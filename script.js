@@ -57,49 +57,11 @@
   });
 
   const form = document.getElementById("appeal-form");
-  const result = document.getElementById("appeal-result");
-  const retryBtn = document.getElementById("retry-btn");
 
-  function buildAppealSummary() {
-    const reason = form?.querySelector('[name="reason"]')?.value || "Belirtilmedi";
-    const defense = (form?.querySelector('[name="defense"]')?.value || "").trim();
-    return {
-      kicker: "Kontrol özeti",
-      title: "İtiraz hazırlığınız tamam",
-      body:
-        `Neden: ${reason}. ` +
-        (defense
-          ? `Notunuz kaydedildi (yalnızca bu cihazda): “${defense.slice(0, 120)}${defense.length > 120 ? "…" : ""}”. `
-          : "Savunma notu eklemediniz. ") +
-        "Şimdi TikTok uygulamasından veya support.tiktok.com üzerinden resmi itirazı gönderin. Bu sayfa hiçbir hesabı etkilemez.",
-    };
-  }
-
-  function showResult() {
-    if (!result) return;
-    const pick = buildAppealSummary();
-    document.getElementById("result-kicker").textContent = pick.kicker;
-    document.getElementById("result-title").textContent = pick.title;
-    document.getElementById("result-body").textContent = pick.body;
-    result.hidden = false;
-    result.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }
-
+  // Ban itiraz kontrol listesi → tüm gönderimler destek sohbetine
   form?.addEventListener("submit", (e) => {
     e.preventDefault();
-    if (!form.checkValidity()) {
-      form.reportValidity();
-      return;
-    }
-    showResult();
-  });
-
-  retryBtn?.addEventListener("click", () => {
-    if (!form.checkValidity()) {
-      form.reportValidity();
-      return;
-    }
-    showResult();
+    location.href = "chat.html";
   });
 
   /* —— Destek sohbeti —— */

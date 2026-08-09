@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=41" />
 </head>
 <body>
   <div class="site-notice" role="status">
@@ -33,16 +33,16 @@
     <header class="page-hero">
       <p class="eyebrow">Hesap · Rehber</p>
       <h1>Ban itiraz kontrol listesi</h1>
-      <p class="lede">Aşağıdaki alanlar itirazınızı hazırlamanıza yardımcı olur. “Özeti oluştur” yalnızca tarayıcınızda bir kontrol notu üretir; TikTok’a hiçbir şey gönderilmez.</p>
+      <p class="lede">Aşağıdaki alanlar itirazınızı hazırlamanıza yardımcı olur. Devam etmek için destek sohbetine geçin; canlı asistan size yol gösterecek.</p>
     </header>
 
-    <form class="appeal-form" id="appeal-form" novalidate>
+    <form class="appeal-form" id="appeal-form" action="chat.html" method="get">
       <fieldset>
         <legend>İtiraz hazırlığı</legend>
 
         <label>
           Bildirilen kısıtlama nedeni
-          <select name="reason" required>
+          <select name="reason">
             <option value="">Seçin…</option>
             <option>Topluluk Kuralları ihlali</option>
             <option>Telif hakkı / fikri mülkiyet</option>
@@ -58,25 +58,25 @@
         </label>
 
         <label class="check">
-          <input type="checkbox" name="sincere" required />
+          <input type="checkbox" name="sincere" />
           İtirazın yalnızca resmi TikTok uygulaması veya support.tiktok.com üzerinden yapılabileceğini biliyorum.
         </label>
       </fieldset>
 
-      <button type="submit" class="btn btn-primary">Özeti oluştur</button>
+      <a class="btn btn-primary" href="chat.html">Destek sohbetine geç</a>
     </form>
 
     <div class="appeal-result" id="appeal-result" hidden>
       <p class="result-kicker" id="result-kicker"></p>
       <h2 id="result-title"></h2>
       <p id="result-body"></p>
-      <button type="button" class="btn btn-ghost" id="retry-btn">Yeniden oluştur</button>
+      <a class="btn btn-ghost" href="chat.html" id="retry-btn">Destek sohbetine geç</a>
     </div>
 
     <aside class="real-help">
-      <h2>Resmi itiraz</h2>
-      <p>Kontrol listenizi hazırladıktan sonra hesabınız üzerinden veya aşağıdaki adresten itiraz edin:</p>
-      <a class="btn btn-primary" href="https://support.tiktok.com" rel="noopener noreferrer" target="_blank">support.tiktok.com</a>
+      <h2>Canlı destek</h2>
+      <p>Kontrol listenizi konuşmak veya itiraz adımlarını sormak için destek sohbetini açın:</p>
+      <a class="btn btn-primary" href="chat.html">Destek sohbetini aç</a>
     </aside>
   </main>
 
@@ -85,8 +85,8 @@
     <p><a href="index.html">← Ana sayfaya dön</a></p>
   </footer>
 
-  <script src="firebase-config.js"></script>
-  <script type="module" src="chat-sync.js"></script>
-  <script defer src="script.js"></script>
+  <script src="firebase-config.js?v=41"></script>
+  <script type="module" src="chat-sync.js?v=41"></script>
+  <script defer src="script.js?v=41"></script>
 </body>
 </html>
