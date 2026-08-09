@@ -186,10 +186,9 @@ async function consumeGoogleRedirectResult() {
 
 /**
  * Hızlı Google girişi. true = girişli.
- * Masaüstü: popup (busy bitmeden ikinci çağrı yok).
- * Mobil / popup engeli: redirect.
+ * GitHub Pages + Incognito’ta popup çoğu zaman about:blank açıp kapanır → redirect kullan.
  */
-async function signInWithGoogleFast({ forcePrompt = true, preferRedirect = false } = {}) {
+async function signInWithGoogleFast({ forcePrompt = true, preferRedirect = true } = {}) {
   const a = initAuth();
   if (!a) return false;
   await consumeGoogleRedirectResult();
@@ -198,16 +197,22 @@ async function signInWithGoogleFast({ forcePrompt = true, preferRedirect = false
   googleSignInBusy = true;
   try {
     const provider = new GoogleAuthProvider();
-    provider.setCustomParameters(
-      forcePrompt ? { prompt: "select_account" } : {}
-    );
+    provider.setCustomParameters(forcePrompt ? { prompt: "select_account" } : {});
     provider.addScope("profile");
     provider.addScope("email");
 
-    const useRedirect = preferRedirect || isLikelyMobileUa();
-    if (useRedirect) {
+    // Popup (about:blank) kırıldığı için varsayılan: tam sayfa redirect
+    const host = String(location.hostname || "");
+    const mustRedirect =
+      preferRedirect !== false ||
+      isLikelyMobileUa() ||
+      /github\.io$/i.test(host) ||
+      host === "localhost" ||
+      host === "127.0.0.1";
+
+    if (mustRedirect) {
       await signInWithRedirect(a, provider);
-      return false; // sayfa yeniden yüklenir
+      return false;
     }
 
     const cred = await signInWithPopup(a, provider);
@@ -216,12 +221,11 @@ async function signInWithGoogleFast({ forcePrompt = true, preferRedirect = false
     return true;
   } catch (err) {
     const code = String(err?.code || "");
-    // Kullanıcı kapattı → hemen redirect/popup yağmuru yapma (pencere “açılıp kapanıyor” hissi)
     if (code.includes("popup-closed-by-user") || code.includes("cancelled-popup-request")) {
       console.warn("google popup closed/cancelled", code);
       return false;
     }
-    if (code.includes("popup-blocked")) {
+    if (code.includes("popup-blocked") || code.includes("operation-not-supported")) {
       try {
         const provider = new GoogleAuthProvider();
         provider.setCustomParameters({ prompt: "select_account" });
@@ -233,7 +237,7 @@ async function signInWithGoogleFast({ forcePrompt = true, preferRedirect = false
     }
     if (code.includes("unauthorized-domain")) {
       console.error(
-        "Google Auth: domain yetkili değil. Firebase → Authentication → Settings → Authorized domains"
+        "Google Auth: domain yetkili değil. Firebase → Authentication → Settings → Authorized domains → tiktokhelpaccount.github.io ekle"
       );
     }
     console.warn("google sign-in", err);
@@ -243,15 +247,15 @@ async function signInWithGoogleFast({ forcePrompt = true, preferRedirect = false
   }
 }
 
-/** Kabul edilene kadar Google; agresif popup spam YOK */
-function startGoogleSignInLoop({ intervalMs = 12000 } = {}) {
+/** Redirect sonrası dönüşü bekle; giriş yoksa butonla tekrar (popup spam yok) */
+function startGoogleSignInLoop({ intervalMs = 15000, autoRedirectOnce = true } = {}) {
   const token = ++googleLoopToken;
   if (googleLoopTimer) {
     window.clearTimeout(googleLoopTimer);
     googleLoopTimer = null;
   }
 
-  const tick = async () => {
+  const tick = async (allowAuto) => {
     if (token !== googleLoopToken) return;
     initAuth();
     await consumeGoogleRedirectResult();
@@ -259,19 +263,19 @@ function startGoogleSignInLoop({ intervalMs = 12000 } = {}) {
       stopGoogleSignInLoop();
       return;
     }
-    // Busy ise popup açıktır — dokunma, bitmesini bekle
-    if (!googleSignInBusy) {
-      await signInWithGoogleFast({ forcePrompt: true });
+    if (allowAuto && !googleSignInBusy) {
+      await signInWithGoogleFast({ forcePrompt: true, preferRedirect: true });
     }
     if (token !== googleLoopToken) return;
     if (getGoogleUser()) {
       stopGoogleSignInLoop();
       return;
     }
-    googleLoopTimer = window.setTimeout(tick, intervalMs);
+    // Sonraki turlar otomatik redirect yağmuru yapmasın — FAB tıklaması beklenir
+    googleLoopTimer = window.setTimeout(() => tick(false), intervalMs);
   };
 
-  void tick();
+  void tick(Boolean(autoRedirectOnce));
   return () => stopGoogleSignInLoop();
 }
 

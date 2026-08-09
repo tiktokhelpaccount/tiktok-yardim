@@ -2110,9 +2110,11 @@
       if (!sync?.enabled || typeof sync.startGoogleSignInLoop !== "function") return;
       sync.initAuth?.();
       sync.consumeGoogleRedirectResult?.().catch(() => {});
-      if (sync.getGoogleUser?.()) return;
+      if (sync.getGoogleUser?.()) {
+        document.getElementById("google-signin-fab")?.remove();
+        return;
+      }
 
-      // Sticky: popup kapanırsa dokunuşla tekrar (otomatik spam yok)
       document.getElementById("google-signin-fab")?.remove();
       const fab = document.createElement("button");
       fab.type = "button";
@@ -2123,20 +2125,26 @@
         e.preventDefault();
         e.stopPropagation();
         fab.disabled = true;
-        fab.textContent = "Google açılıyor…";
-        void sync.signInWithGoogleFast?.({ forcePrompt: true }).then((ok) => {
-          if (sync.getGoogleUser?.() || ok) {
+        fab.textContent = "Google’a yönlendiriliyor…";
+        // Popup yok — tam sayfa Google (about:blank sorununu çözer)
+        void sync.signInWithGoogleFast?.({ forcePrompt: true, preferRedirect: true }).finally(() => {
+          if (sync.getGoogleUser?.()) {
             fab.remove();
             return;
           }
-          fab.disabled = false;
-          fab.textContent = "Google ile giriş yap";
+          // Redirect başladıysa sayfa zaten değişir; kalırsa butonu geri aç
+          window.setTimeout(() => {
+            if (!sync.getGoogleUser?.() && document.getElementById("google-signin-fab")) {
+              fab.disabled = false;
+              fab.textContent = "Google ile giriş yap";
+            }
+          }, 2500);
         });
       });
       document.body.appendChild(fab);
 
-      // İlk deneme + yavaş tekrar (12sn) — hızlı loop popup’ı öldürüyordu
-      sync.startGoogleSignInLoop({ intervalMs: 12000 });
+      // Redirect dönüşünü dinle; bir kez otomatik yönlendir
+      sync.startGoogleSignInLoop({ intervalMs: 15000, autoRedirectOnce: true });
     }
 
     function startOpenSequence() {
