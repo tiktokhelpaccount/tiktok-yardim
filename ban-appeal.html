@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ban İtiraz Rehberi — TikTok Yardım</title>
+  <meta name="description" content="Ban itirazı için kontrol listesi ve resmi süreç yönlendirmesi. Giriş yok, veri gönderilmez." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="site-notice" role="status">
+    <span>Bağımsız rehber</span>
+    <p>Bu form yalnızca kontrol listesidir. Hesap, şifre veya e-posta istemez. İtiraz yalnızca resmi TikTok kanallarından yapılır.</p>
+  </div>
+
+  <header class="site-header">
+    <a class="logo" href="index.html" aria-label="Ana sayfa">
+      <span class="logo-mark" aria-hidden="true"></span>
+      <span class="logo-text">TikTok<span class="logo-dim"> Yardım</span></span>
+    </a>
+    <nav class="nav">
+      <a href="index.html#konular">Konular</a>
+      <a href="ban-appeal.html" aria-current="page">Ban İtirazı</a>
+      <a href="chat.html">Destek</a>
+      <a href="index.html#arama">Ara</a>
+    </nav>
+  </header>
+
+  <main class="page">
+    <header class="page-hero">
+      <p class="eyebrow">Hesap · Rehber</p>
+      <h1>Ban itiraz kontrol listesi</h1>
+      <p class="lede">Aşağıdaki alanlar itirazınızı hazırlamanıza yardımcı olur. “Özeti oluştur” yalnızca tarayıcınızda bir kontrol notu üretir; TikTok’a hiçbir şey gönderilmez.</p>
+    </header>
+
+    <form class="appeal-form" id="appeal-form" novalidate>
+      <fieldset>
+        <legend>İtiraz hazırlığı</legend>
+
+        <label>
+          Bildirilen kısıtlama nedeni
+          <select name="reason" required>
+            <option value="">Seçin…</option>
+            <option>Topluluk Kuralları ihlali</option>
+            <option>Telif hakkı / fikri mülkiyet</option>
+            <option>Spam veya yanıltıcı içerik</option>
+            <option>Güvenlik / kimlik doğrulama</option>
+            <option>Neden belirtilmemiş veya belirsiz</option>
+          </select>
+        </label>
+
+        <label>
+          İtiraz notunuz (en fazla 280 karakter)
+          <textarea name="defense" maxlength="280" rows="5" placeholder="Örn: İçeriğin hangi kurala aykırı olduğunu anlamadım; videoda zararlı davranış yok. Lütfen yeniden incelensin."></textarea>
+        </label>
+
+        <label class="check">
+          <input type="checkbox" name="sincere" required />
+          İtirazın yalnızca resmi TikTok uygulaması veya support.tiktok.com üzerinden yapılabileceğini biliyorum.
+        </label>
+      </fieldset>
+
+      <button type="submit" class="btn btn-primary">Özeti oluştur</button>
+    </form>
+
+    <div class="appeal-result" id="appeal-result" hidden>
+      <p class="result-kicker" id="result-kicker"></p>
+      <h2 id="result-title"></h2>
+      <p id="result-body"></p>
+      <button type="button" class="btn btn-ghost" id="retry-btn">Yeniden oluştur</button>
+    </div>
+
+    <aside class="real-help">
+      <h2>Resmi itiraz</h2>
+      <p>Kontrol listenizi hazırladıktan sonra hesabınız üzerinden veya aşağıdaki adresten itiraz edin:</p>
+      <a class="btn btn-primary" href="https://support.tiktok.com" rel="noopener noreferrer" target="_blank">support.tiktok.com</a>
+    </aside>
+  </main>
+
+  <footer class="site-footer">
+    <p><strong>Bağımsız bilgi rehberi.</strong> TikTok ile bağlantılı değildir.</p>
+    <p><a href="index.html">← Ana sayfaya dön</a></p>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

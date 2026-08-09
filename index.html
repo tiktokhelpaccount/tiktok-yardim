@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TikTok Yardım Rehberi</title>
+  <meta name="description" content="Hesap, görünürlük ve içerik sorunları için bağımsız TikTok yardım rehberi. Resmi destek değildir." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="site-notice" role="status">
+    <span>Bağımsız rehber</span>
+    <p>Bu site TikTok veya ByteDance ile bağlantılı değildir. Hesap bilgisi istemez. Resmi destek: support.tiktok.com</p>
+  </div>
+
+  <header class="site-header">
+    <a class="logo" href="index.html" aria-label="Ana sayfa">
+      <span class="logo-mark" aria-hidden="true"></span>
+      <span class="logo-text">TikTok<span class="logo-dim"> Yardım</span></span>
+    </a>
+    <nav class="nav">
+      <a href="#konular">Konular</a>
+      <a href="ban-appeal.html">Ban İtirazı</a>
+      <a href="chat.html">Destek</a>
+      <a href="#arama">Ara</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-bg" aria-hidden="true"></div>
+      <div class="hero-copy">
+        <p class="brand-lockup">TIKTOK YARDIM REHBERİ</p>
+        <h1>Hesap, görünürlük ve içerik sorunları için net rehberler.</h1>
+        <p class="lede">İzlenme düşüşü, öneri akışı kısıtı veya hesap kısıtlaması yaşıyorsanız aşağıdaki konulara bakın. Hesap işlemleri için yalnızca resmi TikTok kanallarını kullanın.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#canli-destek">Destek sohbeti</a>
+          <a class="btn btn-ghost" href="ban-appeal.html">Ban itiraz rehberi</a>
+        </div>
+      </div>
+      <p class="hero-footnote">Resmi destek: support.tiktok.com</p>
+    </section>
+
+    <section class="search-section" id="arama">
+      <label class="search-label" for="help-search">Nasıl yardımcı olabiliriz?</label>
+      <div class="search-row">
+        <input id="help-search" type="search" placeholder="ör. shadowban, izlenme düşüşü, hesap banı" autocomplete="off" />
+        <button type="button" class="btn btn-primary" id="search-btn">Ara</button>
+      </div>
+      <p class="search-hint" id="search-hint" hidden></p>
+    </section>
+
+    <section class="topics" id="konular">
+      <header class="section-head">
+        <h2>Popüler konular</h2>
+        <p>En sık sorulan hesap ve görünürlük sorunları.</p>
+      </header>
+
+      <ul class="topic-list">
+        <li>
+          <a class="topic-link" href="articles/shadowban.html">
+            <span class="topic-kicker">Keşfet / FYP</span>
+            <strong>Görünürlük düşüşü: öneri akışında dağıtım kısıtı mı?</strong>
+            <span class="topic-meta">8 dk okuma</span>
+          </a>
+        </li>
+        <li>
+          <a class="topic-link" href="articles/algorithm.html">
+            <span class="topic-kicker">Algoritma</span>
+            <strong>Öneri sistemi nasıl çalışır ve neyi etkiler?</strong>
+            <span class="topic-meta">5 dk okuma</span>
+          </a>
+        </li>
+        <li>
+          <a class="topic-link" href="articles/views.html">
+            <span class="topic-kicker">İstatistik</span>
+            <strong>İzlenme düşük kaldığında kontrol listesi</strong>
+            <span class="topic-meta">6 dk okuma</span>
+          </a>
+        </li>
+        <li>
+          <a class="topic-link" href="ban-appeal.html">
+            <span class="topic-kicker">Hesap</span>
+            <strong>Ban itirazı: resmi süreç ve kontrol listesi</strong>
+            <span class="topic-meta">Rehber</span>
+          </a>
+        </li>
+        <li>
+          <a class="topic-link" href="chat.html">
+            <span class="topic-kicker">Destek</span>
+            <strong>Yönlendirme sohbeti</strong>
+            <span class="topic-meta">Anlık · Yerel</span>
+          </a>
+        </li>
+      </ul>
+    </section>
+
+    <section class="chat-section" id="canli-destek">
+      <header class="section-head">
+        <h2>Destek sohbeti</h2>
+        <p>Sorununuzu seçin veya yazın; ilgili rehbere yönlendirilirsiniz. Şifre veya kişisel hesap bilgisi istemez.</p>
+      </header>
+
+      <div class="chat-shell" data-chat-root>
+        <header class="chat-head">
+          <div class="chat-agent">
+            <span class="chat-avatar" aria-hidden="true">Y</span>
+            <div>
+              <strong>Yardım Asistanı</strong>
+              <p><span class="chat-dot"></span> Çevrimiçi</p>
+            </div>
+          </div>
+          <button type="button" class="chat-clear" data-chat-clear>Sohbeti temizle</button>
+        </header>
+
+        <div class="chat-messages" data-chat-messages role="log" aria-live="polite" aria-relevant="additions"></div>
+
+        <div class="chat-quick" data-chat-quick>
+          <button type="button" data-quick="Hesabım kısıtlandı">Hesap kısıtı</button>
+          <button type="button" data-quick="Hesabım ban yedi">Ban</button>
+          <button type="button" data-quick="İzlenmelerim düştü">İzlenme düşüşü</button>
+          <button type="button" data-quick="Shadowban mı oldum?">Görünürlük</button>
+        </div>
+
+        <form class="chat-compose" data-chat-form>
+          <label class="visually-hidden" for="chat-input-home">Mesajınız</label>
+          <input id="chat-input-home" data-chat-input type="text" maxlength="400" placeholder="Sorunuzu yazın… (şifre yazmayın)" autocomplete="off" />
+          <button type="submit" class="btn btn-primary">Gönder</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="faq">
+      <header class="section-head">
+        <h2>Hızlı yanıtlar</h2>
+        <p>Kısa bilgilendirme. Hesap işlemleri resmi uygulamada yapılır.</p>
+      </header>
+      <div class="faq-grid">
+        <article>
+          <h3>Hesabım neden kısıtlandı?</h3>
+          <p>En yaygın nedenler: Topluluk Kuralları ihlali, yanlış bildirimler veya güvenlik incelemesi. Detay için uygulamadaki bildirimleri ve resmi yardım merkezini kontrol edin.</p>
+        </article>
+        <article>
+          <h3>Ban nasıl açılır?</h3>
+          <p>Yalnızca TikTok uygulaması veya support.tiktok.com üzerinden itiraz edin. Bu sitedeki rehber yalnızca süreci açıklar; işlem yapmaz.</p>
+        </article>
+        <article>
+          <h3>Veri toplanıyor mu?</h3>
+          <p>Hayır. Giriş yoktur; sohbet mesajları sunucuya gönderilmez. İçerik tarayıcınızda çalışır.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p><strong>Bağımsız bilgi rehberi.</strong> TikTok, ByteDance’in ticari markasıdır. Bu site bağlı değildir.</p>
+    <p><a href="https://support.tiktok.com" rel="noopener noreferrer" target="_blank">Resmi TikTok Yardım Merkezi →</a></p>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
