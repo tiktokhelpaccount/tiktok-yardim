@@ -1503,6 +1503,21 @@ a.btn[hidden],
   border-color: rgba(254, 44, 85, 0.35);
 }
 
+.session-badge-google {
+  background: rgba(66, 133, 244, 0.12);
+  border-color: rgba(66, 133, 244, 0.4);
+  color: #1a73e8;
+}
+
+.session-google-line {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #1a73e8;
+  margin-top: 0.1rem;
+  word-break: break-all;
+}
+
 .session-quick {
   display: grid;
   grid-template-columns: 1fr 1fr;

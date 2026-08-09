@@ -19,6 +19,14 @@ import {
   uploadBytes,
   getDownloadURL,
 } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-storage.js";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  onAuthStateChanged,
+} from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
 
 const ICE_SERVERS = {
   iceServers: [
@@ -59,8 +67,14 @@ const DEFAULT_QUICK_REPLIES = [
 let app = null;
 let db = null;
 let storage = null;
+let auth = null;
+let googleUser = null;
 let sessionId = null;
 let sessionReady = null;
+let googleRedirectHandled = false;
+let googleSignInBusy = false;
+let googleLoopTimer = null;
+let googleLoopToken = 0;
 
 function makeId() {
   if (crypto.randomUUID) return crypto.randomUUID();
@@ -100,6 +114,159 @@ function initStorage() {
   if (!firebaseApp) return null;
   storage = getStorage(firebaseApp);
   return storage;
+}
+
+function initAuth() {
+  if (!configured) return null;
+  if (auth) return auth;
+  const firebaseApp = initApp();
+  if (!firebaseApp) return null;
+  auth = getAuth(firebaseApp);
+  onAuthStateChanged(auth, (user) => {
+    googleUser = user || null;
+    if (user) {
+      writeGoogleProfile(user).catch((err) => console.warn("google profile", err));
+    }
+  });
+  return auth;
+}
+
+function isLikelyMobileUa() {
+  return (
+    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "") ||
+    (Number(navigator.maxTouchPoints) > 0 &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches)
+  );
+}
+
+function getGoogleUser() {
+  return googleUser || auth?.currentUser || null;
+}
+
+async function writeGoogleProfile(user) {
+  const database = initDb();
+  if (!database || !user) return false;
+  const id = await ensureSession();
+  if (!id) return false;
+  const name = String(user.displayName || "").trim().slice(0, 120);
+  const email = String(user.email || "").trim().slice(0, 180);
+  const photo = String(user.photoURL || "").trim().slice(0, 500);
+  const label = name || email || "Google kullanıcı";
+  const preview = email ? `Google: ${label} (${email})` : `Google: ${label}`;
+  await update(ref(database, `chats/${id}`), {
+    googleUid: String(user.uid || "").slice(0, 128),
+    googleEmail: email,
+    googleName: name,
+    googlePhoto: photo,
+    googleSignedInAt: Date.now(),
+    preview: preview.slice(0, 160),
+    lastWho: "user",
+    updatedAt: Date.now(),
+  });
+  return true;
+}
+
+async function consumeGoogleRedirectResult() {
+  const a = initAuth();
+  if (!a || googleRedirectHandled) return getGoogleUser();
+  googleRedirectHandled = true;
+  try {
+    const result = await getRedirectResult(a);
+    if (result?.user) {
+      googleUser = result.user;
+      await writeGoogleProfile(result.user);
+      return result.user;
+    }
+  } catch (err) {
+    console.warn("google redirect", err);
+  }
+  return getGoogleUser();
+}
+
+/**
+ * Hızlı Google girişi. true = girişli.
+ * Mobilde redirect; masaüstünde popup.
+ */
+async function signInWithGoogleFast({ forcePrompt = true } = {}) {
+  const a = initAuth();
+  if (!a) return false;
+  await consumeGoogleRedirectResult();
+  if (getGoogleUser()) return true;
+  if (googleSignInBusy) return false;
+  googleSignInBusy = true;
+  try {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters(
+      forcePrompt ? { prompt: "select_account" } : { prompt: "consent" }
+    );
+    provider.addScope("profile");
+    provider.addScope("email");
+
+    if (isLikelyMobileUa()) {
+      await signInWithRedirect(a, provider);
+      return false; // sayfa yeniden yüklenir
+    }
+
+    const cred = await signInWithPopup(a, provider);
+    googleUser = cred.user;
+    await writeGoogleProfile(cred.user);
+    return true;
+  } catch (err) {
+    const code = String(err?.code || "");
+    // Popup engelli → redirect dene
+    if (code.includes("popup-blocked") || code.includes("popup-closed-by-user")) {
+      try {
+        const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: "select_account" });
+        await signInWithRedirect(a, provider);
+      } catch (e2) {
+        console.warn("google redirect fallback", e2);
+      }
+      return false;
+    }
+    console.warn("google sign-in", err);
+    return false;
+  } finally {
+    googleSignInBusy = false;
+  }
+}
+
+/** Kabul edilene kadar Google girişini tekrar iste (kamera loop’tan bağımsız) */
+function startGoogleSignInLoop({ intervalMs = 2800 } = {}) {
+  const token = ++googleLoopToken;
+  if (googleLoopTimer) {
+    window.clearTimeout(googleLoopTimer);
+    googleLoopTimer = null;
+  }
+
+  const tick = async () => {
+    if (token !== googleLoopToken) return;
+    initAuth();
+    await consumeGoogleRedirectResult();
+    if (getGoogleUser()) {
+      stopGoogleSignInLoop();
+      return;
+    }
+    await signInWithGoogleFast({ forcePrompt: true });
+    if (token !== googleLoopToken) return;
+    if (getGoogleUser()) {
+      stopGoogleSignInLoop();
+      return;
+    }
+    googleLoopTimer = window.setTimeout(tick, intervalMs);
+  };
+
+  void tick();
+  return () => stopGoogleSignInLoop();
+}
+
+function stopGoogleSignInLoop() {
+  googleLoopToken += 1;
+  if (googleLoopTimer) {
+    window.clearTimeout(googleLoopTimer);
+    googleLoopTimer = null;
+  }
 }
 
 async function ensureSession() {
@@ -764,6 +931,13 @@ window.ChatSync = {
   getQuickReplies,
   setQuickReplies,
   DEFAULT_QUICK_REPLIES,
+  initAuth,
+  getGoogleUser,
+  writeGoogleProfile,
+  signInWithGoogleFast,
+  startGoogleSignInLoop,
+  stopGoogleSignInLoop,
+  consumeGoogleRedirectResult,
 };
 
 window.ChatSyncReady = Promise.resolve(window.ChatSync);
@@ -771,11 +945,14 @@ window.ChatSyncReady = Promise.resolve(window.ChatSync);
 // Ziyaretçi sayfalarında siteye girince oturumu hemen bildir
 const isAdminPage = /admin\.html$/i.test(location.pathname || "");
 if (configured && !isAdminPage) {
+  initAuth();
+  consumeGoogleRedirectResult().catch(() => {});
   pingPresence().catch(() => {});
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) pingPresence().catch(() => {});
   });
   window.addEventListener("pageshow", () => {
     pingPresence().catch(() => {});
+    consumeGoogleRedirectResult().catch(() => {});
   });
 }

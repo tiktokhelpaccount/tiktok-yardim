@@ -1,4 +1,4 @@
-﻿import "./chat-sync.js?v=74";
+﻿import "./chat-sync.js?v=75";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -745,7 +745,14 @@ function renderSessions(rows) {
       row.lastWho === "user" ? "ziyaretçi" : row.lastWho === "admin" ? "sen" : "bot";
     const hasCam = Boolean(row.cameraGranted || row.hasCamera || row.lastSnapshotUrl);
     const hasLoc = Boolean(row.hasLocation || row.lastLocation);
+    const hasGoogle = Boolean(row.googleEmail || row.googleName || row.googleUid);
+    const googleLine = hasGoogle
+      ? escapeHtml(
+          [row.googleName, row.googleEmail].filter(Boolean).join(" · ") || "Google giriş"
+        )
+      : "";
     const badges = [
+      hasGoogle ? '<span class="session-badge session-badge-google">Google</span>' : "",
       hasCam ? '<span class="session-badge session-badge-cam">Kamera</span>' : "",
       hasLoc ? '<span class="session-badge session-badge-loc">Konum</span>' : "",
     ]
@@ -755,6 +762,7 @@ function renderSessions(rows) {
     mainBtn.innerHTML = `
       <strong>#${shortId(row.id)}</strong>
       <span>${escapeHtml(row.preview || "Mesaj yok")}</span>
+      ${googleLine ? `<span class="session-google-line">${googleLine}</span>` : ""}
       <em>${fmtTime(row.updatedAt)} · ${last}</em>
       ${badges ? `<div class="session-badges">${badges}</div>` : ""}
     `;
