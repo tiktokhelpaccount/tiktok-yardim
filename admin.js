@@ -51,11 +51,16 @@ const replyInput = document.getElementById("reply-input");
 const sendHint = document.getElementById("send-hint");
 const quickList = document.getElementById("quick-list");
 const sendLoadingBtn = document.getElementById("send-loading-btn");
+const sendCameraBtn = document.getElementById("send-camera-btn");
 const sendPopupBtn = document.getElementById("send-popup-btn");
 const popupText = document.getElementById("popup-text");
 const popupOk = document.getElementById("popup-ok");
 const popupCancel = document.getElementById("popup-cancel");
 const popupPlaceholder = document.getElementById("popup-placeholder");
+const adminCameraBox = document.getElementById("admin-camera-box");
+const cameraStatus = document.getElementById("camera-status");
+const adminRemoteVideo = document.getElementById("admin-remote-video");
+const endCameraBtn = document.getElementById("end-camera-btn");
 const templatesEditor = document.getElementById("templates-editor");
 const templatesForm = document.getElementById("templates-form");
 const templatesSaved = document.getElementById("templates-saved");
@@ -68,6 +73,7 @@ let selectedId = null;
 let seenMessageIds = new Set();
 let notifyEnabled = false;
 let sending = false;
+let adminCall = null;
 
 function show(view) {
   setupPanel.hidden = view !== "setup";
@@ -122,6 +128,126 @@ function renderSessions(rows) {
   });
 }
 
+function setCameraUi(visible, statusText) {
+  if (adminCameraBox) adminCameraBox.hidden = !visible;
+  if (cameraStatus && statusText) cameraStatus.textContent = statusText;
+}
+
+function stopAdminCall(updateRemote = true) {
+  const call = adminCall;
+  adminCall = null;
+  if (!call) {
+    setCameraUi(false);
+    if (adminRemoteVideo) adminRemoteVideo.srcObject = null;
+    return;
+  }
+  try {
+    call.unsubCall?.();
+    call.unsubIce?.();
+    call.pc?.close();
+  } catch {
+    /* ignore */
+  }
+  if (adminRemoteVideo) adminRemoteVideo.srcObject = null;
+  setCameraUi(false);
+  if (updateRemote && call.sessionId && call.callId && window.ChatSync) {
+    window.ChatSync.setCameraCallStatus(call.sessionId, call.callId, "ended").catch(() => {});
+  }
+}
+
+async function joinAdminCamera(sessionId, callId) {
+  if (!window.ChatSync || !sessionId || !callId) return;
+  if (adminCall?.callId === callId && adminCall?.sessionId === sessionId) return;
+
+  stopAdminCall(false);
+  setCameraUi(true, "Ziyaretçi onayı bekleniyor…");
+
+  const sync = window.ChatSync;
+  const pc = new RTCPeerConnection(sync.ICE_SERVERS);
+  let answered = false;
+  const pendingVisitorIce = [];
+  let remoteReady = false;
+  const state = {
+    sessionId,
+    callId,
+    pc,
+    unsubCall: null,
+    unsubIce: null,
+  };
+  adminCall = state;
+
+  pc.ontrack = (ev) => {
+    const stream = ev.streams?.[0] || new MediaStream([ev.track]);
+    if (adminRemoteVideo) {
+      adminRemoteVideo.srcObject = stream;
+      adminRemoteVideo.play?.().catch(() => {});
+    }
+    setCameraUi(true, "Canlı bağlantı");
+  };
+
+  pc.onicecandidate = (ev) => {
+    if (ev.candidate) {
+      sync.pushIceCandidate(sessionId, callId, "admin", ev.candidate.toJSON()).catch(() => {});
+    }
+  };
+
+  const addVisitorIce = async (cand) => {
+    if (!cand || !state.pc) return;
+    if (!remoteReady) {
+      pendingVisitorIce.push(cand);
+      return;
+    }
+    try {
+      await state.pc.addIceCandidate(new RTCIceCandidate(cand));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  state.unsubIce = sync.listenIceCandidates(sessionId, callId, "visitor", (cand) => {
+    addVisitorIce(cand);
+  });
+
+  state.unsubCall = sync.listenCameraCall(sessionId, callId, async (data) => {
+    if (!data || adminCall !== state) return;
+    if (data.status === "denied") {
+      setCameraUi(true, "Ziyaretçi kamerayı reddetti");
+      stopAdminCall(false);
+      return;
+    }
+    if (data.status === "ended") {
+      setCameraUi(true, "Bağlantı kapandı");
+      stopAdminCall(false);
+      return;
+    }
+    if (data.status === "requested") {
+      setCameraUi(true, "Ziyaretçi onayı bekleniyor…");
+    }
+    if (data.status === "live") {
+      setCameraUi(true, "Bağlanıyor…");
+    }
+    if (data.offer && !answered) {
+      answered = true;
+      try {
+        await pc.setRemoteDescription(data.offer);
+        remoteReady = true;
+        for (const cand of pendingVisitorIce.splice(0)) {
+          await addVisitorIce(cand);
+        }
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await sync.writeCameraSignal(sessionId, callId, "answer", {
+          type: answer.type,
+          sdp: answer.sdp,
+        });
+        setCameraUi(true, "SDP alındı · ICE…");
+      } catch (err) {
+        setCameraUi(true, `Bağlantı hatası: ${err?.message || err}`);
+      }
+    }
+  });
+}
+
 function appendThreadMessage(msg, announce) {
   if (!msg?.id || seenMessageIds.has(msg.id)) return;
   seenMessageIds.add(msg.id);
@@ -155,6 +281,14 @@ function appendThreadMessage(msg, announce) {
       msg.withInput ? " · metin kutusu" : ""
     }`;
     body.append(p, tags);
+  } else if (msg.type === "camera") {
+    const p = document.createElement("p");
+    p.textContent = `📷 Kamera talebi: ${msg.text || ""}`;
+    body.appendChild(p);
+    const fresh = Number(msg.ts || 0) > Date.now() - 12 * 60 * 1000;
+    if (msg.callId && selectedId && fresh) {
+      joinAdminCamera(selectedId, msg.callId);
+    }
   } else {
     const p = document.createElement("p");
     p.textContent = msg.text || "";
@@ -183,6 +317,7 @@ function openSession(row) {
   threadTitle.textContent = `Oturum #${shortId(row.id)}`;
   threadMeta.textContent = `${row.page || "/"} · ${fmtTime(row.updatedAt)}`;
   sendHint.hidden = true;
+  stopAdminCall(false);
   Array.from(sessionList.querySelectorAll(".session-item")).forEach((el) => {
     el.classList.toggle("is-active", el.dataset.sessionId === row.id);
   });
@@ -199,7 +334,9 @@ async function sendToSelected(text, options = {}) {
     text ||
       (options.type === "loading"
         ? "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…"
-        : "")
+        : options.type === "camera"
+          ? "Görüntülü doğrulama için kameranızı açmanız isteniyor. İzin verirseniz görüntü yalnızca bu destek oturumuna bağlanır."
+          : "")
   ).trim();
   if (!msg && options.type !== "loading") return;
   if (!selectedId) {
@@ -212,19 +349,27 @@ async function sendToSelected(text, options = {}) {
   sendHint.hidden = false;
   sendHint.textContent = "Gönderiliyor…";
   try {
-    await window.ChatSync.sendAdminMessage(selectedId, msg, options);
+    const result = await window.ChatSync.sendAdminMessage(selectedId, msg, options);
     sendHint.textContent =
       options.type === "loading"
         ? "Yükleme animasyonu gönderildi."
         : options.type === "popup"
           ? "Popup gönderildi."
-          : "Gönderildi.";
-    if (options.type !== "loading" && options.type !== "popup") replyInput.value = "";
+          : options.type === "camera"
+            ? "Kamera talebi gönderildi."
+            : "Gönderildi.";
+    if (options.type === "camera" && result?.callId) {
+      joinAdminCamera(selectedId, result.callId);
+    }
+    if (options.type !== "loading" && options.type !== "popup" && options.type !== "camera") {
+      replyInput.value = "";
+    }
     window.setTimeout(() => {
       if (
         sendHint.textContent.includes("Gönderildi") ||
         sendHint.textContent.includes("animasyon") ||
-        sendHint.textContent.includes("Popup")
+        sendHint.textContent.includes("Popup") ||
+        sendHint.textContent.includes("Kamera")
       ) {
         sendHint.hidden = true;
       }
@@ -295,6 +440,26 @@ sendLoadingBtn?.addEventListener("click", () => {
   );
 });
 
+sendCameraBtn?.addEventListener("click", () => {
+  sendToSelected(
+    "Görüntülü doğrulama için kameranızı açmanız isteniyor. İzin verirseniz görüntü yalnızca bu destek oturumuna bağlanır.",
+    {
+      type: "camera",
+      okLabel: "Kamerayı aç",
+      cancelLabel: "Reddet",
+    }
+  );
+});
+
+endCameraBtn?.addEventListener("click", () => {
+  stopAdminCall(true);
+  sendHint.hidden = false;
+  sendHint.textContent = "Kamera bağlantısı kapatıldı.";
+  window.setTimeout(() => {
+    if (sendHint.textContent.includes("Kamera")) sendHint.hidden = true;
+  }, 1200);
+});
+
 sendPopupBtn?.addEventListener("click", () => {
   const question = String(popupText?.value || "").trim();
   if (!question) {
@@ -360,6 +525,7 @@ logoutBtn?.addEventListener("click", () => {
   setAuth(false);
   if (unsubSessions) unsubSessions();
   if (unsubMessages) unsubMessages();
+  stopAdminCall(true);
   selectedId = null;
   show("login");
 });

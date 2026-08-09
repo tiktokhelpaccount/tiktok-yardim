@@ -1316,11 +1316,63 @@ a {
 }
 
 .admin-actions-row {
+  display: grid;
+  gap: 0.55rem;
   margin-bottom: 0.65rem;
 }
 
 .admin-actions-row .btn {
   width: 100%;
+}
+
+.admin-camera-box {
+  display: grid;
+  gap: 0.65rem;
+  margin-bottom: 0.75rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(37, 244, 238, 0.4);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.admin-camera-box[hidden] {
+  display: none !important;
+}
+
+.admin-remote-video,
+.chat-camera-video {
+  width: 100%;
+  max-height: 280px;
+  object-fit: cover;
+  border-radius: 12px;
+  background: #0a0a0b;
+  border: 1px solid var(--line);
+}
+
+.chat-camera-preview {
+  align-self: stretch;
+  margin: 0.25rem 0 0.55rem;
+  padding: 0.85rem;
+  border-radius: 16px;
+  border: 1px solid rgba(37, 244, 238, 0.45);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 243, 238, 0.95));
+  box-shadow: 0 8px 24px rgba(10, 10, 11, 0.08);
+  animation: rise-in 0.25s ease both;
+}
+
+.chat-camera-preview-label,
+.chat-camera-note {
+  margin: 0 0 0.55rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.chat-camera-stop {
+  width: 100%;
+  margin-top: 0.55rem;
 }
 
 .admin-popup-box {

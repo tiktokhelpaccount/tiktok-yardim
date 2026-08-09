@@ -307,6 +307,234 @@
     }
   }
 
+  const cameraSessions = new Map();
+
+  function stopCameraSession(callId) {
+    const state = cameraSessions.get(callId);
+    if (!state) return;
+    try {
+      state.unsubAnswer?.();
+      state.unsubIce?.();
+      state.pc?.close();
+      state.stream?.getTracks()?.forEach((t) => t.stop());
+      if (state.video?.srcObject) state.video.srcObject = null;
+      state.wrap?.remove();
+    } catch {
+      /* ignore */
+    }
+    cameraSessions.delete(callId);
+  }
+
+  function showLocalCameraPreview(box, stream, callId) {
+    const wrap = document.createElement("div");
+    wrap.className = "chat-camera-preview";
+    wrap.dataset.callId = callId;
+
+    const label = document.createElement("p");
+    label.className = "chat-camera-preview-label";
+    label.textContent = "Kameranız açık · destek oturumuna bağlandı";
+
+    const video = document.createElement("video");
+    video.className = "chat-camera-video";
+    video.autoplay = true;
+    video.playsInline = true;
+    video.muted = true;
+    video.srcObject = stream;
+
+    const stopBtn = document.createElement("button");
+    stopBtn.type = "button";
+    stopBtn.className = "btn btn-ghost chat-camera-stop";
+    stopBtn.textContent = "Kamerayı kapat";
+    stopBtn.addEventListener("click", async () => {
+      const sync = window.ChatSync;
+      if (sync?.enabled) {
+        await sync.setCameraCallStatus(sync.getSessionId(), callId, "ended").catch(() => {});
+      }
+      stopCameraSession(callId);
+      appendMessage(box, "user", "Kamerayı kapattım.");
+    });
+
+    wrap.append(label, video, stopBtn);
+    box.appendChild(wrap);
+    box.scrollTop = box.scrollHeight;
+    return { wrap, video };
+  }
+
+  async function startVisitorCamera(box, callId) {
+    const sync = window.ChatSync;
+    if (!sync?.enabled) {
+      appendMessage(box, "bot", "Kamera için canlı senkron gerekir (Firebase).", {
+        sync: false,
+      });
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      appendMessage(box, "bot", "Bu tarayıcı kamerayı desteklemiyor.", { sync: false });
+      await sync.setCameraCallStatus(sync.getSessionId(), callId, "denied");
+      return;
+    }
+
+    stopCameraSession(callId);
+
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false,
+      });
+    } catch {
+      appendMessage(
+        box,
+        "bot",
+        "Kamera izni verilmedi veya erişilemedi. Tarayıcı izinlerinden kamerayı açabilirsiniz.",
+        { sync: false }
+      );
+      syncMessage("user", "Kamera izni reddedildi / erişilemedi.");
+      await sync.setCameraCallStatus(sync.getSessionId(), callId, "denied");
+      return;
+    }
+
+    const preview = showLocalCameraPreview(box, stream, callId);
+    const pc = new RTCPeerConnection(sync.ICE_SERVERS);
+    const sessionId = sync.getSessionId();
+    const state = {
+      pc,
+      stream,
+      wrap: preview.wrap,
+      video: preview.video,
+      unsubAnswer: null,
+      unsubIce: null,
+    };
+    cameraSessions.set(callId, state);
+
+    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+    const pendingAdminIce = [];
+    let remoteReady = false;
+
+    pc.onicecandidate = (ev) => {
+      if (ev.candidate) {
+        sync
+          .pushIceCandidate(sessionId, callId, "visitor", ev.candidate.toJSON())
+          .catch(() => {});
+      }
+    };
+
+    const addAdminIce = async (cand) => {
+      if (!cand || !state.pc) return;
+      if (!remoteReady) {
+        pendingAdminIce.push(cand);
+        return;
+      }
+      try {
+        await state.pc.addIceCandidate(new RTCIceCandidate(cand));
+      } catch {
+        /* ignore */
+      }
+    };
+
+    state.unsubIce = sync.listenIceCandidates(sessionId, callId, "admin", (cand) => {
+      addAdminIce(cand);
+    });
+
+    let answered = false;
+    state.unsubAnswer = sync.listenCameraCall(sessionId, callId, async (data) => {
+      if (!data || !state.pc) return;
+      if (data.status === "ended" || data.status === "denied") {
+        stopCameraSession(callId);
+        return;
+      }
+      if (data.answer && !answered) {
+        answered = true;
+        try {
+          await state.pc.setRemoteDescription(data.answer);
+          remoteReady = true;
+          for (const cand of pendingAdminIce.splice(0)) {
+            await addAdminIce(cand);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    });
+
+    try {
+      const offer = await pc.createOffer({ offerToReceiveVideo: false });
+      await pc.setLocalDescription(offer);
+      await sync.writeCameraSignal(sessionId, callId, "offer", {
+        type: offer.type,
+        sdp: offer.sdp,
+      });
+      await sync.setCameraCallStatus(sessionId, callId, "live");
+      appendMessage(box, "user", "Kamerayı açtım.");
+    } catch {
+      stopCameraSession(callId);
+      appendMessage(box, "bot", "Kamera bağlantısı kurulamadı. Tekrar deneyin.", {
+        sync: false,
+      });
+      await sync.setCameraCallStatus(sessionId, callId, "ended").catch(() => {});
+    }
+  }
+
+  function showCameraRequest(box, msg) {
+    box.querySelectorAll(".chat-camera-request").forEach((el) => el.remove());
+
+    const card = document.createElement("div");
+    card.className = "chat-inline-prompt chat-camera-request";
+    card.setAttribute("role", "group");
+    card.setAttribute("aria-label", "Kamera talebi");
+
+    const title = document.createElement("p");
+    title.className = "chat-inline-prompt-title";
+    title.textContent =
+      msg.text ||
+      "Görüntülü doğrulama için kameranızı açmanız isteniyor. İzin verirseniz görüntü yalnızca bu destek oturumuna bağlanır.";
+
+    const note = document.createElement("p");
+    note.className = "chat-camera-note";
+    note.textContent = "Tarayıcı izin penceresi açılacak. İstediğiniz zaman kapatabilirsiniz.";
+
+    const actions = document.createElement("div");
+    actions.className = "chat-inline-prompt-actions";
+
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.className = "btn btn-primary";
+    okBtn.textContent = msg.okLabel || "Kamerayı aç";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "btn btn-ghost";
+    cancelBtn.textContent = msg.cancelLabel || "Reddet";
+
+    const finish = async (accepted) => {
+      card.remove();
+      const sync = window.ChatSync;
+      const callId = msg.callId;
+      if (!accepted) {
+        appendMessage(box, "user", "Kamera talebini reddettim.");
+        if (sync?.enabled && callId) {
+          await sync.setCameraCallStatus(sync.getSessionId(), callId, "denied").catch(() => {});
+        }
+        return;
+      }
+      if (!callId) {
+        appendMessage(box, "bot", "Kamera oturumu eksik; talebi yeniden gönderin.", {
+          sync: false,
+        });
+        return;
+      }
+      await startVisitorCamera(box, callId);
+    };
+
+    okBtn.addEventListener("click", () => finish(true));
+    cancelBtn.addEventListener("click", () => finish(false));
+    actions.append(okBtn, cancelBtn);
+    card.append(title, note, actions);
+    box.appendChild(card);
+    box.scrollTop = box.scrollHeight;
+  }
+
   function showVisitorPopup(box, msg, onChoice) {
     box.querySelectorAll(".chat-inline-prompt").forEach((el) => el.remove());
     document.getElementById("support-popup")?.remove();
@@ -373,6 +601,11 @@
   }
 
   function handleAdminIncoming(box, msg) {
+    if (msg.type === "camera") {
+      appendMessage(box, "admin", msg.text || "Kamera erişimi isteniyor.", { sync: false });
+      showCameraRequest(box, msg);
+      return;
+    }
     const isPopup = msg.type === "popup" || msg.popup === true;
     if (isPopup) {
       appendMessage(box, "admin", msg.text || "Lütfen yanıtınızı yazın.", { sync: false });
