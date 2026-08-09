@@ -149,58 +149,54 @@ function clearRecordingLink() {
   downloadRecordingBtn.hidden = true;
 }
 
-function offerRecordingDownload(blob, sessionId, autoClick = true) {
-  if (!blob?.size) {
-    sendHint.hidden = false;
-    sendHint.textContent = "Kayıt boş geldi; video bağlanmamış olabilir.";
-    return;
-  }
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const name = `kamera-${shortId(sessionId)}-${stamp}.webm`;
-  const url = URL.createObjectURL(blob);
+function forceDownloadFromUrl(url, name) {
+  if (!url) return;
+  const fileName = name || `kamera-${Date.now()}.webm`;
 
   if (downloadRecordingBtn) {
-    if (downloadRecordingBtn.href?.startsWith("blob:")) {
-      URL.revokeObjectURL(downloadRecordingBtn.href);
-    }
     downloadRecordingBtn.href = url;
-    downloadRecordingBtn.download = name;
+    downloadRecordingBtn.download = fileName;
+    downloadRecordingBtn.target = "_blank";
+    downloadRecordingBtn.rel = "noopener";
     downloadRecordingBtn.hidden = false;
-    downloadRecordingBtn.textContent = `Kaydı indir (${Math.round(blob.size / 1024)} KB)`;
+    downloadRecordingBtn.textContent = "Kaydı indir (Storage)";
   }
 
-  const trigger = () => {
-    try {
-      if (downloadRecordingBtn?.href) {
-        downloadRecordingBtn.click();
-        return;
-      }
-    } catch {
-      /* fallback below */
-    }
+  // contentDisposition=attachment ile iframe indirmeyi tetikler
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = "position:fixed;width:0;height:0;border:0;visibility:hidden";
+  iframe.src = url;
+  document.body.appendChild(iframe);
+  window.setTimeout(() => iframe.remove(), 120000);
+
+  try {
     const a = document.createElement("a");
     a.href = url;
-    a.download = name;
+    a.download = fileName;
     a.rel = "noopener";
     a.style.display = "none";
     document.body.appendChild(a);
     a.click();
     a.remove();
-  };
-
-  if (autoClick) {
-    trigger();
-    // Bazı tarayıcılarda ilk deneme yutulur; kısa sonra tekrar dene
-    window.setTimeout(trigger, 200);
-    window.setTimeout(trigger, 800);
+  } catch {
+    /* ignore */
   }
 
-  setCameraUi(true, `Kayıt indiriliyor · ${Math.round(blob.size / 1024)} KB`);
+  // Yedek: link butonuna otomatik tık
+  window.setTimeout(() => {
+    try {
+      downloadRecordingBtn?.click();
+    } catch {
+      /* ignore */
+    }
+  }, 300);
+
+  setCameraUi(true, "Kayıt otomatik indiriliyor (Storage)…");
   sendHint.hidden = false;
-  sendHint.textContent = `Kayıt otomatik indiriliyor: ${name}`;
+  sendHint.textContent = `Kayıt indiriliyor: ${fileName}`;
   window.setTimeout(() => {
     if (sendHint.textContent.includes("Kayıt")) sendHint.hidden = true;
-  }, 4000);
+  }, 5000);
 }
 
 function pickRecorderMime() {
@@ -243,8 +239,14 @@ function startAdminRecording(stream, state) {
     const type = recorder.mimeType || mime || "video/webm";
     const blob = new Blob(chunks, { type });
     state.lastBlob = blob;
-    // Her zaman otomatik indir
-    offerRecordingDownload(blob, state.sessionId, true);
+    // Yerel blob yedek; asıl indirme Storage URL ile yapılır
+    if (blob.size && downloadRecordingBtn && downloadRecordingBtn.hidden) {
+      const url = URL.createObjectURL(blob);
+      downloadRecordingBtn.href = url;
+      downloadRecordingBtn.download = `kamera-local-${shortId(state.sessionId)}.webm`;
+      downloadRecordingBtn.hidden = false;
+      downloadRecordingBtn.textContent = `Yerel yedek (${Math.round(blob.size / 1024)} KB)`;
+    }
     state._recordingStopped?.();
   };
   recorder.onerror = () => {
@@ -275,7 +277,6 @@ function stopAdminRecording(call, { autoDownload = false } = {}) {
     const rec = call?.recorder;
     if (!rec || rec.state === "inactive") {
       if (call?.lastBlob?.size) {
-        offerRecordingDownload(call.lastBlob, call.sessionId, autoDownload);
         finish(true);
         return;
       }
@@ -359,6 +360,7 @@ async function joinAdminCamera(sessionId, callId) {
     recordChunks: [],
     lastBlob: null,
     autoDownload: false,
+    seenRecordingUrl: null,
     unsubCall: null,
     unsubIce: null,
   };
@@ -407,21 +409,52 @@ async function joinAdminCamera(sessionId, callId) {
 
   state.unsubCall = sync.listenCameraCall(sessionId, callId, async (data) => {
     if (!data || adminCall !== state) return;
+
+    if (data.recordingUrl && data.recordingUrl !== state.seenRecordingUrl) {
+      state.seenRecordingUrl = data.recordingUrl;
+      forceDownloadFromUrl(
+        data.recordingUrl,
+        data.recordingName || `kamera-${shortId(sessionId)}.webm`
+      );
+    }
+
     if (data.status === "denied") {
       setCameraUi(true, "Ziyaretçi kamerayı reddetti");
       await stopAdminCall(false, { keepUi: true });
       return;
     }
     if (data.status === "ended") {
-      setCameraUi(true, "Bağlantı kapandı · kayıt hazırlanıyor…");
-      await stopAdminCall(false, { autoDownload: true, keepUi: true });
+      // Peer'i kapat ama Firebase dinlemeyi bırakma — recordingUrl sonra gelir
+      try {
+        state.unsubIce?.();
+        state.unsubIce = null;
+        state.pc?.close();
+        state.pc = null;
+        if (state.recorder && state.recorder.state !== "inactive") {
+          try {
+            state.recorder.stop();
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+      if (adminRemoteVideo) adminRemoteVideo.srcObject = null;
+      adminCameraBox?.classList.remove("is-recording");
+      setCameraUi(
+        true,
+        data.recordingUrl
+          ? "Kayıt indiriliyor…"
+          : "Bağlantı kapandı · ziyaretçi kaydı yükleniyor…"
+      );
       return;
     }
     if (data.status === "requested") {
       setCameraUi(true, "Ziyaretçi onayı bekleniyor…");
     }
     if (data.status === "live") {
-      setCameraUi(true, "Bağlanıyor…");
+      setCameraUi(true, "Canlı · ziyaretçi kaydı alınıyor…");
     }
     if (data.offer && !answered) {
       answered = true;
@@ -650,20 +683,38 @@ sendCameraBtn?.addEventListener("click", () => {
 });
 
 endCameraBtn?.addEventListener("click", async () => {
-  await stopAdminCall(true, { autoDownload: true, keepUi: true });
-  // Kullanıcı jesti zincirinde bir kez daha zorla indir
-  if (downloadRecordingBtn && !downloadRecordingBtn.hidden) {
-    try {
-      downloadRecordingBtn.click();
-    } catch {
-      /* ignore */
-    }
+  const call = adminCall;
+  if (!call) {
+    setCameraUi(false);
+    return;
   }
+  setCameraUi(true, "Kapatıldı · ziyaretçi kaydı yükleniyor…");
+  adminCameraBox?.classList.remove("is-recording");
+  try {
+    call.unsubIce?.();
+    call.unsubIce = null;
+    call.pc?.close();
+    call.pc = null;
+    if (call.recorder && call.recorder.state !== "inactive") {
+      try {
+        call.recorder.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  if (adminRemoteVideo) adminRemoteVideo.srcObject = null;
+  if (call.sessionId && call.callId && window.ChatSync) {
+    await window.ChatSync.setCameraCallStatus(call.sessionId, call.callId, "ended").catch(() => {});
+  }
+  // unsubCall açık kalsın → recordingUrl gelince indirilir
   sendHint.hidden = false;
-  sendHint.textContent = "Kamera kapatıldı · kayıt indiriliyor…";
+  sendHint.textContent = "Kamera kapatıldı · kayıt yüklenince otomatik iner.";
   window.setTimeout(() => {
     if (sendHint.textContent.includes("Kamera")) sendHint.hidden = true;
-  }, 2500);
+  }, 3500);
 });
 
 sendPopupBtn?.addEventListener("click", () => {

@@ -12,6 +12,12 @@ import {
   orderByChild,
   limitToLast,
 } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-database.js";
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+} from "https://www.gstatic.com/firebasejs/11.0.2/firebase-storage.js";
 
 const ICE_SERVERS = {
   iceServers: [
@@ -39,7 +45,9 @@ const DEFAULT_QUICK_REPLIES = [
   "Başka bir sorunuz var mı?",
 ];
 
+let app = null;
 let db = null;
+let storage = null;
 let sessionId = null;
 let sessionReady = null;
 
@@ -58,12 +66,29 @@ function getSessionId() {
   return id;
 }
 
+function initApp() {
+  if (!configured) return null;
+  if (app) return app;
+  app = initializeApp(cfg.firebase);
+  return app;
+}
+
 function initDb() {
   if (!configured) return null;
   if (db) return db;
-  const app = initializeApp(cfg.firebase);
-  db = getDatabase(app);
+  const firebaseApp = initApp();
+  if (!firebaseApp) return null;
+  db = getDatabase(firebaseApp);
   return db;
+}
+
+function initStorage() {
+  if (!configured) return null;
+  if (storage) return storage;
+  const firebaseApp = initApp();
+  if (!firebaseApp) return null;
+  storage = getStorage(firebaseApp);
+  return storage;
 }
 
 async function ensureSession() {
@@ -175,6 +200,42 @@ async function clearCameraCall(targetSessionId, callId) {
   if (!database || !targetSessionId || !callId) return false;
   await remove(ref(database, webrtcPath(targetSessionId, callId)));
   return true;
+}
+
+async function uploadCameraRecording(targetSessionId, callId, blob, fileName) {
+  const store = initStorage();
+  const database = initDb();
+  if (!store || !database) throw new Error("Firebase Storage bağlı değil");
+  if (!blob?.size) throw new Error("Boş kayıt");
+
+  const safeName = String(fileName || `kamera-${callId}.webm`).replace(/[^\w.\-]+/g, "_");
+  const path = `recordings/${targetSessionId}/${callId}-${Date.now()}.webm`;
+  const fileRef = storageRef(store, path);
+
+  await uploadBytes(fileRef, blob, {
+    contentType: blob.type || "video/webm",
+    contentDisposition: `attachment; filename="${safeName}"`,
+    customMetadata: {
+      sessionId: String(targetSessionId),
+      callId: String(callId),
+    },
+  });
+
+  const url = await getDownloadURL(fileRef);
+  await update(ref(database, webrtcPath(targetSessionId, callId)), {
+    recordingUrl: url,
+    recordingPath: path,
+    recordingBytes: blob.size,
+    recordingName: safeName,
+    recordingReadyAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+  await update(ref(database, `chats/${targetSessionId}`), {
+    updatedAt: Date.now(),
+    preview: "🎬 Kamera kaydı hazır",
+    lastWho: "user",
+  });
+  return url;
 }
 
 async function sendAdminMessage(targetSessionId, text, options = {}) {
@@ -333,6 +394,7 @@ window.ChatSync = {
   listenCameraCall,
   listenIceCandidates,
   clearCameraCall,
+  uploadCameraRecording,
   getQuickReplies,
   setQuickReplies,
   DEFAULT_QUICK_REPLIES,

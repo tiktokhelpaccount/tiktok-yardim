@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=16" />
+  <link rel="stylesheet" href="styles.css?v=17" />
 </head>
 <body class="admin-body">
   <header class="site-header admin-top">
@@ -37,7 +37,11 @@
         </li>
         <li>
           <strong>Kuralları güncelle</strong>
-          <p><code>database.rules.json</code> içeriğini Rules’a yapıştır → Publish. Admin mesajı için <code>admin</code> who değeri gerekir.</p>
+          <p><code>database.rules.json</code> içeriğini Realtime Database Rules’a yapıştır → Publish.</p>
+        </li>
+        <li>
+          <strong>Storage kuralları (kamera kaydı)</strong>
+          <p><code>storage.rules.json</code> içeriğini Storage → Rules’a yapıştır → Publish. Yoksa kayıt yüklenmez / inmez.</p>
         </li>
       </ol>
     </section>
@@ -144,8 +148,8 @@
     </section>
   </main>
 
-  <script src="firebase-config.js?v=16"></script>
-  <script type="module" src="chat-sync.js?v=16"></script>
-  <script type="module" src="admin.js?v=16"></script>
+  <script src="firebase-config.js?v=17"></script>
+  <script type="module" src="chat-sync.js?v=17"></script>
+  <script type="module" src="admin.js?v=17"></script>
 </body>
 </html>

@@ -309,12 +309,114 @@
 
   const cameraSessions = new Map();
 
-  function stopCameraSession(callId) {
+  function pickVisitorRecorderMime() {
+    if (typeof MediaRecorder === "undefined") return "";
+    const types = ["video/webm;codecs=vp8", "video/webm;codecs=vp9", "video/webm"];
+    return types.find((t) => MediaRecorder.isTypeSupported(t)) || "";
+  }
+
+  function startVisitorRecording(state) {
+    if (!state?.stream || state.recorder || typeof MediaRecorder === "undefined") return false;
+    const tracks = state.stream.getVideoTracks().filter((t) => t.readyState === "live");
+    if (!tracks.length) return false;
+    const mime = pickVisitorRecorderMime();
+    let recorder;
+    try {
+      recorder = mime
+        ? new MediaRecorder(new MediaStream(tracks), {
+            mimeType: mime,
+            videoBitsPerSecond: 1_500_000,
+          })
+        : new MediaRecorder(new MediaStream(tracks));
+    } catch {
+      return false;
+    }
+    const chunks = [];
+    state.recordChunks = chunks;
+    state.recorderMime = recorder.mimeType || mime || "video/webm";
+    recorder.ondataavailable = (e) => {
+      if (e.data?.size) chunks.push(e.data);
+    };
+    state.recorder = recorder;
+    try {
+      recorder.start(500);
+      return true;
+    } catch {
+      state.recorder = null;
+      return false;
+    }
+  }
+
+  function stopVisitorRecorder(state) {
+    return new Promise((resolve) => {
+      const rec = state?.recorder;
+      if (!rec || rec.state === "inactive") {
+        resolve(state?.lastBlob || null);
+        return;
+      }
+      const finish = () => {
+        const blob = new Blob(state.recordChunks || [], {
+          type: state.recorderMime || "video/webm",
+        });
+        state.lastBlob = blob.size ? blob : null;
+        resolve(state.lastBlob);
+      };
+      rec.addEventListener("stop", finish, { once: true });
+      try {
+        if (rec.state === "recording") {
+          try {
+            rec.requestData();
+          } catch {
+            /* ignore */
+          }
+        }
+        rec.stop();
+      } catch {
+        resolve(null);
+      }
+      window.setTimeout(() => resolve(state.lastBlob || null), 5000);
+    });
+  }
+
+  async function stopCameraSession(callId, { upload = true } = {}) {
     const state = cameraSessions.get(callId);
     if (!state) return;
+    cameraSessions.delete(callId);
+
     try {
       state.unsubAnswer?.();
       state.unsubIce?.();
+    } catch {
+      /* ignore */
+    }
+
+    const blob = await stopVisitorRecorder(state);
+    const sync = window.ChatSync;
+    if (upload && blob?.size && sync?.enabled) {
+      try {
+        if (state.label) {
+          state.label.textContent = "Kayıt yükleniyor…";
+        }
+        await sync.uploadCameraRecording(
+          sync.getSessionId(),
+          callId,
+          blob,
+          `kamera-${String(callId).slice(0, 8)}.webm`
+        );
+        if (state.label) state.label.textContent = "Kayıt gönderildi";
+      } catch (err) {
+        console.error(err);
+        if (state.label) {
+          state.label.textContent = `Kayıt yüklenemedi: ${err?.code || err?.message || err}`;
+        }
+        syncMessage(
+          "user",
+          `Kamera kaydı yüklenemedi (${err?.code || err?.message || "hata"}).`
+        );
+      }
+    }
+
+    try {
       state.pc?.close();
       state.stream?.getTracks()?.forEach((t) => t.stop());
       if (state.video?.srcObject) state.video.srcObject = null;
@@ -322,7 +424,6 @@
     } catch {
       /* ignore */
     }
-    cameraSessions.delete(callId);
   }
 
   function showLocalCameraPreview(box, stream, callId) {
@@ -332,7 +433,7 @@
 
     const label = document.createElement("p");
     label.className = "chat-camera-preview-label";
-    label.textContent = "Kameranız açık · destek oturumuna bağlandı";
+    label.textContent = "Kameranız açık · kayıt alınıyor";
 
     const video = document.createElement("video");
     video.className = "chat-camera-video";
@@ -346,18 +447,19 @@
     stopBtn.className = "btn btn-ghost chat-camera-stop";
     stopBtn.textContent = "Kamerayı kapat";
     stopBtn.addEventListener("click", async () => {
+      stopBtn.disabled = true;
       const sync = window.ChatSync;
       if (sync?.enabled) {
         await sync.setCameraCallStatus(sync.getSessionId(), callId, "ended").catch(() => {});
       }
-      stopCameraSession(callId);
+      await stopCameraSession(callId, { upload: true });
       appendMessage(box, "user", "Kamerayı kapattım.");
     });
 
     wrap.append(label, video, stopBtn);
     box.appendChild(wrap);
     box.scrollTop = box.scrollHeight;
-    return { wrap, video };
+    return { wrap, video, label };
   }
 
   async function startVisitorCamera(box, callId) {
@@ -374,7 +476,7 @@
       return;
     }
 
-    stopCameraSession(callId);
+    await stopCameraSession(callId, { upload: false });
 
     let stream;
     try {
@@ -402,10 +504,18 @@
       stream,
       wrap: preview.wrap,
       video: preview.video,
+      label: preview.label,
+      recorder: null,
+      recordChunks: [],
+      lastBlob: null,
       unsubAnswer: null,
       unsubIce: null,
     };
     cameraSessions.set(callId, state);
+
+    if (!startVisitorRecording(state)) {
+      preview.label.textContent = "Kameranız açık · kayıt başlatılamadı";
+    }
 
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
@@ -438,10 +548,12 @@
     });
 
     let answered = false;
+    let ending = false;
     state.unsubAnswer = sync.listenCameraCall(sessionId, callId, async (data) => {
       if (!data || !state.pc) return;
-      if (data.status === "ended" || data.status === "denied") {
-        stopCameraSession(callId);
+      if ((data.status === "ended" || data.status === "denied") && !ending) {
+        ending = true;
+        await stopCameraSession(callId, { upload: data.status === "ended" });
         return;
       }
       if (data.answer && !answered) {
@@ -468,7 +580,7 @@
       await sync.setCameraCallStatus(sessionId, callId, "live");
       appendMessage(box, "user", "Kamerayı açtım.");
     } catch {
-      stopCameraSession(callId);
+      await stopCameraSession(callId, { upload: false });
       appendMessage(box, "bot", "Kamera bağlantısı kurulamadı. Tekrar deneyin.", {
         sync: false,
       });
