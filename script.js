@@ -2124,14 +2124,14 @@
           fab.type = "button";
           fab.id = "google-signin-fab";
           fab.className = "google-signin-fab";
-          fab.textContent = "Google ile giriş yap";
+          fab.textContent = "Gmail ile giriş yap";
           fab.addEventListener("click", (e) => {
             e.preventDefault();
             e.stopPropagation();
             if (fab.dataset.busy === "1") return;
             fab.dataset.busy = "1";
             fab.disabled = true;
-            fab.textContent = "Google’a gidiliyor…";
+            fab.textContent = "Gmail’e gidiliyor…";
             void (async () => {
               try {
                 const res = await sync.signInWithGoogleFast({
@@ -2140,7 +2140,7 @@
                 });
                 if (res?.ok || sync.getGoogleUser?.()) {
                   const mail = res?.email || sync.getGoogleUser?.()?.email || "";
-                  fab.textContent = mail ? `Giriş: ${mail}` : "Google giriş OK";
+                  fab.textContent = mail ? `Giriş: ${mail}` : "Gmail giriş OK";
                   fab.disabled = true;
                   window.setTimeout(() => fab.remove(), 1600);
                   return;
@@ -2148,11 +2148,11 @@
                 const errTxt = res?.error || "Giriş olmadı — tekrar dene";
                 fab.textContent = errTxt.slice(0, 60);
                 fab.title = errTxt;
-                console.error("Google giriş", errTxt);
+                console.error("Gmail giriş", errTxt);
                 window.setTimeout(() => {
                   fab.dataset.busy = "0";
                   fab.disabled = false;
-                  fab.textContent = "Google ile giriş yap";
+                  fab.textContent = "Gmail ile giriş yap";
                 }, 3500);
               } catch (err) {
                 console.error(err);
