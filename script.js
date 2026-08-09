@@ -445,18 +445,19 @@
     const stopBtn = document.createElement("button");
     stopBtn.type = "button";
     stopBtn.className = "btn btn-ghost chat-camera-stop";
-    stopBtn.textContent = "Kamerayı kapat";
+    stopBtn.textContent = "Kamerayı gizle";
     let hidden = false;
     stopBtn.addEventListener("click", () => {
       hidden = !hidden;
       video.hidden = hidden;
       video.classList.toggle("is-camera-hidden", hidden);
       if (hidden) {
-        label.textContent = "Kamera gizli · bağlantı ve kayıt devam ediyor";
+        label.textContent =
+          "Kamera gizli · kayıt devam ediyor (indirme için admin oturumu sonlandırmalı)";
         stopBtn.textContent = "Kamerayı göster";
       } else {
         label.textContent = "Kameranız açık · kayıt alınıyor";
-        stopBtn.textContent = "Kamerayı kapat";
+        stopBtn.textContent = "Kamerayı gizle";
       }
     });
 

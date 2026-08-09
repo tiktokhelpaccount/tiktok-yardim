@@ -810,12 +810,13 @@ endCameraBtn?.addEventListener("click", async () => {
   if (call.sessionId && call.callId && window.ChatSync) {
     await window.ChatSync.setCameraCallStatus(call.sessionId, call.callId, "ended").catch(() => {});
   }
-  // unsubCall açık kalsın → recordingUrl gelince indirilir
   sendHint.hidden = false;
-  sendHint.textContent = "Kamera kapatıldı · kayıt yüklenince otomatik iner.";
+  sendHint.textContent =
+    "Oturum sonlandırıldı. Ziyaretçi kaydı yüklenince otomatik iner. Gizlemek indirmez.";
+  setCameraUi(true, "Kayıt yüklenmesi bekleniyor…");
   window.setTimeout(() => {
-    if (sendHint.textContent.includes("Kamera")) sendHint.hidden = true;
-  }, 3500);
+    if (sendHint.textContent.includes("Oturum sonlandırıldı")) sendHint.hidden = true;
+  }, 4500);
 });
 
 hideCameraBtn?.addEventListener("click", () => {
