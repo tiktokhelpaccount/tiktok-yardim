@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=39" />
+  <link rel="stylesheet" href="styles.css?v=40" />
 </head>
 <body class="admin-body">
   <header class="site-header admin-top">
@@ -72,6 +72,9 @@
             <h2>Sohbetler</h2>
             <p id="session-count">0 aktif</p>
           </header>
+          <div class="admin-session-tools">
+            <button type="button" class="btn btn-ghost" id="clear-all-chats-btn">Tüm sohbetleri temizle</button>
+          </div>
           <ul class="session-list" id="session-list"></ul>
         </aside>
 
@@ -80,6 +83,10 @@
             <h2 id="thread-title">Bir sohbet seçin</h2>
             <p id="thread-meta">Sol listeden canlı oturumları izleyin.</p>
           </header>
+          <div class="admin-thread-tools">
+            <button type="button" class="btn btn-ghost" id="export-chat-btn" disabled>Sohbeti dışa aktar</button>
+            <button type="button" class="btn btn-danger" id="clear-chat-btn" disabled>Sohbeti temizle</button>
+          </div>
           <div class="chat-messages admin-messages" id="thread-messages" role="log" aria-live="polite"></div>
 
             <div class="admin-compose-wrap">
@@ -163,8 +170,8 @@
     </div>
   </div>
 
-  <script src="firebase-config.js?v=39"></script>
-  <script type="module" src="chat-sync.js?v=39"></script>
-  <script type="module" src="admin.js?v=39"></script>
+  <script src="firebase-config.js?v=40"></script>
+  <script type="module" src="chat-sync.js?v=40"></script>
+  <script type="module" src="admin.js?v=40"></script>
 </body>
 </html>

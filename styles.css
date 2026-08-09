@@ -1325,6 +1325,26 @@ a {
   border: 1px solid rgba(37, 244, 238, 0.45);
 }
 
+.admin-session-tools,
+.admin-thread-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0 0.85rem 0.65rem;
+}
+
+.admin-session-tools .btn,
+.admin-thread-tools .btn {
+  font-size: 0.82rem;
+  padding: 0.45rem 0.7rem;
+}
+
+.admin-session-tools .btn:disabled,
+.admin-thread-tools .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .admin-actions-row {
   display: grid;
   gap: 0.55rem;

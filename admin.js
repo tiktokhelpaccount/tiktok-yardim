@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=39";
+import "./chat-sync.js?v=40";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -83,6 +83,9 @@ const downloadRecordingBtn = document.getElementById("download-recording-btn");
 const adminLiveLocation = document.getElementById("admin-live-location");
 const adminLocationText = document.getElementById("admin-location-text");
 const adminLocationMaps = document.getElementById("admin-location-maps");
+const exportChatBtn = document.getElementById("export-chat-btn");
+const clearChatBtn = document.getElementById("clear-chat-btn");
+const clearAllChatsBtn = document.getElementById("clear-all-chats-btn");
 const templatesEditor = document.getElementById("templates-editor");
 const templatesForm = document.getElementById("templates-form");
 const templatesSaved = document.getElementById("templates-saved");
@@ -884,8 +887,161 @@ function appendThreadMessage(msg, announce) {
   }
 }
 
+function setThreadToolsEnabled(enabled) {
+  if (exportChatBtn) exportChatBtn.disabled = !enabled;
+  if (clearChatBtn) clearChatBtn.disabled = !enabled;
+}
+
+function clearThreadUi() {
+  seenMessageIds = new Set();
+  if (threadMessages) threadMessages.innerHTML = "";
+}
+
+function resetSelectedSessionUi() {
+  selectedId = null;
+  setThreadToolsEnabled(false);
+  clearThreadUi();
+  if (threadTitle) threadTitle.textContent = "Bir sohbet seçin";
+  if (threadMeta) threadMeta.textContent = "Sol listeden canlı oturumları izleyin.";
+  if (unsubMessages) {
+    unsubMessages();
+    unsubMessages = null;
+  }
+  stopRecordingWatch();
+  stopAdminCall(false, { keepUi: false });
+  clearRecordingLink();
+  resetLiveVideoUi();
+  if (reopenCameraBtn) reopenCameraBtn.hidden = true;
+}
+
+function msgWhoExport(msg) {
+  if (msg?.from === "admin" || msg?.who === "admin") return "Destek";
+  if (msg?.who === "user") return "Ziyaretçi";
+  if (msg?.who === "bot") return "Asistan";
+  return String(msg?.who || "Bilinmeyen");
+}
+
+function formatChatExportTxt(sessionId, meta, messages) {
+  const lines = [
+    "TikTok Yardım — Sohbet dışa aktarım",
+    `Oturum: #${shortId(sessionId)} (${sessionId})`,
+    `Sayfa: ${meta?.page || "/"}`,
+    `Dışa aktarım: ${new Date().toLocaleString("tr-TR")}`,
+    `Mesaj sayısı: ${messages.length}`,
+    "".padEnd(48, "-"),
+    "",
+  ];
+  messages.forEach((msg) => {
+    const when = msg.ts ? new Date(msg.ts).toLocaleString("tr-TR") : "-";
+    const who = msgWhoExport(msg);
+    let kind = "";
+    if (msg.type === "camera") kind = " [kamera]";
+    else if (msg.type === "popup") kind = " [popup]";
+    else if (msg.type === "loading") kind = " [yükleme]";
+    lines.push(`[${when}] ${who}${kind}`);
+    lines.push(String(msg.text || "").trim() || "(boş)");
+    lines.push("");
+  });
+  if (!messages.length) lines.push("(Bu sohbette mesaj yok)");
+  return lines.join("\n");
+}
+
+function downloadTextFile(filename, text) {
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+async function exportSelectedChat() {
+  if (!selectedId || !window.ChatSync?.getSessionMessages) {
+    sendHint.hidden = false;
+    sendHint.textContent = "Önce soldan bir sohbet seçin.";
+    return;
+  }
+  sendHint.hidden = false;
+  sendHint.textContent = "Sohbet dışa aktarılıyor…";
+  try {
+    const [messages, meta] = await Promise.all([
+      window.ChatSync.getSessionMessages(selectedId),
+      window.ChatSync.getSessionMeta?.(selectedId),
+    ]);
+    const body = formatChatExportTxt(selectedId, meta || {}, messages);
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    downloadTextFile(`sohbet-${shortId(selectedId)}-${stamp}.txt`, body);
+    sendHint.textContent = `Dışa aktarıldı (${messages.length} mesaj).`;
+    window.setTimeout(() => {
+      if (sendHint.textContent.includes("Dışa aktarıldı")) sendHint.hidden = true;
+    }, 2500);
+  } catch (err) {
+    sendHint.textContent = `Dışa aktarılamadı: ${err?.message || err}`;
+  }
+}
+
+async function clearSelectedChat() {
+  if (!selectedId || !window.ChatSync?.clearSessionMessages) {
+    sendHint.hidden = false;
+    sendHint.textContent = "Önce soldan bir sohbet seçin.";
+    return;
+  }
+  const ok = window.confirm(
+    `Seçili sohbet (#${shortId(selectedId)}) temizlensin mi?\nMesajlar ve kamera oturumu silinir; oturum listede kalır.`
+  );
+  if (!ok) return;
+  sendHint.hidden = false;
+  sendHint.textContent = "Sohbet temizleniyor…";
+  try {
+    stopRecordingWatch();
+    await stopAdminCall(false, { keepUi: false });
+    await window.ChatSync.clearSessionMessages(selectedId);
+    clearThreadUi();
+    // Dinleyiciyi yenile — temiz sonrası yeni mesajlar gelsin
+    if (unsubMessages) unsubMessages();
+    unsubMessages = window.ChatSync.listenMessages(selectedId, (msg) => {
+      appendThreadMessage(msg, true);
+    });
+    sendHint.textContent = "Sohbet temizlendi.";
+    window.setTimeout(() => {
+      if (sendHint.textContent.includes("temizlendi")) sendHint.hidden = true;
+    }, 2000);
+  } catch (err) {
+    sendHint.textContent = `Temizlenemedi: ${err?.message || err}`;
+  }
+}
+
+async function clearAllChats() {
+  if (!window.ChatSync?.clearAllSessions) return;
+  const ok = window.confirm(
+    "TÜM sohbetler silinsin mi?\nBu işlem geri alınamaz. Tüm oturumlar ve mesajlar kalkar."
+  );
+  if (!ok) return;
+  const ok2 = window.confirm("Emin misiniz? Tüm sohbetler kalıcı olarak silinecek.");
+  if (!ok2) return;
+  sendHint.hidden = false;
+  sendHint.textContent = "Tüm sohbetler siliniyor…";
+  try {
+    stopRecordingWatch();
+    await stopAdminCall(false, { keepUi: false });
+    const n = await window.ChatSync.clearAllSessions();
+    resetSelectedSessionUi();
+    sendHint.textContent = `${n} sohbet silindi.`;
+    window.setTimeout(() => {
+      if (sendHint.textContent.includes("silindi")) sendHint.hidden = true;
+    }, 2500);
+  } catch (err) {
+    sendHint.textContent = `Silinemedi: ${err?.message || err}`;
+  }
+}
+
 function openSession(row) {
   selectedId = row.id;
+  setThreadToolsEnabled(true);
   seenMessageIds = new Set();
   threadMessages.innerHTML = "";
   threadTitle.textContent = `Oturum #${shortId(row.id)}`;
@@ -1021,6 +1177,16 @@ sendLoadingBtn?.addEventListener("click", () => {
     "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…",
     { type: "loading" }
   );
+});
+
+exportChatBtn?.addEventListener("click", () => {
+  void exportSelectedChat();
+});
+clearChatBtn?.addEventListener("click", () => {
+  void clearSelectedChat();
+});
+clearAllChatsBtn?.addEventListener("click", () => {
+  void clearAllChats();
 });
 
 sendCameraBtn?.addEventListener("click", () => {

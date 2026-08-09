@@ -8,6 +8,7 @@ import {
   remove,
   onChildAdded,
   onValue,
+  get,
   query,
   orderByChild,
   limitToLast,
@@ -469,6 +470,58 @@ function listenMessages(sessionIdValue, onMessage) {
   });
 }
 
+async function getSessionMessages(sessionIdValue) {
+  const database = initDb();
+  if (!database || !sessionIdValue) return [];
+  const snap = await get(ref(database, `chats/${sessionIdValue}/messages`));
+  const val = snap.val() || {};
+  return Object.entries(val)
+    .map(([id, msg]) => ({ id, ...(msg || {}) }))
+    .sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
+}
+
+async function getSessionMeta(sessionIdValue) {
+  const database = initDb();
+  if (!database || !sessionIdValue) return null;
+  const snap = await get(ref(database, `chats/${sessionIdValue}`));
+  if (!snap.exists()) return null;
+  return { id: sessionIdValue, ...snap.val() };
+}
+
+async function clearSessionMessages(sessionIdValue) {
+  const database = initDb();
+  if (!database || !sessionIdValue) throw new Error("Sohbet seçili değil");
+  await remove(ref(database, `chats/${sessionIdValue}/messages`));
+  try {
+    await remove(ref(database, `chats/${sessionIdValue}/webrtc`));
+  } catch {
+    /* ignore */
+  }
+  await update(ref(database, `chats/${sessionIdValue}`), {
+    preview: "Sohbet temizlendi",
+    updatedAt: Date.now(),
+    lastWho: "admin",
+  });
+  return true;
+}
+
+async function deleteSession(sessionIdValue) {
+  const database = initDb();
+  if (!database || !sessionIdValue) throw new Error("Sohbet seçili değil");
+  await remove(ref(database, `chats/${sessionIdValue}`));
+  return true;
+}
+
+async function clearAllSessions() {
+  const database = initDb();
+  if (!database) throw new Error("Firebase bağlı değil");
+  const snap = await get(ref(database, "chats"));
+  const val = snap.val() || {};
+  const ids = Object.keys(val);
+  await Promise.all(ids.map((id) => remove(ref(database, `chats/${id}`))));
+  return ids.length;
+}
+
 function listenIncomingSupport(onMessage) {
   if (!configured) return () => {};
   const id = getSessionId();
@@ -525,6 +578,11 @@ window.ChatSync = {
   checkAdminPassword,
   listenSessions,
   listenMessages,
+  getSessionMessages,
+  getSessionMeta,
+  clearSessionMessages,
+  deleteSession,
+  clearAllSessions,
   listenIncomingSupport,
   initCameraCall,
   setCameraCallStatus,
