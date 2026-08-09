@@ -1328,27 +1328,23 @@ a {
 .admin-camera-modal {
   position: fixed;
   inset: 0;
-  z-index: 80;
-  display: grid;
-  place-items: center;
-  padding: 1rem;
+  z-index: 2147483000;
+  display: block;
+  pointer-events: none;
+  padding: 0;
 }
 
 .admin-camera-modal[hidden] {
   display: none !important;
 }
 
-.admin-camera-modal-backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(10, 10, 11, 0.55);
-  backdrop-filter: blur(2px);
-}
-
 .admin-camera-modal-panel {
-  position: relative;
-  z-index: 1;
-  width: min(480px, 100%);
+  position: fixed;
+  top: 12vh;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483001;
+  width: min(420px, calc(100vw - 1.5rem));
   display: grid;
   gap: 0.75rem;
   padding: 1rem;
@@ -1356,8 +1352,17 @@ a {
   border: 1px solid rgba(37, 244, 238, 0.45);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 243, 238, 0.96));
-  box-shadow: 0 24px 60px rgba(10, 10, 11, 0.28);
+  box-shadow: 0 24px 60px rgba(10, 10, 11, 0.35);
   animation: rise-in 0.22s ease both;
+  pointer-events: auto;
+  user-select: none;
+  touch-action: none;
+}
+
+.admin-camera-modal-panel.is-dragging {
+  transition: none;
+  animation: none;
+  cursor: grabbing;
 }
 
 .admin-camera-modal-head {
@@ -1365,10 +1370,19 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+  cursor: grab;
+  padding: 0.15rem 0.1rem 0.35rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 0.15rem;
+}
+
+.admin-camera-modal-head:active {
+  cursor: grabbing;
 }
 
 .admin-camera-modal-head strong {
   font-size: 1rem;
+  pointer-events: none;
 }
 
 .admin-camera-modal-x {
@@ -1381,15 +1395,13 @@ a {
   font-size: 1.4rem;
   line-height: 1;
   cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
 }
 
 .admin-camera-modal-x:hover {
   border-color: var(--rose);
   color: var(--rose);
-}
-
-.admin-camera-box {
-  /* legacy class kept for recording badge state on modal root */
 }
 
 .admin-rec-badge {

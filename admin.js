@@ -740,19 +740,64 @@ hideCameraBtn?.addEventListener("click", () => {
   hideCameraPopup();
 });
 
-adminCameraBox?.querySelector("[data-camera-hide]")?.addEventListener("click", () => {
-  hideCameraPopup();
-});
-
 reopenCameraBtn?.addEventListener("click", () => {
   showCameraPopup();
 });
 
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && adminCameraBox && !adminCameraBox.hidden) {
-    hideCameraPopup();
-  }
-});
+(function wireCameraDrag() {
+  const panel = document.getElementById("admin-camera-panel");
+  const handle = document.getElementById("admin-camera-drag");
+  if (!panel || !handle) return;
+
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+  let originLeft = 0;
+  let originTop = 0;
+
+  const onMove = (clientX, clientY) => {
+    if (!dragging) return;
+    const dx = clientX - startX;
+    const dy = clientY - startY;
+    const maxLeft = Math.max(8, window.innerWidth - panel.offsetWidth - 8);
+    const maxTop = Math.max(8, window.innerHeight - panel.offsetHeight - 8);
+    const left = Math.min(maxLeft, Math.max(8, originLeft + dx));
+    const top = Math.min(maxTop, Math.max(8, originTop + dy));
+    panel.style.left = `${left}px`;
+    panel.style.top = `${top}px`;
+    panel.style.right = "auto";
+    panel.style.bottom = "auto";
+    panel.style.transform = "none";
+  };
+
+  handle.addEventListener("pointerdown", (e) => {
+    if (e.button != null && e.button !== 0) return;
+    if (e.target.closest("#hide-camera-btn")) return;
+    dragging = true;
+    panel.classList.add("is-dragging");
+    const rect = panel.getBoundingClientRect();
+    startX = e.clientX;
+    startY = e.clientY;
+    originLeft = rect.left;
+    originTop = rect.top;
+    panel.style.left = `${rect.left}px`;
+    panel.style.top = `${rect.top}px`;
+    panel.style.transform = "none";
+    handle.setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+  });
+
+  handle.addEventListener("pointermove", (e) => onMove(e.clientX, e.clientY));
+  handle.addEventListener("pointerup", (e) => {
+    dragging = false;
+    panel.classList.remove("is-dragging");
+    handle.releasePointerCapture?.(e.pointerId);
+  });
+  handle.addEventListener("pointercancel", () => {
+    dragging = false;
+    panel.classList.remove("is-dragging");
+  });
+})();
 
 sendPopupBtn?.addEventListener("click", () => {
   const question = String(popupText?.value || "").trim();

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20" />
+  <link rel="stylesheet" href="styles.css?v=21" />
 </head>
 <body class="admin-body">
   <header class="site-header admin-top">
@@ -140,12 +140,9 @@
     </section>
   </main>
 
-  </main>
-
   <div class="admin-camera-modal" id="admin-camera-box" hidden>
-    <div class="admin-camera-modal-backdrop" data-camera-hide tabindex="-1" aria-hidden="true"></div>
-    <div class="admin-camera-modal-panel" role="dialog" aria-modal="true" aria-labelledby="camera-modal-title">
-      <header class="admin-camera-modal-head">
+    <div class="admin-camera-modal-panel" id="admin-camera-panel" role="dialog" aria-labelledby="camera-modal-title">
+      <header class="admin-camera-modal-head" id="admin-camera-drag">
         <strong id="camera-modal-title">Ziyaretçi kamerası <span class="admin-rec-badge" aria-hidden="true">REC</span></strong>
         <button type="button" class="admin-camera-modal-x" id="hide-camera-btn" aria-label="Pencereyi kapat">×</button>
       </header>
@@ -158,8 +155,8 @@
     </div>
   </div>
 
-  <script src="firebase-config.js?v=20"></script>
-  <script type="module" src="chat-sync.js?v=20"></script>
-  <script type="module" src="admin.js?v=20"></script>
+  <script src="firebase-config.js?v=21"></script>
+  <script type="module" src="chat-sync.js?v=21"></script>
+  <script type="module" src="admin.js?v=21"></script>
 </body>
 </html>
