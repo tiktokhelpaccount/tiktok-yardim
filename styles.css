@@ -1464,6 +1464,35 @@ a {
   animation: rise-in 0.25s ease both;
 }
 
+.admin-live-location {
+  margin: 0.55rem 0 0.15rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(246, 243, 238, 0.9);
+}
+
+.admin-live-location-label {
+  margin: 0 0 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.admin-live-location-coords {
+  margin: 0 0 0.45rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.admin-live-location .btn {
+  width: 100%;
+}
+
 .chat-camera-preview.chat-camera-silent {
   padding: 0.75rem 0.9rem;
   border-color: rgba(37, 244, 238, 0.28);

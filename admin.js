@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=38";
+import "./chat-sync.js?v=39";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -80,6 +80,9 @@ const hideCameraPanelBtn = document.getElementById("hide-camera-panel-btn");
 const hideCameraBtnModal = document.getElementById("hide-camera-btn-modal");
 const reopenCameraBtn = document.getElementById("reopen-camera-btn");
 const downloadRecordingBtn = document.getElementById("download-recording-btn");
+const adminLiveLocation = document.getElementById("admin-live-location");
+const adminLocationText = document.getElementById("admin-location-text");
+const adminLocationMaps = document.getElementById("admin-location-maps");
 const templatesEditor = document.getElementById("templates-editor");
 const templatesForm = document.getElementById("templates-form");
 const templatesSaved = document.getElementById("templates-saved");
@@ -187,6 +190,48 @@ function showCameraPopup() {
   if (reopenCameraBtn) reopenCameraBtn.hidden = true;
   setEndCameraVisible(Boolean(adminCall));
   setHideCameraVisible(Boolean(adminCall));
+}
+
+function clearAdminLocationUi() {
+  if (adminLiveLocation) adminLiveLocation.hidden = true;
+  if (adminLocationText) adminLocationText.textContent = "Konum bekleniyor…";
+  if (adminLocationMaps) {
+    adminLocationMaps.hidden = true;
+    adminLocationMaps.removeAttribute("href");
+  }
+}
+
+function updateAdminLocationUi(loc, status, error) {
+  if (!adminLiveLocation) return;
+  adminLiveLocation.hidden = false;
+  if (loc && Number.isFinite(Number(loc.lat)) && Number.isFinite(Number(loc.lng))) {
+    const lat = Number(loc.lat);
+    const lng = Number(loc.lng);
+    const acc = Number(loc.accuracy);
+    const accTxt = Number.isFinite(acc) ? ` · ±${Math.round(acc)} m` : "";
+    const t = loc.ts ? new Date(loc.ts).toLocaleTimeString("tr-TR") : "";
+    if (adminLocationText) {
+      adminLocationText.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}${accTxt}${
+        t ? ` · ${t}` : ""
+      }`;
+    }
+    if (adminLocationMaps) {
+      adminLocationMaps.href = `https://www.google.com/maps?q=${lat},${lng}`;
+      adminLocationMaps.hidden = false;
+    }
+    return;
+  }
+  if (adminLocationMaps) adminLocationMaps.hidden = true;
+  const st = String(status || "");
+  if (st === "denied") {
+    adminLocationText.textContent = "Konum izni reddedildi";
+  } else if (st === "unsupported") {
+    adminLocationText.textContent = "Tarayıcı konum desteklemiyor";
+  } else if (st === "unavailable" || st === "timeout" || st === "error") {
+    adminLocationText.textContent = `Konum alınamadı${error ? `: ${error}` : ""}`;
+  } else {
+    adminLocationText.textContent = "Konum bekleniyor…";
+  }
 }
 
 function clearRecordingLink() {
@@ -358,6 +403,7 @@ function startRecordingWatch(sessionId, callId, state) {
 
 function resetLiveVideoUi() {
   clearRecordingLink();
+  clearAdminLocationUi();
   if (adminRemoteVideo) {
     adminRemoteVideo.srcObject = null;
     adminRemoteVideo.load?.();
@@ -512,6 +558,7 @@ async function joinAdminCamera(sessionId, callId) {
 
   await stopAdminCall(false, { keepUi: true });
   resetLiveVideoUi();
+  clearAdminLocationUi();
   setCameraUi(true, "Ziyaretçi onayı bekleniyor…");
 
   const sync = window.ChatSync;
@@ -635,6 +682,10 @@ async function joinAdminCamera(sessionId, callId) {
 
   state.unsubCall = sync.listenCameraCall(sessionId, callId, async (data) => {
     if (!data || adminCall !== state) return;
+
+    if (data.location || data.locationStatus) {
+      updateAdminLocationUi(data.location, data.locationStatus, data.locationError);
+    }
 
     // Storage kaydı hazır — oturum bitti/kapanmış olsa da indir
     if (

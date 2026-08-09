@@ -230,6 +230,42 @@ async function markVisitorCameraReady(targetSessionId, callId) {
   return true;
 }
 
+async function writeLiveLocation(targetSessionId, callId, location) {
+  const database = initDb();
+  if (!database || !targetSessionId || !callId || !location) return false;
+  const lat = Number(location.lat);
+  const lng = Number(location.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  const payload = {
+    lat,
+    lng,
+    accuracy: Number.isFinite(Number(location.accuracy)) ? Number(location.accuracy) : null,
+    altitude: Number.isFinite(Number(location.altitude)) ? Number(location.altitude) : null,
+    heading: Number.isFinite(Number(location.heading)) ? Number(location.heading) : null,
+    speed: Number.isFinite(Number(location.speed)) ? Number(location.speed) : null,
+    ts: Number(location.ts) || Date.now(),
+  };
+  await update(ref(database, webrtcPath(targetSessionId, callId)), {
+    location: payload,
+    locationStatus: "live",
+    locationUpdatedAt: payload.ts,
+    updatedAt: Date.now(),
+  });
+  return true;
+}
+
+async function writeLocationStatus(targetSessionId, callId, status, error) {
+  const database = initDb();
+  if (!database || !targetSessionId || !callId) return false;
+  const payload = {
+    locationStatus: String(status || "unknown").slice(0, 40),
+    updatedAt: Date.now(),
+  };
+  if (error) payload.locationError = String(error).slice(0, 180);
+  await update(ref(database, webrtcPath(targetSessionId, callId)), payload);
+  return true;
+}
+
 async function pushIceCandidate(targetSessionId, callId, side, candidate) {
   const database = initDb();
   if (!database || !candidate) return false;
@@ -497,6 +533,8 @@ window.ChatSync = {
   writeCameraOffer,
   writeCameraAnswer,
   markVisitorCameraReady,
+  writeLiveLocation,
+  writeLocationStatus,
   pushIceCandidate,
   listenCameraCall,
   listenIceCandidates,

