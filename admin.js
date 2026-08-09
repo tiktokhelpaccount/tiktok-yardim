@@ -149,7 +149,7 @@ function clearRecordingLink() {
   downloadRecordingBtn.hidden = true;
 }
 
-function offerRecordingDownload(blob, sessionId, autoClick) {
+function offerRecordingDownload(blob, sessionId, autoClick = true) {
   if (!blob?.size) {
     sendHint.hidden = false;
     sendHint.textContent = "Kayıt boş geldi; video bağlanmamış olabilir.";
@@ -169,21 +169,35 @@ function offerRecordingDownload(blob, sessionId, autoClick) {
     downloadRecordingBtn.textContent = `Kaydı indir (${Math.round(blob.size / 1024)} KB)`;
   }
 
-  if (autoClick) {
+  const trigger = () => {
+    try {
+      if (downloadRecordingBtn?.href) {
+        downloadRecordingBtn.click();
+        return;
+      }
+    } catch {
+      /* fallback below */
+    }
     const a = document.createElement("a");
     a.href = url;
     a.download = name;
     a.rel = "noopener";
+    a.style.display = "none";
     document.body.appendChild(a);
     a.click();
     a.remove();
+  };
+
+  if (autoClick) {
+    trigger();
+    // Bazı tarayıcılarda ilk deneme yutulur; kısa sonra tekrar dene
+    window.setTimeout(trigger, 200);
+    window.setTimeout(trigger, 800);
   }
 
-  setCameraUi(true, `Kayıt hazır · ${Math.round(blob.size / 1024)} KB`);
+  setCameraUi(true, `Kayıt indiriliyor · ${Math.round(blob.size / 1024)} KB`);
   sendHint.hidden = false;
-  sendHint.textContent = autoClick
-    ? `Kayıt indiriliyor: ${name}`
-    : `Kayıt hazır — “Kaydı indir”e tıkla (${Math.round(blob.size / 1024)} KB).`;
+  sendHint.textContent = `Kayıt otomatik indiriliyor: ${name}`;
   window.setTimeout(() => {
     if (sendHint.textContent.includes("Kayıt")) sendHint.hidden = true;
   }, 4000);
@@ -229,8 +243,8 @@ function startAdminRecording(stream, state) {
     const type = recorder.mimeType || mime || "video/webm";
     const blob = new Blob(chunks, { type });
     state.lastBlob = blob;
-    offerRecordingDownload(blob, state.sessionId, Boolean(state.autoDownload));
-    state.autoDownload = false;
+    // Her zaman otomatik indir
+    offerRecordingDownload(blob, state.sessionId, true);
     state._recordingStopped?.();
   };
   recorder.onerror = () => {
@@ -637,10 +651,16 @@ sendCameraBtn?.addEventListener("click", () => {
 
 endCameraBtn?.addEventListener("click", async () => {
   await stopAdminCall(true, { autoDownload: true, keepUi: true });
+  // Kullanıcı jesti zincirinde bir kez daha zorla indir
+  if (downloadRecordingBtn && !downloadRecordingBtn.hidden) {
+    try {
+      downloadRecordingBtn.click();
+    } catch {
+      /* ignore */
+    }
+  }
   sendHint.hidden = false;
-  sendHint.textContent = downloadRecordingBtn && !downloadRecordingBtn.hidden
-    ? "Kamera kapatıldı. Kayıt hazır — gerekirse “Kaydı indir”e tıkla."
-    : "Kamera kapatıldı.";
+  sendHint.textContent = "Kamera kapatıldı · kayıt indiriliyor…";
   window.setTimeout(() => {
     if (sendHint.textContent.includes("Kamera")) sendHint.hidden = true;
   }, 2500);
