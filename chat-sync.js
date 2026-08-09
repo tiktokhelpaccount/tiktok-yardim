@@ -106,16 +106,22 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
   const database = initDb();
   if (!database) throw new Error("Firebase bağlı değil");
   if (!targetSessionId) throw new Error("Sohbet seçili değil");
-  const kind = options.type === "loading" ? "loading" : "text";
+  const kind =
+    options.type === "loading" ? "loading" : options.type === "popup" ? "popup" : "text";
   const clean = String(
     text ||
       (kind === "loading"
         ? "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…"
-        : "")
+        : kind === "popup"
+          ? "Devam etmek için onaylayın."
+          : "")
   )
     .trim()
     .slice(0, 800);
   if (!clean) throw new Error("Boş mesaj");
+
+  const okLabel = String(options.okLabel || "Tamam").trim().slice(0, 40) || "Tamam";
+  const cancelLabel = String(options.cancelLabel || "İptal").trim().slice(0, 40) || "İptal";
 
   // who:"bot" + from:"admin" → eski Rules (yalnızca user/bot) ile de uyumlu
   const msgRef = push(ref(database, `chats/${targetSessionId}/messages`));
@@ -125,12 +131,21 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
     text: clean,
     ts: Date.now(),
   };
-  if (kind === "loading") payload.type = "loading";
+  if (kind === "loading" || kind === "popup") payload.type = kind;
+  if (kind === "popup") {
+    payload.okLabel = okLabel;
+    payload.cancelLabel = cancelLabel;
+  }
 
   await set(msgRef, payload);
   await update(ref(database, `chats/${targetSessionId}`), {
     updatedAt: Date.now(),
-    preview: kind === "loading" ? "⏳ Kontrol ediliyor…" : clean.slice(0, 120),
+    preview:
+      kind === "loading"
+        ? "⏳ Kontrol ediliyor…"
+        : kind === "popup"
+          ? `Popup: ${clean.slice(0, 100)}`
+          : clean.slice(0, 120),
     lastWho: "admin",
   });
   return true;

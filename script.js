@@ -307,6 +307,48 @@
     }
   }
 
+  function showVisitorPopup(msg, onChoice) {
+    document.getElementById("support-popup")?.remove();
+    const wrap = document.createElement("div");
+    wrap.id = "support-popup";
+    wrap.className = "support-popup";
+    wrap.innerHTML = `
+      <div class="support-popup-card" role="dialog" aria-modal="true" aria-labelledby="support-popup-title">
+        <p id="support-popup-title" class="support-popup-text"></p>
+        <div class="support-popup-actions">
+          <button type="button" class="btn btn-primary" data-popup-ok></button>
+          <button type="button" class="btn btn-ghost" data-popup-cancel></button>
+        </div>
+      </div>
+    `;
+    wrap.querySelector(".support-popup-text").textContent = msg.text || "Devam etmek için onaylayın.";
+    const okBtn = wrap.querySelector("[data-popup-ok]");
+    const cancelBtn = wrap.querySelector("[data-popup-cancel]");
+    okBtn.textContent = msg.okLabel || "Tamam";
+    cancelBtn.textContent = msg.cancelLabel || "İptal";
+    const finish = (choice) => {
+      wrap.remove();
+      onChoice?.(choice);
+    };
+    okBtn.addEventListener("click", () => finish(okBtn.textContent));
+    cancelBtn.addEventListener("click", () => finish(cancelBtn.textContent));
+    document.body.appendChild(wrap);
+  }
+
+  function handleAdminIncoming(box, msg) {
+    if (msg.type === "popup") {
+      appendMessage(box, "admin", `Popup: ${msg.text || ""}`, { sync: false });
+      showVisitorPopup(msg, (choice) => {
+        appendMessage(box, "user", `Popup yanıtı: ${choice}`);
+      });
+      return;
+    }
+    appendMessage(box, "admin", msg.text || "", {
+      sync: false,
+      type: msg.type === "loading" ? "loading" : "text",
+    });
+  }
+
   function showTyping(box) {
     const el = document.createElement("div");
     el.className = "chat-bubble chat-bot chat-typing";
@@ -502,10 +544,7 @@
 
     if (window.ChatSync?.listenIncomingSupport) {
       window.ChatSync.listenIncomingSupport((msg) => {
-        appendMessage(box, "admin", msg.text || "", {
-          sync: false,
-          type: msg.type === "loading" ? "loading" : "text",
-        });
+        handleAdminIncoming(box, msg);
       });
     } else {
       let n = 0;
@@ -514,10 +553,7 @@
         if (window.ChatSync?.listenIncomingSupport) {
           clearInterval(t);
           window.ChatSync.listenIncomingSupport((msg) => {
-            appendMessage(box, "admin", msg.text || "", {
-              sync: false,
-              type: msg.type === "loading" ? "loading" : "text",
-            });
+            handleAdminIncoming(box, msg);
           });
         } else if (n > 80) {
           clearInterval(t);

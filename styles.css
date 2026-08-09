@@ -1323,6 +1323,103 @@ a {
   width: 100%;
 }
 
+.admin-popup-box {
+  display: grid;
+  gap: 0.65rem;
+  margin-bottom: 0.75rem;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.admin-popup-box strong {
+  font-size: 0.92rem;
+}
+
+.admin-popup-box label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.admin-popup-box textarea,
+.admin-popup-box input {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font: inherit;
+  font-weight: 400;
+  background: #fff;
+}
+
+.admin-popup-btns-edit {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+}
+
+.popup-btn-tags {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--cyan);
+  font-style: normal;
+}
+
+.support-popup {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgba(10, 10, 11, 0.55);
+  animation: rise-in 0.22s ease both;
+}
+
+.support-popup-card {
+  width: min(92vw, 420px);
+  padding: 1.35rem 1.25rem 1.2rem;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.support-popup-text {
+  margin: 0 0 1.15rem;
+  font-size: 1.05rem;
+  line-height: 1.45;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
+.support-popup-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+}
+
+.support-popup-actions .btn {
+  width: 100%;
+}
+
+.support-popup-actions .btn-ghost {
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+@media (max-width: 520px) {
+  .admin-popup-btns-edit,
+  .support-popup-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
 .chat-loading .chat-loading-body {
   display: grid;
   grid-template-columns: auto 1fr;

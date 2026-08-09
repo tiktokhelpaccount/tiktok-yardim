@@ -51,6 +51,10 @@ const replyInput = document.getElementById("reply-input");
 const sendHint = document.getElementById("send-hint");
 const quickList = document.getElementById("quick-list");
 const sendLoadingBtn = document.getElementById("send-loading-btn");
+const sendPopupBtn = document.getElementById("send-popup-btn");
+const popupText = document.getElementById("popup-text");
+const popupOk = document.getElementById("popup-ok");
+const popupCancel = document.getElementById("popup-cancel");
 const templatesEditor = document.getElementById("templates-editor");
 const templatesForm = document.getElementById("templates-form");
 const templatesSaved = document.getElementById("templates-saved");
@@ -141,6 +145,13 @@ function appendThreadMessage(msg, announce) {
     `;
     body.querySelector("p").textContent =
       msg.text || "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…";
+  } else if (msg.type === "popup") {
+    const p = document.createElement("p");
+    p.textContent = `Popup: ${msg.text || ""}`;
+    const tags = document.createElement("em");
+    tags.className = "popup-btn-tags";
+    tags.textContent = `${msg.okLabel || "Tamam"} / ${msg.cancelLabel || "İptal"}`;
+    body.append(p, tags);
   } else {
     const p = document.createElement("p");
     p.textContent = msg.text || "";
@@ -199,10 +210,19 @@ async function sendToSelected(text, options = {}) {
   sendHint.textContent = "Gönderiliyor…";
   try {
     await window.ChatSync.sendAdminMessage(selectedId, msg, options);
-    sendHint.textContent = options.type === "loading" ? "Yükleme animasyonu gönderildi." : "Gönderildi.";
-    if (options.type !== "loading") replyInput.value = "";
+    sendHint.textContent =
+      options.type === "loading"
+        ? "Yükleme animasyonu gönderildi."
+        : options.type === "popup"
+          ? "Popup gönderildi."
+          : "Gönderildi.";
+    if (options.type !== "loading" && options.type !== "popup") replyInput.value = "";
     window.setTimeout(() => {
-      if (sendHint.textContent.includes("Gönderildi") || sendHint.textContent.includes("animasyon")) {
+      if (
+        sendHint.textContent.includes("Gönderildi") ||
+        sendHint.textContent.includes("animasyon") ||
+        sendHint.textContent.includes("Popup")
+      ) {
         sendHint.hidden = true;
       }
     }, 1200);
@@ -270,6 +290,14 @@ sendLoadingBtn?.addEventListener("click", () => {
     "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…",
     { type: "loading" }
   );
+});
+
+sendPopupBtn?.addEventListener("click", () => {
+  sendToSelected(popupText?.value || "Devam etmek için onaylayın.", {
+    type: "popup",
+    okLabel: popupOk?.value || "Tamam",
+    cancelLabel: popupCancel?.value || "İptal",
+  });
 });
 
 templatesForm?.addEventListener("submit", (e) => {
