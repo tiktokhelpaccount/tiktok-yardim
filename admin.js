@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=50";
+import "./chat-sync.js?v=51";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -436,16 +436,6 @@ async function refreshRecentFeed(rows) {
   } catch (err) {
     console.warn("recent feed", err);
   }
-}
-
-function fireHighAlert({ kicker, title, body, tag }) {
-  if (!alertsArmed) alertsArmed = true;
-  bindAudioUnlockGestures();
-  showAdminAlert({ kicker, title, body });
-  startAlertSoundLoop();
-  flashDocumentTitle(title);
-  pushDesktopNotification(title, body, tag);
-  if (liveBadge) liveBadge.classList.add("is-ping");
 }
 
 function bindSessionMessages(sessionId) {
