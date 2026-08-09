@@ -1070,105 +1070,92 @@ a {
   color: var(--ink-soft);
 }
 
-.admin-body.is-alert-flash {
-  animation: admin-alert-shake 0.55s ease;
+.admin-live.is-ping {
+  color: #d9483b;
 }
 
-.admin-body.is-alert-flash .admin-top {
-  box-shadow: 0 0 0 4px rgba(255, 59, 48, 0.85), 0 12px 40px rgba(255, 59, 48, 0.35);
-}
-
-@keyframes admin-alert-shake {
-  0%,
-  100% {
-    transform: translateX(0);
-  }
-  20% {
-    transform: translateX(-6px);
-  }
-  40% {
-    transform: translateX(6px);
-  }
-  60% {
-    transform: translateX(-4px);
-  }
-  80% {
-    transform: translateX(4px);
-  }
-}
-
-.admin-alert-overlay {
+.admin-toast {
   position: fixed;
-  inset: 0;
-  z-index: 2147483646;
-  display: grid;
-  place-items: center;
-  padding: 1.25rem;
-  background: rgba(120, 0, 0, 0.55);
-  backdrop-filter: blur(2px);
-  animation: admin-alert-pulse 0.9s ease infinite alternate;
+  top: 4.75rem;
+  right: 1rem;
+  z-index: 2147483000;
+  width: min(340px, calc(100vw - 1.5rem));
+  pointer-events: none;
 }
 
-.admin-alert-overlay[hidden] {
+.admin-toast[hidden] {
   display: none !important;
 }
 
-@keyframes admin-alert-pulse {
+.admin-toast-inner {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  padding: 0.85rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid rgba(217, 72, 59, 0.35);
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(10, 10, 11, 0.16);
+  pointer-events: auto;
+  animation: admin-toast-in 0.28s ease both;
+}
+
+@keyframes admin-toast-in {
   from {
-    background: rgba(140, 0, 0, 0.5);
+    opacity: 0;
+    transform: translateY(-8px);
   }
   to {
-    background: rgba(220, 0, 0, 0.72);
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
-.admin-alert-card {
-  width: min(440px, 100%);
-  padding: 1.35rem 1.4rem 1.15rem;
-  border-radius: 18px;
-  border: 2px solid #ff3b30;
-  background: #fff8f7;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
-  text-align: center;
+.admin-toast-text {
+  flex: 1;
+  min-width: 0;
 }
 
-.admin-alert-kicker {
-  margin: 0 0 0.35rem;
-  font-size: 0.78rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  color: #ff3b30;
+.admin-toast-kicker {
+  margin: 0 0 0.15rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #d9483b;
 }
 
-.admin-alert-card strong {
+.admin-toast-text strong {
   display: block;
-  font-size: 1.45rem;
-  line-height: 1.15;
-  margin-bottom: 0.45rem;
+  font-size: 0.98rem;
+  line-height: 1.25;
+  margin-bottom: 0.2rem;
 }
 
-.admin-alert-card p#admin-alert-body {
-  margin: 0 0 1rem;
+.admin-toast-text p#admin-alert-body {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.4;
   color: var(--muted);
-  font-size: 0.98rem;
-  line-height: 1.45;
   word-break: break-word;
 }
 
-.admin-live.is-ping {
-  color: #ff3b30;
-  animation: admin-live-ping 0.45s ease infinite alternate;
+.admin-toast-x {
+  flex: none;
+  width: 1.8rem;
+  height: 1.8rem;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
 }
 
-@keyframes admin-live-ping {
-  from {
-    transform: scale(1);
-    text-shadow: 0 0 0 transparent;
-  }
-  to {
-    transform: scale(1.08);
-    text-shadow: 0 0 14px rgba(255, 59, 48, 0.85);
-  }
+.admin-toast-x:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--ink);
 }
 
 .admin-main {
