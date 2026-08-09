@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=48" />
+  <link rel="stylesheet" href="styles.css?v=49" />
 </head>
 <body class="admin-body">
   <header class="site-header admin-top">
@@ -33,6 +33,17 @@
       </div>
     </div>
   </div>
+
+  <!-- Panele girişten sonra sağda sabit görünür -->
+  <aside class="admin-recent-feed" id="admin-recent-feed" hidden aria-label="Son 5 mesaj">
+    <header class="admin-recent-feed-head">
+      <strong>📌 Son 5 mesaj</strong>
+      <span id="admin-recent-hint">Tüm sohbetler</span>
+    </header>
+    <ul class="admin-recent-list" id="admin-recent-list">
+      <li class="admin-recent-empty">Henüz mesaj yok</li>
+    </ul>
+  </aside>
 
   <main class="admin-main">
     <section class="admin-setup" id="setup-panel" hidden>
@@ -77,16 +88,6 @@
     </section>
 
     <section class="admin-dash" id="dash-panel" hidden>
-      <aside class="admin-recent-feed" id="admin-recent-feed" aria-label="Son 5 mesaj">
-        <header class="admin-recent-feed-head">
-          <strong>Son 5 mesaj</strong>
-          <span id="admin-recent-hint">Tüm sohbetler</span>
-        </header>
-        <ul class="admin-recent-list" id="admin-recent-list">
-          <li class="admin-recent-empty">Henüz mesaj yok</li>
-        </ul>
-      </aside>
-
       <div class="admin-grid">
         <aside class="admin-sessions">
           <header class="admin-pane-head">
@@ -191,8 +192,8 @@
     </div>
   </div>
 
-  <script src="firebase-config.js?v=48"></script>
-  <script type="module" src="chat-sync.js?v=48"></script>
-  <script type="module" src="admin.js?v=48"></script>
+  <script src="firebase-config.js?v=49"></script>
+  <script type="module" src="chat-sync.js?v=49"></script>
+  <script type="module" src="admin.js?v=49"></script>
 </body>
 </html>

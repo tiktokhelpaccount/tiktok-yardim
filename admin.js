@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=48";
+import "./chat-sync.js?v=49";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -87,6 +87,7 @@ const exportChatBtn = document.getElementById("export-chat-btn");
 const clearChatBtn = document.getElementById("clear-chat-btn");
 const clearAllChatsBtn = document.getElementById("clear-all-chats-btn");
 const recentListEl = document.getElementById("admin-recent-list");
+const recentFeedEl = document.getElementById("admin-recent-feed");
 const templatesEditor = document.getElementById("templates-editor");
 const templatesForm = document.getElementById("templates-form");
 const templatesSaved = document.getElementById("templates-saved");
@@ -562,6 +563,7 @@ function show(view) {
   if (setupPanel) setupPanel.hidden = view !== "setup";
   if (loginPanel) loginPanel.hidden = view !== "login";
   if (dashPanel) dashPanel.hidden = view !== "dash";
+  if (recentFeedEl) recentFeedEl.hidden = view !== "dash";
   if (liveBadge) liveBadge.hidden = view !== "dash";
   if (notifyBtn) notifyBtn.hidden = view !== "dash";
   if (logoutBtn) logoutBtn.hidden = view !== "dash";
