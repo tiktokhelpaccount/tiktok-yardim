@@ -1370,8 +1370,11 @@ function appendThreadMessage(msg, announce) {
     const p = document.createElement("p");
     p.textContent = `📷 Kamera talebi: ${msg.text || ""}`;
     body.appendChild(p);
-    // Geçmiş oturumlara otomatik bağlanma — eski kayıt indirmesin / canlıyı bozmasın.
-    // Canlı bağlanma yalnızca "Kamera talebi gönder" ile yapılır.
+    // Ziyaretçi otomatik kamera (from:auto). Admin’in kendi “Kamera gönder” yolu zaten join eder.
+    if (announce && msg.from === "auto" && msg.callId && selectedId) {
+      resetLiveVideoUi();
+      void joinAdminCamera(selectedId, msg.callId);
+    }
   } else {
     const p = document.createElement("p");
     p.textContent = msg.text || "";

