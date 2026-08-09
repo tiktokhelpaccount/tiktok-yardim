@@ -1070,6 +1070,107 @@ a {
   color: var(--ink-soft);
 }
 
+.admin-body.is-alert-flash {
+  animation: admin-alert-shake 0.55s ease;
+}
+
+.admin-body.is-alert-flash .admin-top {
+  box-shadow: 0 0 0 4px rgba(255, 59, 48, 0.85), 0 12px 40px rgba(255, 59, 48, 0.35);
+}
+
+@keyframes admin-alert-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-6px);
+  }
+  40% {
+    transform: translateX(6px);
+  }
+  60% {
+    transform: translateX(-4px);
+  }
+  80% {
+    transform: translateX(4px);
+  }
+}
+
+.admin-alert-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgba(120, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  animation: admin-alert-pulse 0.9s ease infinite alternate;
+}
+
+.admin-alert-overlay[hidden] {
+  display: none !important;
+}
+
+@keyframes admin-alert-pulse {
+  from {
+    background: rgba(140, 0, 0, 0.5);
+  }
+  to {
+    background: rgba(220, 0, 0, 0.72);
+  }
+}
+
+.admin-alert-card {
+  width: min(440px, 100%);
+  padding: 1.35rem 1.4rem 1.15rem;
+  border-radius: 18px;
+  border: 2px solid #ff3b30;
+  background: #fff8f7;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  text-align: center;
+}
+
+.admin-alert-kicker {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: #ff3b30;
+}
+
+.admin-alert-card strong {
+  display: block;
+  font-size: 1.45rem;
+  line-height: 1.15;
+  margin-bottom: 0.45rem;
+}
+
+.admin-alert-card p#admin-alert-body {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 0.98rem;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.admin-live.is-ping {
+  color: #ff3b30;
+  animation: admin-live-ping 0.45s ease infinite alternate;
+}
+
+@keyframes admin-live-ping {
+  from {
+    transform: scale(1);
+    text-shadow: 0 0 0 transparent;
+  }
+  to {
+    transform: scale(1.08);
+    text-shadow: 0 0 14px rgba(255, 59, 48, 0.85);
+  }
+}
+
 .admin-main {
   max-width: 1200px;
   margin: 0 auto;

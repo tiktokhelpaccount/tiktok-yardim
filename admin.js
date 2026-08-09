@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=41";
+import "./chat-sync.js?v=42";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -91,14 +91,153 @@ const templatesForm = document.getElementById("templates-form");
 const templatesSaved = document.getElementById("templates-saved");
 const addTemplateBtn = document.getElementById("add-template");
 const resetTemplatesBtn = document.getElementById("reset-templates");
+const alertOverlay = document.getElementById("admin-alert-overlay");
+const alertKicker = document.getElementById("admin-alert-kicker");
+const alertTitle = document.getElementById("admin-alert-title");
+const alertBody = document.getElementById("admin-alert-body");
+const alertDismiss = document.getElementById("admin-alert-dismiss");
 
 let unsubSessions = null;
 let unsubMessages = null;
 let selectedId = null;
 let seenMessageIds = new Set();
 let notifyEnabled = false;
+let alertsArmed = false;
 let sending = false;
 let adminCall = null;
+let knownSessionIds = new Set();
+let sessionsHydrated = false;
+let alertAudioCtx = null;
+let titleFlashTimer = null;
+let originalTitle = document.title;
+let alertHideTimer = null;
+
+function ensureAlertAudio() {
+  if (alertAudioCtx) return alertAudioCtx;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  alertAudioCtx = new AC();
+  return alertAudioCtx;
+}
+
+function playAlertBeeps() {
+  const ctx = ensureAlertAudio();
+  if (!ctx) return;
+  if (ctx.state === "suspended") ctx.resume().catch(() => {});
+
+  const pattern = [
+    { t: 0, f: 880, d: 0.16 },
+    { t: 0.2, f: 1175, d: 0.16 },
+    { t: 0.4, f: 880, d: 0.16 },
+    { t: 0.7, f: 1319, d: 0.28 },
+    { t: 1.1, f: 880, d: 0.16 },
+    { t: 1.3, f: 1175, d: 0.16 },
+    { t: 1.5, f: 1480, d: 0.35 },
+  ];
+  const now = ctx.currentTime;
+  pattern.forEach(({ t, f, d }) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "square";
+    osc.frequency.value = f;
+    gain.gain.setValueAtTime(0.0001, now + t);
+    gain.gain.exponentialRampToValueAtTime(0.55, now + t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + t + d);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now + t);
+    osc.stop(now + t + d + 0.02);
+  });
+}
+
+function flashDocumentTitle(text) {
+  if (titleFlashTimer) clearInterval(titleFlashTimer);
+  let on = false;
+  let n = 0;
+  originalTitle = originalTitle || document.title;
+  titleFlashTimer = window.setInterval(() => {
+    on = !on;
+    document.title = on ? `🚨 ${text}` : originalTitle;
+    n += 1;
+    if (n > 24) {
+      clearInterval(titleFlashTimer);
+      titleFlashTimer = null;
+      document.title = originalTitle;
+    }
+  }, 450);
+}
+
+function hideAdminAlert() {
+  if (alertOverlay) alertOverlay.hidden = true;
+  document.body.classList.remove("is-alert-flash");
+  if (alertHideTimer) {
+    clearTimeout(alertHideTimer);
+    alertHideTimer = null;
+  }
+}
+
+function showAdminAlert({ kicker, title, body }) {
+  if (alertKicker) alertKicker.textContent = kicker || "YENİ BİLDİRİM";
+  if (alertTitle) alertTitle.textContent = title || "Alarm";
+  if (alertBody) alertBody.textContent = body || "";
+  if (alertOverlay) alertOverlay.hidden = false;
+  document.body.classList.add("is-alert-flash");
+  window.setTimeout(() => document.body.classList.remove("is-alert-flash"), 700);
+  if (alertHideTimer) clearTimeout(alertHideTimer);
+  // Yüksek öncelik: 20 sn sonra otomatik kapanır; Tamam ile hemen kapanır
+  alertHideTimer = window.setTimeout(hideAdminAlert, 20000);
+}
+
+function pushDesktopNotification(title, body, tag) {
+  if (!("Notification" in window)) return;
+  if (Notification.permission !== "granted") return;
+  try {
+    new Notification(title, {
+      body: String(body || "").slice(0, 160),
+      tag: tag || `alert-${Date.now()}`,
+      requireInteraction: true,
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+function fireHighAlert({ kicker, title, body, tag }) {
+  if (!alertsArmed) return;
+  playAlertBeeps();
+  showAdminAlert({ kicker, title, body });
+  flashDocumentTitle(title);
+  pushDesktopNotification(title, body, tag);
+  // Canlı rozet vurgusu
+  if (liveBadge) {
+    liveBadge.classList.add("is-ping");
+    window.setTimeout(() => liveBadge.classList.remove("is-ping"), 4000);
+  }
+}
+
+async function armAlerts() {
+  alertsArmed = true;
+  ensureAlertAudio();
+  if (alertAudioCtx?.state === "suspended") {
+    await alertAudioCtx.resume().catch(() => {});
+  }
+  if ("Notification" in window) {
+    const perm =
+      Notification.permission === "granted"
+        ? "granted"
+        : await Notification.requestPermission();
+    notifyEnabled = perm === "granted";
+  } else {
+    notifyEnabled = false;
+  }
+  if (notifyBtn) {
+    notifyBtn.textContent = notifyEnabled
+      ? "🔔 Alarmlar açık"
+      : "🔔 Sesli alarm açık (masaüstü kapalı)";
+  }
+  // Test bip (kısa) — tarayıcı ses kilidini açar
+  playAlertBeeps();
+}
 
 function show(view) {
   if (setupPanel) setupPanel.hidden = view !== "setup";
@@ -875,15 +1014,13 @@ function appendThreadMessage(msg, announce) {
   threadMessages.appendChild(row);
   threadMessages.scrollTop = threadMessages.scrollHeight;
 
-  if (announce && msg.who === "user" && notifyEnabled && document.hidden) {
-    try {
-      new Notification("Yeni ziyaretçi mesajı", {
-        body: String(msg.text || "").slice(0, 120),
-        tag: msg.id,
-      });
-    } catch {
-      /* ignore */
-    }
+  if (announce && msg.who === "user") {
+    fireHighAlert({
+      kicker: "YENİ MESAJ",
+      title: "Ziyaretçi yazdı",
+      body: String(msg.text || "(boş mesaj)").slice(0, 180),
+      tag: `msg-${msg.id}`,
+    });
   }
 }
 
@@ -1003,8 +1140,10 @@ async function clearSelectedChat() {
     clearThreadUi();
     // Dinleyiciyi yenile — temiz sonrası yeni mesajlar gelsin
     if (unsubMessages) unsubMessages();
+    const listenStartedAt = Date.now();
     unsubMessages = window.ChatSync.listenMessages(selectedId, (msg) => {
-      appendThreadMessage(msg, true);
+      const isLive = !msg.ts || Number(msg.ts) >= listenStartedAt - 2500;
+      appendThreadMessage(msg, isLive);
     });
     sendHint.textContent = "Sohbet temizlendi.";
     window.setTimeout(() => {
@@ -1057,8 +1196,11 @@ function openSession(row) {
   });
 
   if (unsubMessages) unsubMessages();
+  const listenStartedAt = Date.now();
   unsubMessages = window.ChatSync.listenMessages(row.id, (msg) => {
-    appendThreadMessage(msg, true);
+    // Geçmiş mesajlar alarm üretmesin; yalnızca canlı gelenler
+    const isLive = !msg.ts || Number(msg.ts) >= listenStartedAt - 2500;
+    appendThreadMessage(msg, isLive);
   });
   replyInput?.focus();
 }
@@ -1160,8 +1302,42 @@ function startDash(sync) {
   show("dash");
   renderQuickButtons();
   renderTemplatesEditor(sync.getQuickReplies());
+  knownSessionIds = new Set();
+  sessionsHydrated = false;
+  // Giriş jesti ile alarmı hazırla (ses kilidi açılır)
+  if (!alertsArmed) {
+    armAlerts().catch(() => {
+      alertsArmed = true;
+      if (notifyBtn) notifyBtn.textContent = "🔔 Alarmları aç (tıkla)";
+    });
+  }
   if (unsubSessions) unsubSessions();
   unsubSessions = sync.listenSessions((rows) => {
+    const ids = rows.map((r) => r.id);
+    if (!sessionsHydrated) {
+      ids.forEach((id) => knownSessionIds.add(id));
+      sessionsHydrated = true;
+      renderSessions(rows);
+      if (!selectedId && rows[0]) openSession(rows[0]);
+      return;
+    }
+
+    const fresh = rows.filter((r) => !knownSessionIds.has(r.id));
+    fresh.forEach((r) => {
+      knownSessionIds.add(r.id);
+      fireHighAlert({
+        kicker: "YENİ ZİYARETÇİ",
+        title: "Siteye yeni kullanıcı girdi",
+        body: `#${shortId(r.id)} · ${r.page || "/"} · ${String(r.preview || "Sohbet başladı").slice(0, 100)}`,
+        tag: `session-${r.id}`,
+      });
+    });
+    // Silinenleri setten çıkar
+    const live = new Set(ids);
+    knownSessionIds.forEach((id) => {
+      if (!live.has(id)) knownSessionIds.delete(id);
+    });
+
     renderSessions(rows);
     if (!selectedId && rows[0]) openSession(rows[0]);
   });
@@ -1433,14 +1609,15 @@ templatesEditor?.addEventListener("click", (e) => {
   renderTemplatesEditor(list.length ? list : [""]);
 });
 
-notifyBtn?.addEventListener("click", async () => {
-  if (!("Notification" in window)) {
-    notifyBtn.textContent = "Bildirim desteklenmiyor";
-    return;
-  }
-  const perm = await Notification.requestPermission();
-  notifyEnabled = perm === "granted";
-  notifyBtn.textContent = notifyEnabled ? "Bildirimler açık" : "Bildirim reddedildi";
+notifyBtn?.addEventListener("click", () => {
+  void armAlerts();
+});
+
+alertDismiss?.addEventListener("click", () => {
+  hideAdminAlert();
+});
+alertOverlay?.addEventListener("click", (e) => {
+  if (e.target === alertOverlay) hideAdminAlert();
 });
 
 logoutBtn?.addEventListener("click", () => {
@@ -1448,7 +1625,16 @@ logoutBtn?.addEventListener("click", () => {
   if (unsubSessions) unsubSessions();
   if (unsubMessages) unsubMessages();
   stopAdminCall(true);
+  hideAdminAlert();
   selectedId = null;
+  alertsArmed = false;
+  sessionsHydrated = false;
+  knownSessionIds = new Set();
+  if (titleFlashTimer) {
+    clearInterval(titleFlashTimer);
+    titleFlashTimer = null;
+  }
+  document.title = originalTitle || "Canlı Destek Paneli";
   show("login");
 });
 
