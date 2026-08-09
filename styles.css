@@ -289,6 +289,16 @@ a {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.btn-danger {
+  background: var(--rose);
+  border-color: var(--rose);
+  color: #fff;
+}
+
+.btn-danger:hover {
+  filter: brightness(1.05);
+}
+
 .page .btn-ghost,
 .real-help .btn-ghost,
 .appeal-result .btn-ghost {
@@ -1473,16 +1483,20 @@ a {
   display: none !important;
 }
 
-.admin-camera-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.5rem;
+.admin-camera-actions .btn-ghost,
+.admin-camera-modal .btn-ghost,
+.admin-actions-row .btn-ghost,
+.admin-body .btn-ghost {
+  border-color: var(--line);
+  color: var(--ink);
+  background: #fff;
 }
 
-.admin-camera-actions .btn {
-  width: 100%;
-  text-align: center;
-  text-decoration: none;
+.admin-camera-actions .btn-ghost:hover,
+.admin-camera-modal .btn-ghost:hover,
+.admin-actions-row .btn-ghost:hover,
+.admin-body .btn-ghost:hover {
+  background: rgba(10, 10, 11, 0.04);
 }
 
 @media (max-width: 520px) {

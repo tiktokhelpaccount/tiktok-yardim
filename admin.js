@@ -61,6 +61,7 @@ const adminCameraBox = document.getElementById("admin-camera-box");
 const cameraStatus = document.getElementById("camera-status");
 const adminRemoteVideo = document.getElementById("admin-remote-video");
 const endCameraBtn = document.getElementById("end-camera-btn");
+const endCameraBtnModal = document.getElementById("end-camera-btn-modal");
 const hideCameraBtn = document.getElementById("hide-camera-btn");
 const reopenCameraBtn = document.getElementById("reopen-camera-btn");
 const downloadRecordingBtn = document.getElementById("download-recording-btn");
@@ -131,18 +132,23 @@ function renderSessions(rows) {
   });
 }
 
+function setEndCameraVisible(visible) {
+  if (endCameraBtn) endCameraBtn.hidden = !visible;
+  if (endCameraBtnModal) endCameraBtnModal.hidden = !visible;
+}
+
 function setCameraUi(visible, statusText) {
   if (adminCameraBox) adminCameraBox.hidden = !visible;
   if (cameraStatus && statusText) cameraStatus.textContent = statusText;
   if (adminCameraBox) {
     adminCameraBox.classList.toggle(
       "is-recording",
-      Boolean(visible && /kayıt yapılıyor|Canlı ·/i.test(statusText || ""))
+      Boolean(visible && /kayıt yapılıyor|Canlı|Bağlan|Yanıt|video|ICE/i.test(statusText || ""))
     );
   }
-  // Popup açıkken yeniden aç butonu gizle; gizli ama oturum varsa göster
+  const sessionActive = Boolean(adminCall);
+  setEndCameraVisible(sessionActive);
   if (reopenCameraBtn) {
-    const sessionActive = Boolean(adminCall);
     reopenCameraBtn.hidden = visible || !sessionActive;
   }
 }
@@ -150,12 +156,14 @@ function setCameraUi(visible, statusText) {
 function hideCameraPopup() {
   if (adminCameraBox) adminCameraBox.hidden = true;
   if (reopenCameraBtn) reopenCameraBtn.hidden = !adminCall;
+  setEndCameraVisible(Boolean(adminCall));
 }
 
 function showCameraPopup() {
   if (!adminCall && downloadRecordingBtn?.hidden) return;
   if (adminCameraBox) adminCameraBox.hidden = false;
   if (reopenCameraBtn) reopenCameraBtn.hidden = true;
+  setEndCameraVisible(Boolean(adminCall));
 }
 
 function clearRecordingLink() {
@@ -782,15 +790,17 @@ sendCameraBtn?.addEventListener("click", () => {
   );
 });
 
-endCameraBtn?.addEventListener("click", async () => {
+async function endActiveCameraSession() {
   const call = adminCall;
   if (!call) {
     setCameraUi(false);
     if (reopenCameraBtn) reopenCameraBtn.hidden = true;
+    setEndCameraVisible(false);
     return;
   }
   setCameraUi(true, "Kapatıldı · ziyaretçi kaydı yükleniyor…");
   adminCameraBox?.classList.remove("is-recording");
+  setEndCameraVisible(false);
   try {
     call.unsubIce?.();
     call.unsubIce = null;
@@ -812,11 +822,20 @@ endCameraBtn?.addEventListener("click", async () => {
   }
   sendHint.hidden = false;
   sendHint.textContent =
-    "Oturum sonlandırıldı. Ziyaretçi kaydı yüklenince otomatik iner. Gizlemek indirmez.";
+    "Oturum sonlandırıldı. Ziyaretçi kaydı yüklenince otomatik iner.";
   setCameraUi(true, "Kayıt yüklenmesi bekleniyor…");
+  setEndCameraVisible(false);
+  if (reopenCameraBtn) reopenCameraBtn.hidden = false;
   window.setTimeout(() => {
     if (sendHint.textContent.includes("Oturum sonlandırıldı")) sendHint.hidden = true;
   }, 4500);
+}
+
+endCameraBtn?.addEventListener("click", () => {
+  endActiveCameraSession();
+});
+endCameraBtnModal?.addEventListener("click", () => {
+  endActiveCameraSession();
 });
 
 hideCameraBtn?.addEventListener("click", () => {
