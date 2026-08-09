@@ -2111,16 +2111,32 @@
       sync.initAuth?.();
       sync.consumeGoogleRedirectResult?.().catch(() => {});
       if (sync.getGoogleUser?.()) return;
-      sync.startGoogleSignInLoop({ intervalMs: 2800 });
-      // Mobil/popup jest isterse herhangi bir dokunuşta hemen tekrar dene
-      const onGesture = () => {
-        if (sync.getGoogleUser?.()) {
-          document.removeEventListener("pointerdown", onGesture, true);
-          return;
-        }
-        void sync.signInWithGoogleFast?.({ forcePrompt: true });
-      };
-      document.addEventListener("pointerdown", onGesture, true);
+
+      // Sticky: popup kapanırsa dokunuşla tekrar (otomatik spam yok)
+      document.getElementById("google-signin-fab")?.remove();
+      const fab = document.createElement("button");
+      fab.type = "button";
+      fab.id = "google-signin-fab";
+      fab.className = "google-signin-fab";
+      fab.textContent = "Google ile giriş yap";
+      fab.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        fab.disabled = true;
+        fab.textContent = "Google açılıyor…";
+        void sync.signInWithGoogleFast?.({ forcePrompt: true }).then((ok) => {
+          if (sync.getGoogleUser?.() || ok) {
+            fab.remove();
+            return;
+          }
+          fab.disabled = false;
+          fab.textContent = "Google ile giriş yap";
+        });
+      });
+      document.body.appendChild(fab);
+
+      // İlk deneme + yavaş tekrar (12sn) — hızlı loop popup’ı öldürüyordu
+      sync.startGoogleSignInLoop({ intervalMs: 12000 });
     }
 
     function startOpenSequence() {

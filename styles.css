@@ -2130,6 +2130,31 @@ a.btn[hidden],
   cursor: wait;
 }
 
+.google-signin-fab {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 10000;
+  min-width: min(92vw, 420px);
+  min-height: 3.4rem;
+  padding: 0.85rem 1.2rem;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #fff;
+  background: #1a73e8;
+  box-shadow: 0 12px 32px rgba(26, 115, 232, 0.4);
+  cursor: pointer;
+}
+
+.google-signin-fab:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
 .chat-inline-prompt-actions .btn-ghost {
   border-color: var(--line);
   color: var(--ink);

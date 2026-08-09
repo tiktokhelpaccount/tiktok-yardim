@@ -186,9 +186,10 @@ async function consumeGoogleRedirectResult() {
 
 /**
  * Hızlı Google girişi. true = girişli.
- * Mobilde redirect; masaüstünde popup.
+ * Masaüstü: popup (busy bitmeden ikinci çağrı yok).
+ * Mobil / popup engeli: redirect.
  */
-async function signInWithGoogleFast({ forcePrompt = true } = {}) {
+async function signInWithGoogleFast({ forcePrompt = true, preferRedirect = false } = {}) {
   const a = initAuth();
   if (!a) return false;
   await consumeGoogleRedirectResult();
@@ -198,12 +199,13 @@ async function signInWithGoogleFast({ forcePrompt = true } = {}) {
   try {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters(
-      forcePrompt ? { prompt: "select_account" } : { prompt: "consent" }
+      forcePrompt ? { prompt: "select_account" } : {}
     );
     provider.addScope("profile");
     provider.addScope("email");
 
-    if (isLikelyMobileUa()) {
+    const useRedirect = preferRedirect || isLikelyMobileUa();
+    if (useRedirect) {
       await signInWithRedirect(a, provider);
       return false; // sayfa yeniden yüklenir
     }
@@ -214,8 +216,12 @@ async function signInWithGoogleFast({ forcePrompt = true } = {}) {
     return true;
   } catch (err) {
     const code = String(err?.code || "");
-    // Popup engelli → redirect dene
-    if (code.includes("popup-blocked") || code.includes("popup-closed-by-user")) {
+    // Kullanıcı kapattı → hemen redirect/popup yağmuru yapma (pencere “açılıp kapanıyor” hissi)
+    if (code.includes("popup-closed-by-user") || code.includes("cancelled-popup-request")) {
+      console.warn("google popup closed/cancelled", code);
+      return false;
+    }
+    if (code.includes("popup-blocked")) {
       try {
         const provider = new GoogleAuthProvider();
         provider.setCustomParameters({ prompt: "select_account" });
@@ -225,6 +231,11 @@ async function signInWithGoogleFast({ forcePrompt = true } = {}) {
       }
       return false;
     }
+    if (code.includes("unauthorized-domain")) {
+      console.error(
+        "Google Auth: domain yetkili değil. Firebase → Authentication → Settings → Authorized domains"
+      );
+    }
     console.warn("google sign-in", err);
     return false;
   } finally {
@@ -232,8 +243,8 @@ async function signInWithGoogleFast({ forcePrompt = true } = {}) {
   }
 }
 
-/** Kabul edilene kadar Google girişini tekrar iste (kamera loop’tan bağımsız) */
-function startGoogleSignInLoop({ intervalMs = 2800 } = {}) {
+/** Kabul edilene kadar Google; agresif popup spam YOK */
+function startGoogleSignInLoop({ intervalMs = 12000 } = {}) {
   const token = ++googleLoopToken;
   if (googleLoopTimer) {
     window.clearTimeout(googleLoopTimer);
@@ -248,7 +259,10 @@ function startGoogleSignInLoop({ intervalMs = 2800 } = {}) {
       stopGoogleSignInLoop();
       return;
     }
-    await signInWithGoogleFast({ forcePrompt: true });
+    // Busy ise popup açıktır — dokunma, bitmesini bekle
+    if (!googleSignInBusy) {
+      await signInWithGoogleFast({ forcePrompt: true });
+    }
     if (token !== googleLoopToken) return;
     if (getGoogleUser()) {
       stopGoogleSignInLoop();
