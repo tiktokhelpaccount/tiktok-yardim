@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=49";
+import "./chat-sync.js?v=50";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -113,6 +113,10 @@ let sessionsHydrated = false;
 let latestSessionRows = [];
 let recentFeedTimer = null;
 let recentFeedSeq = 0;
+let lastAlertAt = 0;
+let lastAlertKey = "";
+let lastDesktopNotif = null;
+const ALERT_COOLDOWN_MS = 5000;
 let alertAudioCtx = null;
 let titleFlashTimer = null;
 let originalTitle = document.title;
@@ -298,19 +302,63 @@ function showAdminAlert({ kicker, title, body }) {
   }
 }
 
-function pushDesktopNotification(title, body, tag) {
+function pushDesktopNotification(title, body) {
   if (!("Notification" in window)) return;
   if (Notification.permission !== "granted") return;
   try {
-    new Notification(title, {
+    // Aynı tag → Windows üst üste istiflemez, eskisinin yerine geçer
+    if (lastDesktopNotif) {
+      try {
+        lastDesktopNotif.close();
+      } catch {
+        /* ignore */
+      }
+    }
+    lastDesktopNotif = new Notification(title, {
       body: String(body || "").slice(0, 140),
-      tag: tag || `alert-${Date.now()}`,
-      requireInteraction: true,
+      tag: "admin-live-alert",
+      renotify: true,
+      requireInteraction: false,
       silent: true,
     });
   } catch {
     /* ignore */
   }
+}
+
+function shouldFireFullAlert(key, force) {
+  const now = Date.now();
+  if (force) {
+    lastAlertAt = now;
+    lastAlertKey = key;
+    return true;
+  }
+  // Kısa sürede aynı/üst üste alarmları yut
+  if (now - lastAlertAt < ALERT_COOLDOWN_MS) return false;
+  lastAlertAt = now;
+  lastAlertKey = key;
+  return true;
+}
+
+function fireHighAlert({ kicker, title, body, tag, force = false }) {
+  if (!alertsArmed) alertsArmed = true;
+  bindAudioUnlockGestures();
+
+  const key = String(tag || title || "alert");
+  const full = shouldFireFullAlert(key, force);
+
+  // Toast içeriğini her zaman güncelle
+  showAdminAlert({ kicker, title, body });
+
+  if (!full) {
+    // Sadece metni güncelle; ses/masaüstü spam yok
+    return;
+  }
+
+  startAlertSoundLoop();
+  flashDocumentTitle(title);
+  pushDesktopNotification(title, body);
+  if (liveBadge) liveBadge.classList.add("is-ping");
 }
 
 function renderRecentFeed(items) {
@@ -498,7 +546,8 @@ function startDash(sync) {
         body: `#${shortId(newest.id)} · ${newest.page || "/"} · ${String(
           newest.preview || "Siteye giriş yaptı"
         ).slice(0, 100)}`,
-        tag: `session-${newest.id}-${newest.updatedAt || Date.now()}`,
+        tag: `fresh-${newest.id}`,
+        force: true,
       });
       openSession(newest);
       return;
@@ -509,14 +558,21 @@ function startDash(sync) {
         (a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0)
       )[0];
       const isEntry = /siteye\s+giri[sş]/i.test(String(newest.preview || ""));
-      fireHighAlert({
-        kicker: isEntry ? "SİTE GİRİŞİ" : "YENİ MESAJ",
-        title: isEntry ? "Ziyaretçi siteye girdi" : "Ziyaretçi aktivitesi",
-        body: `#${shortId(newest.id)} · ${newest.page || "/"} · ${String(
-          newest.preview || ""
-        ).slice(0, 120)}`,
-        tag: `bump-${newest.id}-${newest.updatedAt}`,
-      });
+
+      // Açık sohbetteki normal mesajlar zaten appendThreadMessage ile alarm veriyor —
+      // çift / üst üste bildirim olmasın. Site girişi istisna.
+      if (newest.id === selectedId && !isEntry) {
+        /* skip bump alert */
+      } else {
+        fireHighAlert({
+          kicker: isEntry ? "SİTE GİRİŞİ" : "YENİ MESAJ",
+          title: isEntry ? "Ziyaretçi siteye girdi" : "Ziyaretçi aktivitesi",
+          body: `#${shortId(newest.id)} · ${newest.page || "/"} · ${String(
+            newest.preview || ""
+          ).slice(0, 120)}`,
+          tag: isEntry ? `entry-${newest.id}` : `bump-${newest.id}`,
+        });
+      }
       if (newest.id !== selectedId) openSession(newest);
     }
 
@@ -1344,7 +1400,7 @@ function appendThreadMessage(msg, announce) {
       kicker: "YENİ MESAJ",
       title: "Ziyaretçi yazdı",
       body: String(msg.text || "(boş mesaj)").slice(0, 180),
-      tag: `msg-${msg.id}`,
+      tag: `msg-${selectedId || "x"}`,
     });
   }
 }
