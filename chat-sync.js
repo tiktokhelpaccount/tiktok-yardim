@@ -92,7 +92,11 @@ async function pushMessage(who, text) {
 }
 
 function checkAdminPassword(password) {
-  return String(password || "") === String(cfg.adminPassword || "");
+  const expected = String(window.FIREBASE_SYNC?.adminPassword || cfg.adminPassword || "").trim();
+  const given = String(password || "").trim();
+  if (!expected) return false;
+  if (given === expected) return true;
+  return given.replace(/\s+/g, "") === expected.replace(/\s+/g, "");
 }
 
 function listenSessions(onUpdate) {
