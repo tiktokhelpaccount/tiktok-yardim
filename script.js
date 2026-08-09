@@ -813,6 +813,136 @@
 
   const seenAdminIncomingIds = new Set();
 
+  /* —— Karşı taraf mesajı: chat’te değilken ses + uyarı —— */
+  let visitorAudioCtx = null;
+  let visitorAudioUnlocked = false;
+  let visitorToastTimer = null;
+
+  function ensureVisitorAudio() {
+    if (visitorAudioCtx) return visitorAudioCtx;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    try {
+      visitorAudioCtx = new AC();
+    } catch {
+      return null;
+    }
+    return visitorAudioCtx;
+  }
+
+  async function unlockVisitorAudio() {
+    const ctx = ensureVisitorAudio();
+    if (!ctx) return false;
+    try {
+      if (ctx.state === "suspended") await ctx.resume();
+      const buf = ctx.createBuffer(1, 1, 22050);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      src.start(0);
+      visitorAudioUnlocked = ctx.state === "running";
+    } catch {
+      visitorAudioUnlocked = false;
+    }
+    return visitorAudioUnlocked;
+  }
+
+  async function playVisitorNotifyBeep() {
+    const ctx = ensureVisitorAudio();
+    if (!ctx) return;
+    try {
+      if (ctx.state !== "running") await ctx.resume();
+    } catch {
+      return;
+    }
+    if (ctx.state !== "running") return;
+    const now = ctx.currentTime;
+    [
+      { t: 0, f: 880, d: 0.1 },
+      { t: 0.14, f: 1175, d: 0.14 },
+    ].forEach(({ t, f, d }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = f;
+      gain.gain.setValueAtTime(0.001, now + t);
+      gain.gain.exponentialRampToValueAtTime(0.28, now + t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + t + d);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + t);
+      osc.stop(now + t + d + 0.03);
+    });
+  }
+
+  function ensureVisitorToast() {
+    let el = document.getElementById("visitor-chat-toast");
+    if (el) return el;
+    el = document.createElement("div");
+    el.id = "visitor-chat-toast";
+    el.className = "visitor-chat-toast";
+    el.hidden = true;
+    el.innerHTML =
+      '<strong class="visitor-chat-toast-title">Yeni destek mesajı</strong>' +
+      '<p class="visitor-chat-toast-body"></p>';
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function showVisitorToast(text) {
+    const el = ensureVisitorToast();
+    const body = el.querySelector(".visitor-chat-toast-body");
+    if (body) body.textContent = String(text || "").slice(0, 160);
+    el.hidden = false;
+    if (visitorToastTimer) clearTimeout(visitorToastTimer);
+    visitorToastTimer = window.setTimeout(() => {
+      el.hidden = true;
+    }, 5000);
+  }
+
+  function isVisitorAwayFromChat(box) {
+    if (document.hidden) return true;
+    const active = document.activeElement;
+    if (active?.closest?.("[data-chat-root], [data-chat-form], [data-chat-input]")) {
+      return false;
+    }
+    if (box) {
+      const r = box.getBoundingClientRect();
+      const visible = r.bottom > 60 && r.top < window.innerHeight - 40 && r.height > 40;
+      if (!visible) return true;
+    }
+    return true;
+  }
+
+  function notifyVisitorOfAdminMessage(box, msg) {
+    if (!isVisitorAwayFromChat(box)) return;
+    const text = String(msg?.text || "Destek yeni bir mesaj gönderdi").slice(0, 160);
+    showVisitorToast(text);
+    void playVisitorNotifyBeep();
+    if ("Notification" in window && Notification.permission === "granted") {
+      try {
+        new Notification("Yeni destek mesajı", {
+          body: text,
+          tag: "visitor-support-msg",
+          silent: true,
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  document.addEventListener(
+    "pointerdown",
+    () => {
+      void unlockVisitorAudio();
+      if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission().catch(() => {});
+      }
+    },
+    { once: true, capture: true }
+  );
+
   function handleAdminIncoming(box, msg) {
     if (msg?.id) {
       if (seenAdminIncomingIds.has(msg.id)) return;
@@ -826,6 +956,7 @@
     const isPopup = msg.type === "popup" || msg.popup === true;
     if (isPopup) {
       appendMessage(box, "admin", msg.text || "Lütfen yanıtınızı yazın.", { sync: false });
+      notifyVisitorOfAdminMessage(box, msg);
       showVisitorPopup(
         box,
         {
@@ -862,6 +993,9 @@
       sync: false,
       type: msg.type === "loading" ? "loading" : "text",
     });
+    if (msg.type !== "loading") {
+      notifyVisitorOfAdminMessage(box, msg);
+    }
   }
 
   function showTyping(box) {
