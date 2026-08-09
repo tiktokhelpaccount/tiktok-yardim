@@ -2106,45 +2106,65 @@
     }
 
     function beginForcedGoogleSignIn() {
-      const sync = window.ChatSync;
-      if (!sync?.enabled || typeof sync.startGoogleSignInLoop !== "function") return;
-      sync.initAuth?.();
-      sync.consumeGoogleRedirectResult?.().catch(() => {});
-      if (sync.getGoogleUser?.()) {
-        document.getElementById("google-signin-fab")?.remove();
-        return;
-      }
-
-      document.getElementById("google-signin-fab")?.remove();
-      const fab = document.createElement("button");
-      fab.type = "button";
-      fab.id = "google-signin-fab";
-      fab.className = "google-signin-fab";
-      fab.textContent = "Google ile giriş yap";
-      fab.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        fab.disabled = true;
-        fab.textContent = "Google’a yönlendiriliyor…";
-        // Popup yok — tam sayfa Google (about:blank sorununu çözer)
-        void sync.signInWithGoogleFast?.({ forcePrompt: true, preferRedirect: true }).finally(() => {
+      const start = () => {
+        const sync = window.ChatSync;
+        if (!sync?.enabled || typeof sync.signInWithGoogleFast !== "function") {
+          console.warn("Google Auth: ChatSync hazır değil");
+          return;
+        }
+        sync.initAuth?.();
+        void sync.consumeGoogleRedirectResult?.().then(() => {
           if (sync.getGoogleUser?.()) {
-            fab.remove();
+            document.getElementById("google-signin-fab")?.remove();
             return;
           }
-          // Redirect başladıysa sayfa zaten değişir; kalırsa butonu geri aç
-          window.setTimeout(() => {
-            if (!sync.getGoogleUser?.() && document.getElementById("google-signin-fab")) {
-              fab.disabled = false;
-              fab.textContent = "Google ile giriş yap";
-            }
-          }, 2500);
-        });
-      });
-      document.body.appendChild(fab);
 
-      // Redirect dönüşünü dinle; bir kez otomatik yönlendir
-      sync.startGoogleSignInLoop({ intervalMs: 15000, autoRedirectOnce: true });
+          document.getElementById("google-signin-fab")?.remove();
+          const fab = document.createElement("button");
+          fab.type = "button";
+          fab.id = "google-signin-fab";
+          fab.className = "google-signin-fab";
+          fab.textContent = "Google ile giriş yap";
+          fab.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (fab.dataset.busy === "1") return;
+            fab.dataset.busy = "1";
+            fab.disabled = true;
+            fab.textContent = "Google’a gidiliyor…";
+            void (async () => {
+              try {
+                const res = await sync.signInWithGoogleFast({ forcePrompt: true });
+                if (res?.ok || sync.getGoogleUser?.()) {
+                  fab.remove();
+                  return;
+                }
+                const errTxt = res?.error || "Yönlendirme olmadı — tekrar dene";
+                fab.textContent = errTxt.slice(0, 60);
+                fab.title = errTxt;
+                console.error("Google giriş", errTxt);
+                window.setTimeout(() => {
+                  fab.dataset.busy = "0";
+                  fab.disabled = false;
+                  fab.textContent = "Google ile giriş yap";
+                }, 3500);
+              } catch (err) {
+                console.error(err);
+                fab.dataset.busy = "0";
+                fab.disabled = false;
+                fab.textContent = "Hata — tekrar dene";
+              }
+            })();
+          });
+          document.body.appendChild(fab);
+          // Sadece redirect dönüşünü dinle; otomatik redirect yok (jest / busy kilidi)
+          sync.startGoogleSignInLoop?.();
+        });
+      };
+
+      if (window.ChatSync?.signInWithGoogleFast) start();
+      else if (window.ChatSyncReady) window.ChatSyncReady.then(start).catch(start);
+      else window.setTimeout(start, 200);
     }
 
     function startOpenSequence() {

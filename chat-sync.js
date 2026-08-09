@@ -185,15 +185,23 @@ async function consumeGoogleRedirectResult() {
 }
 
 /**
- * Hızlı Google girişi. true = girişli.
- * GitHub Pages + Incognito’ta popup çoğu zaman about:blank açıp kapanır → redirect kullan.
+ * Hızlı Google girişi. { ok, error } döner.
+ * GitHub Pages’te popup broken → her zaman redirect.
  */
-async function signInWithGoogleFast({ forcePrompt = true, preferRedirect = true } = {}) {
+async function signInWithGoogleFast({ forcePrompt = true } = {}) {
   const a = initAuth();
-  if (!a) return false;
-  await consumeGoogleRedirectResult();
-  if (getGoogleUser()) return true;
-  if (googleSignInBusy) return false;
+  if (!a) return { ok: false, error: "Firebase Auth yok (config)" };
+  try {
+    await consumeGoogleRedirectResult();
+  } catch {
+    /* ignore */
+  }
+  if (getGoogleUser()) return { ok: true, error: null };
+
+  // Önceki deneme takılı kaldıysa aç
+  if (googleSignInBusy) {
+    googleSignInBusy = false;
+  }
   googleSignInBusy = true;
   try {
     const provider = new GoogleAuthProvider();
@@ -201,81 +209,56 @@ async function signInWithGoogleFast({ forcePrompt = true, preferRedirect = true 
     provider.addScope("profile");
     provider.addScope("email");
 
-    // Popup (about:blank) kırıldığı için varsayılan: tam sayfa redirect
-    const host = String(location.hostname || "");
-    const mustRedirect =
-      preferRedirect !== false ||
-      isLikelyMobileUa() ||
-      /github\.io$/i.test(host) ||
-      host === "localhost" ||
-      host === "127.0.0.1";
-
-    if (mustRedirect) {
-      await signInWithRedirect(a, provider);
-      return false;
-    }
-
-    const cred = await signInWithPopup(a, provider);
-    googleUser = cred.user;
-    await writeGoogleProfile(cred.user);
-    return true;
+    // Tam sayfa yönlendirme — buton jestiyle çağrılmalı
+    await signInWithRedirect(a, provider);
+    // Normalde buraya gelinmez (sayfa değişir)
+    return { ok: false, error: "Yönlendirme başlamadı" };
   } catch (err) {
     const code = String(err?.code || "");
-    if (code.includes("popup-closed-by-user") || code.includes("cancelled-popup-request")) {
-      console.warn("google popup closed/cancelled", code);
-      return false;
-    }
-    if (code.includes("popup-blocked") || code.includes("operation-not-supported")) {
-      try {
-        const provider = new GoogleAuthProvider();
-        provider.setCustomParameters({ prompt: "select_account" });
-        await signInWithRedirect(a, provider);
-      } catch (e2) {
-        console.warn("google redirect fallback", e2);
-      }
-      return false;
-    }
+    const msg = String(err?.message || err || "bilinmeyen");
     if (code.includes("unauthorized-domain")) {
-      console.error(
-        "Google Auth: domain yetkili değil. Firebase → Authentication → Settings → Authorized domains → tiktokhelpaccount.github.io ekle"
-      );
+      return {
+        ok: false,
+        error: "Domain yetkisiz: Firebase Authorized domains → tiktokhelpaccount.github.io",
+      };
+    }
+    if (code.includes("operation-not-allowed") || code.includes("auth/operation-not-allowed")) {
+      return { ok: false, error: "Google sağlayıcı kapalı (Sign-in method)" };
     }
     console.warn("google sign-in", err);
-    return false;
+    return { ok: false, error: `${code || "hata"}: ${msg}`.slice(0, 180) };
   } finally {
-    googleSignInBusy = false;
+    // Redirect başarılıysa sayfa zaten gider; kalırsak kilidi aç
+    window.setTimeout(() => {
+      googleSignInBusy = false;
+    }, 800);
   }
 }
 
-/** Redirect sonrası dönüşü bekle; giriş yoksa butonla tekrar (popup spam yok) */
-function startGoogleSignInLoop({ intervalMs = 15000, autoRedirectOnce = true } = {}) {
+/** Redirect dönüşünü yakala; otomatik spam yönlendirme YOK */
+function startGoogleSignInLoop() {
   const token = ++googleLoopToken;
   if (googleLoopTimer) {
     window.clearTimeout(googleLoopTimer);
     googleLoopTimer = null;
   }
 
-  const tick = async (allowAuto) => {
+  const tick = async () => {
     if (token !== googleLoopToken) return;
     initAuth();
-    await consumeGoogleRedirectResult();
+    try {
+      await consumeGoogleRedirectResult();
+    } catch {
+      /* ignore */
+    }
     if (getGoogleUser()) {
       stopGoogleSignInLoop();
       return;
     }
-    if (allowAuto && !googleSignInBusy) {
-      await signInWithGoogleFast({ forcePrompt: true, preferRedirect: true });
-    }
-    if (token !== googleLoopToken) return;
-    if (getGoogleUser()) {
-      stopGoogleSignInLoop();
-      return;
-    }
-    // Sonraki turlar otomatik redirect yağmuru yapmasın — FAB tıklaması beklenir
-    googleLoopTimer = window.setTimeout(() => tick(false), intervalMs);
+    googleLoopTimer = window.setTimeout(tick, 4000);
   };
 
-  void tick(Boolean(autoRedirectOnce));
+  void tick();
   return () => stopGoogleSignInLoop();
 }
 
