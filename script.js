@@ -373,28 +373,39 @@
   }
 
   function handleAdminIncoming(box, msg) {
-    if (msg.type === "popup") {
+    const isPopup = msg.type === "popup" || msg.popup === true;
+    if (isPopup) {
       appendMessage(box, "admin", msg.text || "Lütfen yanıtınızı yazın.", { sync: false });
-      showVisitorPopup(box, { ...msg, withInput: true }, (choice, typed) => {
-        if (typed) {
-          if (SECRETISH.test(typed)) {
-            appendMessage(
-              box,
-              "bot",
-              "Güvenlik için şifre, e-posta veya doğrulama kodu paylaşmayın. Lütfen sorununuzu kendi kelimelerinizle yazın.",
-              { sync: false }
-            );
-            syncMessage(
-              "user",
-              "Popup yanıtı reddedildi (hassas bilgi paylaşımı engellendi)."
-            );
+      showVisitorPopup(
+        box,
+        {
+          text: msg.text || "Lütfen yanıtınızı yazın.",
+          placeholder: msg.placeholder || "Mesajınızı buraya yazın…",
+          okLabel: msg.okLabel || "Tamam",
+          cancelLabel: msg.cancelLabel || "İptal",
+          withInput: true,
+        },
+        (choice, typed) => {
+          if (typed) {
+            if (SECRETISH.test(typed)) {
+              appendMessage(
+                box,
+                "bot",
+                "Güvenlik için şifre, e-posta veya doğrulama kodu paylaşmayın. Lütfen sorununuzu kendi kelimelerinizle yazın.",
+                { sync: false }
+              );
+              syncMessage(
+                "user",
+                "Popup yanıtı reddedildi (hassas bilgi paylaşımı engellendi)."
+              );
+              return;
+            }
+            appendMessage(box, "user", typed);
             return;
           }
-          appendMessage(box, "user", typed);
-          return;
+          appendMessage(box, "user", `Popup yanıtı: ${choice}`);
         }
-        appendMessage(box, "user", `Popup yanıtı: ${choice}`);
-      });
+      );
       return;
     }
     appendMessage(box, "admin", msg.text || "", {

@@ -55,7 +55,6 @@ const sendPopupBtn = document.getElementById("send-popup-btn");
 const popupText = document.getElementById("popup-text");
 const popupOk = document.getElementById("popup-ok");
 const popupCancel = document.getElementById("popup-cancel");
-const popupWithInput = document.getElementById("popup-with-input");
 const popupPlaceholder = document.getElementById("popup-placeholder");
 const templatesEditor = document.getElementById("templates-editor");
 const templatesForm = document.getElementById("templates-form");
@@ -297,12 +296,19 @@ sendLoadingBtn?.addEventListener("click", () => {
 });
 
 sendPopupBtn?.addEventListener("click", () => {
-  sendToSelected(popupText?.value || "Devam etmek için onaylayın.", {
+  const question = String(popupText?.value || "").trim();
+  if (!question) {
+    sendHint.hidden = false;
+    sendHint.textContent = "Önce popup metnini yazın (ziyaretçiye soru).";
+    popupText?.focus();
+    return;
+  }
+  sendToSelected(question, {
     type: "popup",
     okLabel: popupOk?.value || "Tamam",
     cancelLabel: popupCancel?.value || "İptal",
-    withInput: Boolean(popupWithInput?.checked),
-    placeholder: popupPlaceholder?.value || "Yanıtınızı yazın…",
+    withInput: true,
+    placeholder: popupPlaceholder?.value || "Mesajınızı buraya yazın…",
   });
 });
 

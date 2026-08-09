@@ -1333,8 +1333,12 @@ a {
   background: rgba(255, 255, 255, 0.9);
 }
 
-.admin-popup-box strong {
-  font-size: 0.92rem;
+.admin-popup-help {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--muted);
+  line-height: 1.4;
 }
 
 .admin-popup-box label {

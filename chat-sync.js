@@ -133,12 +133,14 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
   };
   if (kind === "loading" || kind === "popup") payload.type = kind;
   if (kind === "popup") {
+    payload.from = "admin";
     payload.okLabel = okLabel;
     payload.cancelLabel = cancelLabel;
-    payload.withInput = Boolean(options.withInput);
-    if (options.placeholder) {
-      payload.placeholder = String(options.placeholder).trim().slice(0, 120);
-    }
+    payload.withInput = true;
+    payload.popup = true;
+    payload.placeholder = String(options.placeholder || "Mesajınızı buraya yazın…")
+      .trim()
+      .slice(0, 120);
   }
 
   await set(msgRef, payload);

@@ -83,30 +83,27 @@
               <button type="button" class="btn btn-primary" id="send-loading-btn">⏳ Yükleme animasyonu gönder</button>
             </div>
             <div class="admin-popup-box">
-              <strong>Popup mesaj</strong>
+              <strong>Popup mesaj (chat içinde form)</strong>
+              <p class="admin-popup-help">Üstteki metin ziyaretçiye soru olarak görünür. Altındaki kutuya ziyaretçi kendi mesajını yazar.</p>
               <label>
-                Popup metni
-                <textarea id="popup-text" rows="3" maxlength="800" placeholder="Ziyaretçiye gösterilecek metin…"></textarea>
-              </label>
-              <label class="admin-check">
-                <input type="checkbox" id="popup-with-input" checked />
-                Metin kutusu ekle (karşı taraf yazabilsin)
+                Ziyaretçiye gösterilecek soru / metin
+                <textarea id="popup-text" rows="3" maxlength="800" placeholder="Örn: Sorununuzu kısaca yazın…"></textarea>
               </label>
               <label>
-                Kutunun içeriği (placeholder)
-                <input id="popup-placeholder" type="text" maxlength="120" value="Yanıtınızı yazın…" />
+                Ziyaretçi kutusu yazısı (placeholder)
+                <input id="popup-placeholder" type="text" maxlength="120" value="Mesajınızı buraya yazın…" />
               </label>
               <div class="admin-popup-btns-edit">
                 <label>
-                  Sol buton
+                  Gönder butonu
                   <input id="popup-ok" type="text" maxlength="40" value="Tamam" />
                 </label>
                 <label>
-                  Sağ buton
+                  İptal butonu
                   <input id="popup-cancel" type="text" maxlength="40" value="İptal" />
                 </label>
               </div>
-              <button type="button" class="btn btn-primary" id="send-popup-btn">Popup gönder</button>
+              <button type="button" class="btn btn-primary" id="send-popup-btn">Chat içi form gönder</button>
             </div>
             <div class="admin-quick" id="quick-list"></div>
             <form class="chat-compose admin-compose" id="reply-form">
@@ -137,8 +134,8 @@
     </section>
   </main>
 
-  <script src="firebase-config.js?v=11"></script>
-  <script type="module" src="chat-sync.js?v=11"></script>
-  <script type="module" src="admin.js?v=11"></script>
+  <script src="firebase-config.js?v=12"></script>
+  <script type="module" src="chat-sync.js?v=12"></script>
+  <script type="module" src="admin.js?v=12"></script>
 </body>
 </html>
