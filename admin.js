@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=46";
+import "./chat-sync.js?v=47";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -114,39 +114,109 @@ let originalTitle = document.title;
 let alertHideTimer = null;
 let alertSoundTimer = null;
 let alertSounding = false;
+let audioUnlocked = false;
+let unlockListenersBound = false;
 
 function ensureAlertAudio() {
   if (alertAudioCtx) return alertAudioCtx;
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return null;
-  alertAudioCtx = new AC();
+  try {
+    alertAudioCtx = new AC();
+  } catch {
+    return null;
+  }
   return alertAudioCtx;
 }
 
-function playAlertBeeps() {
+async function unlockAlertAudio() {
   const ctx = ensureAlertAudio();
-  if (!ctx) return;
-  if (ctx.state === "suspended") ctx.resume().catch(() => {});
+  if (!ctx) return false;
+  try {
+    if (ctx.state === "suspended") {
+      await ctx.resume();
+    }
+    // Gerçek sessiz tick — tarayıcı ses kilidini açar
+    const buffer = ctx.createBuffer(1, 1, 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(ctx.destination);
+    src.start(0);
+    audioUnlocked = ctx.state === "running";
+  } catch (err) {
+    console.warn("Ses açılamadı", err);
+    audioUnlocked = false;
+  }
+  updateNotifyBtnLabel();
+  return audioUnlocked;
+}
 
-  // Kısa, yumuşak çift bip — sohbeti bölmez
+function updateNotifyBtnLabel() {
+  if (!notifyBtn) return;
+  if (!alertsArmed) {
+    notifyBtn.textContent = "🔔 Alarmları aç";
+    return;
+  }
+  if (audioUnlocked) {
+    notifyBtn.textContent = notifyEnabled
+      ? "🔔 Alarm + ses açık"
+      : "🔔 Ses açık (masaüstü kapalı)";
+  } else {
+    notifyBtn.textContent = "🔔 Sesi aç (tıkla)";
+  }
+}
+
+function bindAudioUnlockGestures() {
+  if (unlockListenersBound) return;
+  unlockListenersBound = true;
+  const tryUnlock = () => {
+    if (audioUnlocked) return;
+    void unlockAlertAudio().then((ok) => {
+      if (ok && alertSounding) void playAlertBeeps();
+    });
+  };
+  document.addEventListener("pointerdown", tryUnlock, true);
+  document.addEventListener("keydown", tryUnlock, true);
+}
+
+async function playAlertBeeps() {
+  const ctx = ensureAlertAudio();
+  if (!ctx) return false;
+  try {
+    if (ctx.state !== "running") {
+      await ctx.resume();
+    }
+  } catch {
+    return false;
+  }
+  if (ctx.state !== "running") {
+    audioUnlocked = false;
+    updateNotifyBtnLabel();
+    return false;
+  }
+  audioUnlocked = true;
+
+  // Daha net / yüksek bip
   const pattern = [
-    { t: 0, f: 920, d: 0.09 },
-    { t: 0.14, f: 1180, d: 0.11 },
+    { t: 0, f: 880, d: 0.12 },
+    { t: 0.16, f: 1175, d: 0.14 },
+    { t: 0.34, f: 988, d: 0.16 },
   ];
   const now = ctx.currentTime;
   pattern.forEach(({ t, f, d }) => {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    osc.type = "sine";
+    osc.type = "square";
     osc.frequency.value = f;
-    gain.gain.setValueAtTime(0.0001, now + t);
-    gain.gain.exponentialRampToValueAtTime(0.18, now + t + 0.015);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + t + d);
+    gain.gain.setValueAtTime(0.001, now + t);
+    gain.gain.exponentialRampToValueAtTime(0.35, now + t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + t + d);
     osc.connect(gain);
     gain.connect(ctx.destination);
     osc.start(now + t);
-    osc.stop(now + t + d + 0.02);
+    osc.stop(now + t + d + 0.03);
   });
+  return true;
 }
 
 function stopAlertSound() {
@@ -160,12 +230,23 @@ function stopAlertSound() {
 function startAlertSoundLoop() {
   stopAlertSound();
   alertSounding = true;
-  playAlertBeeps();
-  // Tamam’a basılana kadar tekrar et
-  alertSoundTimer = window.setInterval(() => {
+  bindAudioUnlockGestures();
+
+  const tick = () => {
     if (!alertSounding) return;
-    playAlertBeeps();
-  }, 1100);
+    void playAlertBeeps().then((ok) => {
+      if (!ok && alertOverlay && !alertOverlay.hidden && alertBody) {
+        // Ses kilitliyse kullanıcıya net yaz
+        const tip = " · Ses için sayfaya bir kez tıkla / Alarmları aç";
+        if (!String(alertBody.textContent || "").includes("Ses için")) {
+          alertBody.textContent = `${alertBody.textContent || ""}${tip}`;
+        }
+      }
+    });
+  };
+
+  tick();
+  alertSoundTimer = window.setInterval(tick, 900);
 }
 
 function flashDocumentTitle(text) {
@@ -228,11 +309,8 @@ function pushDesktopNotification(title, body, tag) {
 }
 
 function fireHighAlert({ kicker, title, body, tag }) {
-  // Alarmlar henüz kurulmadıysa sessizce kurmayı dene; mesaj akışını engelleme
-  if (!alertsArmed) {
-    alertsArmed = true;
-    ensureAlertAudio();
-  }
+  if (!alertsArmed) alertsArmed = true;
+  bindAudioUnlockGestures();
   showAdminAlert({ kicker, title, body });
   startAlertSoundLoop();
   flashDocumentTitle(title);
@@ -257,6 +335,7 @@ function bindSessionMessages(sessionId) {
 
 function startDash(sync) {
   show("dash");
+  bindAudioUnlockGestures();
   renderQuickButtons();
   renderTemplatesEditor(sync.getQuickReplies());
   knownSessionIds = new Set();
@@ -266,8 +345,11 @@ function startDash(sync) {
   if (!alertsArmed) {
     armAlerts().catch(() => {
       alertsArmed = true;
-      if (notifyBtn) notifyBtn.textContent = "🔔 Alarmları aç (tıkla)";
+      updateNotifyBtnLabel();
     });
+  } else {
+    void unlockAlertAudio();
+    updateNotifyBtnLabel();
   }
 
   if (unsubSessions) unsubSessions();
@@ -302,7 +384,13 @@ function startDash(sync) {
       const prev = sessionUpdatedAt.get(r.id) || 0;
       if (updated > prev) {
         sessionUpdatedAt.set(r.id, updated);
-        if (r.lastWho === "user") bumped.push(r);
+        const preview = String(r.preview || "");
+        const isEntry = /siteye\s+giri[sş]/i.test(preview);
+        const enteredAt = Number(r.enteredAt) || 0;
+        // Mesaj veya siteye giriş — admin’e düşsün
+        if (r.lastWho === "user" || isEntry || enteredAt > prev) {
+          bumped.push(r);
+        }
       }
     });
 
@@ -324,11 +412,10 @@ function startDash(sync) {
         kicker: "YENİ ZİYARETÇİ",
         title: "Siteye yeni kullanıcı girdi",
         body: `#${shortId(newest.id)} · ${newest.page || "/"} · ${String(
-          newest.preview || "Sohbet başladı"
+          newest.preview || "Siteye giriş yaptı"
         ).slice(0, 100)}`,
-        tag: `session-${newest.id}`,
+        tag: `session-${newest.id}-${newest.updatedAt || Date.now()}`,
       });
-      // Yeni sohbeti otomatik aç — mesajlar kaçmasın
       openSession(newest);
       return;
     }
@@ -337,15 +424,16 @@ function startDash(sync) {
       const newest = bumped.sort(
         (a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0)
       )[0];
-      if (newest.id !== selectedId) {
-        fireHighAlert({
-          kicker: "YENİ MESAJ",
-          title: "Başka sohbette mesaj var",
-          body: `#${shortId(newest.id)} · ${String(newest.preview || "").slice(0, 120)}`,
-          tag: `bump-${newest.id}-${newest.updatedAt}`,
-        });
-        openSession(newest);
-      }
+      const isEntry = /siteye\s+giri[sş]/i.test(String(newest.preview || ""));
+      fireHighAlert({
+        kicker: isEntry ? "SİTE GİRİŞİ" : "YENİ MESAJ",
+        title: isEntry ? "Ziyaretçi siteye girdi" : "Ziyaretçi aktivitesi",
+        body: `#${shortId(newest.id)} · ${newest.page || "/"} · ${String(
+          newest.preview || ""
+        ).slice(0, 120)}`,
+        tag: `bump-${newest.id}-${newest.updatedAt}`,
+      });
+      if (newest.id !== selectedId) openSession(newest);
     }
 
     if (!selectedId && rows[0]) openSession(rows[0]);
@@ -354,26 +442,37 @@ function startDash(sync) {
 
 async function armAlerts() {
   alertsArmed = true;
-  ensureAlertAudio();
-  if (alertAudioCtx?.state === "suspended") {
-    await alertAudioCtx.resume().catch(() => {});
-  }
+  bindAudioUnlockGestures();
+  // Önce ses kilidini aç (Notification izni jesti tüketmeden)
+  await unlockAlertAudio();
+  const played = await playAlertBeeps();
   if ("Notification" in window) {
-    const perm =
-      Notification.permission === "granted"
-        ? "granted"
-        : await Notification.requestPermission();
-    notifyEnabled = perm === "granted";
+    try {
+      const perm =
+        Notification.permission === "granted"
+          ? "granted"
+          : await Notification.requestPermission();
+      notifyEnabled = perm === "granted";
+    } catch {
+      notifyEnabled = false;
+    }
   } else {
     notifyEnabled = false;
   }
-  if (notifyBtn) {
-    notifyBtn.textContent = notifyEnabled
-      ? "🔔 Alarmlar açık"
-      : "🔔 Sesli alarm açık (masaüstü kapalı)";
+  updateNotifyBtnLabel();
+  if (!played) {
+    if (sendHint) {
+      sendHint.hidden = false;
+      sendHint.textContent =
+        "Ses henüz kilitli. Üstteki “Sesi aç” butonuna tekrar tıkla veya sayfaya bir kez tıkla.";
+    }
+  } else if (sendHint) {
+    sendHint.hidden = false;
+    sendHint.textContent = "Test sesi çaldı. Alarmlar hazır.";
+    window.setTimeout(() => {
+      if (sendHint.textContent.includes("Test sesi")) sendHint.hidden = true;
+    }, 2500);
   }
-  // Kurulum testi: tek bip (döngü yok)
-  playAlertBeeps();
 }
 
 function show(view) {
@@ -1739,7 +1838,12 @@ loginForm?.addEventListener("submit", (e) => {
   }
   loginError.hidden = true;
   setAuth(true);
-  startDash(window.ChatSync);
+  // Giriş jesti ile sesi hemen aç
+  void (async () => {
+    await unlockAlertAudio();
+    startDash(window.ChatSync);
+    await armAlerts();
+  })();
 });
 
 const sync = await ready();

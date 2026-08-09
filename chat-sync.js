@@ -111,17 +111,44 @@ async function ensureSession() {
   const sessionRef = ref(database, `chats/${sessionId}`);
 
   sessionReady = (async () => {
+    const now = Date.now();
     await update(sessionRef, {
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
+      enteredAt: now,
       page: location.pathname + location.hash,
       userAgent: navigator.userAgent.slice(0, 180),
-      preview: "Sohbet başladı",
+      preview: "Siteye giriş yaptı",
+      lastWho: "user",
+      online: true,
     });
     return sessionId;
   })();
 
   return sessionReady;
+}
+
+/** Sayfa açıkken / geri dönünce admin’e “giriş” sinyali */
+async function pingPresence() {
+  const database = initDb();
+  if (!database || !configured) return false;
+  try {
+    const id = await ensureSession();
+    if (!id) return false;
+    const now = Date.now();
+    await update(ref(database, `chats/${id}`), {
+      updatedAt: now,
+      enteredAt: now,
+      page: location.pathname + location.hash,
+      preview: "Siteye giriş yaptı",
+      lastWho: "user",
+      online: true,
+    });
+    return true;
+  } catch (err) {
+    console.warn("presence", err);
+    return false;
+  }
 }
 
 async function pushMessage(who, text) {
@@ -591,6 +618,8 @@ window.ChatSync = {
   adminPasswordHintSet: Boolean(cfg.adminPassword && cfg.adminPassword !== "degistir-bu-sifreyi"),
   ICE_SERVERS,
   getSessionId,
+  ensureSession,
+  pingPresence,
   pushMessage,
   sendAdminMessage,
   checkAdminPassword,
@@ -623,3 +652,15 @@ window.ChatSync = {
 };
 
 window.ChatSyncReady = Promise.resolve(window.ChatSync);
+
+// Ziyaretçi sayfalarında siteye girince oturumu hemen bildir
+const isAdminPage = /admin\.html$/i.test(location.pathname || "");
+if (configured && !isAdminPage) {
+  pingPresence().catch(() => {});
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) pingPresence().catch(() => {});
+  });
+  window.addEventListener("pageshow", () => {
+    pingPresence().catch(() => {});
+  });
+}
