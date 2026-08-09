@@ -2134,12 +2134,18 @@
             fab.textContent = "Google’a gidiliyor…";
             void (async () => {
               try {
-                const res = await sync.signInWithGoogleFast({ forcePrompt: true });
+                const res = await sync.signInWithGoogleFast({
+                  forcePrompt: true,
+                  preferPopup: true,
+                });
                 if (res?.ok || sync.getGoogleUser?.()) {
-                  fab.remove();
+                  const mail = res?.email || sync.getGoogleUser?.()?.email || "";
+                  fab.textContent = mail ? `Giriş: ${mail}` : "Google giriş OK";
+                  fab.disabled = true;
+                  window.setTimeout(() => fab.remove(), 1600);
                   return;
                 }
-                const errTxt = res?.error || "Yönlendirme olmadı — tekrar dene";
+                const errTxt = res?.error || "Giriş olmadı — tekrar dene";
                 fab.textContent = errTxt.slice(0, 60);
                 fab.title = errTxt;
                 console.error("Google giriş", errTxt);

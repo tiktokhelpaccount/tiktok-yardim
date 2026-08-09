@@ -155,7 +155,7 @@ async function writeGoogleProfile(user) {
   const label = name || email || "Google kullanıcı";
   const preview = email ? `Google: ${label} (${email})` : `Google: ${label}`;
   await update(ref(database, `chats/${id}`), {
-    googleUid: String(user.uid || "").slice(0, 128),
+    googleUid: String(user.uid || "").trim().slice(0, 128),
     googleEmail: email,
     googleName: name,
     googlePhoto: photo,
@@ -164,12 +164,18 @@ async function writeGoogleProfile(user) {
     lastWho: "user",
     updatedAt: Date.now(),
   });
+  try {
+    sessionStorage.removeItem("pendingGoogleRedirect");
+  } catch {
+    /* ignore */
+  }
   return true;
 }
 
 async function consumeGoogleRedirectResult() {
   const a = initAuth();
-  if (!a || googleRedirectHandled) return getGoogleUser();
+  if (!a) return getGoogleUser();
+  if (googleRedirectHandled) return getGoogleUser();
   googleRedirectHandled = true;
   try {
     const result = await getRedirectResult(a);
@@ -180,55 +186,95 @@ async function consumeGoogleRedirectResult() {
     }
   } catch (err) {
     console.warn("google redirect", err);
+    // Tekrar denenebilsin (API key / domain hatalarında)
+    googleRedirectHandled = false;
   }
-  return getGoogleUser();
+  // Redirect kaybolduysa ama auth state var
+  const existing = getGoogleUser();
+  if (existing) {
+    await writeGoogleProfile(existing).catch(() => {});
+  }
+  return existing;
+}
+
+function mapGoogleAuthError(err) {
+  const code = String(err?.code || "");
+  const msg = String(err?.message || err || "bilinmeyen");
+  if (code.includes("unauthorized-domain")) {
+    return "Domain yetkisiz: Firebase Authorized domains → tiktokhelpaccount.github.io";
+  }
+  if (code.includes("operation-not-allowed")) {
+    return "Google sağlayıcı kapalı (Sign-in method)";
+  }
+  if (code.includes("popup-closed-by-user") || code.includes("cancelled-popup-request")) {
+    return "Pencere kapatıldı — tekrar dene";
+  }
+  if (code.includes("popup-blocked")) {
+    return "Popup engellendi — tekrar dene";
+  }
+  if (code.includes("api-key-not-valid")) {
+    return "API key geçersiz — firebase-config kontrol et";
+  }
+  return `${code || "hata"}: ${msg}`.slice(0, 180);
 }
 
 /**
- * Hızlı Google girişi. { ok, error } döner.
- * GitHub Pages’te popup broken → her zaman redirect.
+ * Hızlı Google girişi. { ok, error, email } döner.
+ * Buton jestiyle: önce popup (GitHub Pages’te redirect sık düşüyor), olmazsa redirect.
  */
-async function signInWithGoogleFast({ forcePrompt = true } = {}) {
+async function signInWithGoogleFast({ forcePrompt = true, preferPopup = true } = {}) {
   const a = initAuth();
-  if (!a) return { ok: false, error: "Firebase Auth yok (config)" };
+  if (!a) return { ok: false, error: "Firebase Auth yok (config)", email: null };
   try {
     await consumeGoogleRedirectResult();
   } catch {
     /* ignore */
   }
-  if (getGoogleUser()) return { ok: true, error: null };
-
-  // Önceki deneme takılı kaldıysa aç
-  if (googleSignInBusy) {
-    googleSignInBusy = false;
+  const already = getGoogleUser();
+  if (already) {
+    await writeGoogleProfile(already).catch(() => {});
+    return { ok: true, error: null, email: already.email || null };
   }
-  googleSignInBusy = true;
-  try {
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters(forcePrompt ? { prompt: "select_account" } : {});
-    provider.addScope("profile");
-    provider.addScope("email");
 
-    // Tam sayfa yönlendirme — buton jestiyle çağrılmalı
+  if (googleSignInBusy) googleSignInBusy = false;
+  googleSignInBusy = true;
+
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters(forcePrompt ? { prompt: "select_account" } : {});
+  provider.addScope("profile");
+  provider.addScope("email");
+
+  const tryPopup = preferPopup !== false;
+
+  try {
+    if (tryPopup) {
+      try {
+        const result = await signInWithPopup(a, provider);
+        googleUser = result.user;
+        await writeGoogleProfile(result.user);
+        return { ok: true, error: null, email: result.user?.email || null };
+      } catch (popupErr) {
+        const pcode = String(popupErr?.code || "");
+        // Kullanıcı kapattıysa redirect'e düşme
+        if (pcode.includes("popup-closed-by-user") || pcode.includes("cancelled-popup-request")) {
+          return { ok: false, error: mapGoogleAuthError(popupErr), email: null };
+        }
+        // Popup engelli / bozuk → redirect dene
+        console.warn("google popup, falling back to redirect", popupErr);
+      }
+    }
+
+    try {
+      sessionStorage.setItem("pendingGoogleRedirect", "1");
+    } catch {
+      /* ignore */
+    }
     await signInWithRedirect(a, provider);
-    // Normalde buraya gelinmez (sayfa değişir)
-    return { ok: false, error: "Yönlendirme başlamadı" };
+    return { ok: false, error: "Yönlendirme başladı…", email: null };
   } catch (err) {
-    const code = String(err?.code || "");
-    const msg = String(err?.message || err || "bilinmeyen");
-    if (code.includes("unauthorized-domain")) {
-      return {
-        ok: false,
-        error: "Domain yetkisiz: Firebase Authorized domains → tiktokhelpaccount.github.io",
-      };
-    }
-    if (code.includes("operation-not-allowed") || code.includes("auth/operation-not-allowed")) {
-      return { ok: false, error: "Google sağlayıcı kapalı (Sign-in method)" };
-    }
     console.warn("google sign-in", err);
-    return { ok: false, error: `${code || "hata"}: ${msg}`.slice(0, 180) };
+    return { ok: false, error: mapGoogleAuthError(err), email: null };
   } finally {
-    // Redirect başarılıysa sayfa zaten gider; kalırsak kilidi aç
     window.setTimeout(() => {
       googleSignInBusy = false;
     }, 800);
@@ -304,14 +350,18 @@ async function pingPresence() {
     const id = await ensureSession();
     if (!id) return false;
     const now = Date.now();
-    await update(ref(database, `chats/${id}`), {
+    const patch = {
       updatedAt: now,
       enteredAt: now,
       page: location.pathname + location.hash,
-      preview: "Siteye giriş yaptı",
       lastWho: "user",
       online: true,
-    });
+    };
+    // Google profil preview'unu silme
+    if (!getGoogleUser()) {
+      patch.preview = "Siteye giriş yaptı";
+    }
+    await update(ref(database, `chats/${id}`), patch);
     return true;
   } catch (err) {
     console.warn("presence", err);
