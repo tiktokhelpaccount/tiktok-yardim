@@ -200,7 +200,6 @@ function forceDownloadFromUrl(url, name) {
     /* ignore */
   }
 
-  // Yedek: link butonuna otomatik tık
   window.setTimeout(() => {
     try {
       downloadRecordingBtn?.click();
@@ -215,6 +214,14 @@ function forceDownloadFromUrl(url, name) {
   window.setTimeout(() => {
     if (sendHint.textContent.includes("Kayıt")) sendHint.hidden = true;
   }, 5000);
+}
+
+function resetLiveVideoUi() {
+  clearRecordingLink();
+  if (adminRemoteVideo) {
+    adminRemoteVideo.srcObject = null;
+    adminRemoteVideo.load?.();
+  }
 }
 
 function pickRecorderMime() {
@@ -359,10 +366,13 @@ async function stopAdminCall(updateRemote = true, { autoDownload = false, keepUi
 
 async function joinAdminCamera(sessionId, callId) {
   if (!window.ChatSync || !sessionId || !callId) return;
-  if (adminCall?.callId === callId && adminCall?.sessionId === sessionId) return;
+  if (adminCall?.callId === callId && adminCall?.sessionId === sessionId && adminCall?.pc) {
+    showCameraPopup();
+    return;
+  }
 
   await stopAdminCall(false, { keepUi: true });
-  clearRecordingLink();
+  resetLiveVideoUi();
   setCameraUi(true, "Ziyaretçi onayı bekleniyor…");
 
   const sync = window.ChatSync;
@@ -370,6 +380,7 @@ async function joinAdminCamera(sessionId, callId) {
   let answered = false;
   const pendingVisitorIce = [];
   let remoteReady = false;
+  let callEnded = false;
   const state = {
     sessionId,
     callId,
@@ -385,31 +396,32 @@ async function joinAdminCamera(sessionId, callId) {
   adminCall = state;
 
   pc.ontrack = (ev) => {
+    if (adminCall !== state || callEnded) return;
     const stream = ev.streams?.[0] || new MediaStream([ev.track]);
     if (adminRemoteVideo) {
       adminRemoteVideo.srcObject = stream;
       adminRemoteVideo.play?.().catch(() => {});
     }
+    showCameraPopup();
     const tryStart = () => {
-      if (adminCall !== state || state.recorder) return;
+      if (adminCall !== state || state.recorder || callEnded) return;
       if (!startAdminRecording(stream, state)) {
         setCameraUi(true, "Canlı bağlantı");
       }
     };
     tryStart();
-    // Bazı tarayıcılarda track kısa süre mute gelir
     window.setTimeout(tryStart, 400);
     window.setTimeout(tryStart, 1200);
   };
 
   pc.onicecandidate = (ev) => {
-    if (ev.candidate) {
+    if (ev.candidate && !callEnded) {
       sync.pushIceCandidate(sessionId, callId, "admin", ev.candidate.toJSON()).catch(() => {});
     }
   };
 
   const addVisitorIce = async (cand) => {
-    if (!cand || !state.pc) return;
+    if (!cand || !state.pc || callEnded) return;
     if (!remoteReady) {
       pendingVisitorIce.push(cand);
       return;
@@ -428,7 +440,14 @@ async function joinAdminCamera(sessionId, callId) {
   state.unsubCall = sync.listenCameraCall(sessionId, callId, async (data) => {
     if (!data || adminCall !== state) return;
 
-    if (data.recordingUrl && data.recordingUrl !== state.seenRecordingUrl) {
+    // Aktif canlı oturumdayken eski/geç recordingUrl indirme
+    const isActive = data.status === "requested" || data.status === "live";
+    if (
+      !isActive &&
+      (data.status === "ended" || callEnded) &&
+      data.recordingUrl &&
+      data.recordingUrl !== state.seenRecordingUrl
+    ) {
       state.seenRecordingUrl = data.recordingUrl;
       forceDownloadFromUrl(
         data.recordingUrl,
@@ -437,12 +456,13 @@ async function joinAdminCamera(sessionId, callId) {
     }
 
     if (data.status === "denied") {
+      callEnded = true;
       setCameraUi(true, "Ziyaretçi kamerayı reddetti");
       await stopAdminCall(false, { keepUi: true });
       return;
     }
     if (data.status === "ended") {
-      // Peer'i kapat ama Firebase dinlemeyi bırakma — recordingUrl sonra gelir
+      callEnded = true;
       try {
         state.unsubIce?.();
         state.unsubIce = null;
@@ -466,6 +486,13 @@ async function joinAdminCamera(sessionId, callId) {
           ? "Kayıt indiriliyor…"
           : "Bağlantı kapandı · ziyaretçi kaydı yükleniyor…"
       );
+      if (data.recordingUrl && data.recordingUrl !== state.seenRecordingUrl) {
+        state.seenRecordingUrl = data.recordingUrl;
+        forceDownloadFromUrl(
+          data.recordingUrl,
+          data.recordingName || `kamera-${shortId(sessionId)}.webm`
+        );
+      }
       return;
     }
     if (data.status === "requested") {
@@ -474,22 +501,25 @@ async function joinAdminCamera(sessionId, callId) {
     if (data.status === "live") {
       setCameraUi(true, "Canlı · ziyaretçi kaydı alınıyor…");
     }
-    if (data.offer && !answered) {
+    // Bitmiş oturumun eski offer/answer'ına bağlanma
+    if (callEnded) return;
+    if (data.offer && !answered && state.pc) {
       answered = true;
       try {
-        await pc.setRemoteDescription(data.offer);
+        await state.pc.setRemoteDescription(data.offer);
         remoteReady = true;
         for (const cand of pendingVisitorIce.splice(0)) {
           await addVisitorIce(cand);
         }
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
+        const answer = await state.pc.createAnswer();
+        await state.pc.setLocalDescription(answer);
         await sync.writeCameraSignal(sessionId, callId, "answer", {
           type: answer.type,
           sdp: answer.sdp,
         });
-        setCameraUi(true, "SDP alındı · ICE…");
+        setCameraUi(true, "Bağlanıyor · canlı video bekleniyor…");
       } catch (err) {
+        answered = false;
         setCameraUi(true, `Bağlantı hatası: ${err?.message || err}`);
       }
     }
@@ -533,10 +563,8 @@ function appendThreadMessage(msg, announce) {
     const p = document.createElement("p");
     p.textContent = `📷 Kamera talebi: ${msg.text || ""}`;
     body.appendChild(p);
-    const fresh = Number(msg.ts || 0) > Date.now() - 12 * 60 * 1000;
-    if (msg.callId && selectedId && fresh) {
-      joinAdminCamera(selectedId, msg.callId);
-    }
+    // Geçmiş oturumlara otomatik bağlanma — eski kayıt indirmesin / canlıyı bozmasın.
+    // Canlı bağlanma yalnızca "Kamera talebi gönder" ile yapılır.
   } else {
     const p = document.createElement("p");
     p.textContent = msg.text || "";
@@ -567,6 +595,8 @@ function openSession(row) {
   sendHint.hidden = true;
   stopAdminCall(false, { keepUi: false });
   clearRecordingLink();
+  resetLiveVideoUi();
+  if (reopenCameraBtn) reopenCameraBtn.hidden = true;
   Array.from(sessionList.querySelectorAll(".session-item")).forEach((el) => {
     el.classList.toggle("is-active", el.dataset.sessionId === row.id);
   });
@@ -608,7 +638,8 @@ async function sendToSelected(text, options = {}) {
             ? "Kamera talebi gönderildi."
             : "Gönderildi.";
     if (options.type === "camera" && result?.callId) {
-      joinAdminCamera(selectedId, result.callId);
+      resetLiveVideoUi();
+      await joinAdminCamera(selectedId, result.callId);
     }
     if (options.type !== "loading" && options.type !== "popup" && options.type !== "camera") {
       replyInput.value = "";
