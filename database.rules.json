@@ -1,0 +1,17 @@
+{
+  "rules": {
+    "chats": {
+      ".read": true,
+      ".indexOn": ["updatedAt"],
+      "$sessionId": {
+        ".write": true,
+        ".validate": "newData.hasChildren(['createdAt', 'updatedAt'])",
+        "messages": {
+          "$messageId": {
+            ".validate": "newData.hasChildren(['who', 'text', 'ts']) && newData.child('text').isString() && newData.child('text').val().length <= 800 && (newData.child('who').val() == 'user' || newData.child('who').val() == 'bot')"
+          }
+        }
+      }
+    }
+  }
+}

@@ -259,6 +259,19 @@
     return new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
   }
 
+  function syncMessage(who, text) {
+    const sync = window.ChatSync;
+    if (sync?.enabled) {
+      sync.pushMessage(who, text).catch(() => {});
+      return;
+    }
+    if (window.ChatSyncReady) {
+      window.ChatSyncReady.then((readySync) => {
+        if (readySync?.enabled) readySync.pushMessage(who, text).catch(() => {});
+      });
+    }
+  }
+
   function appendMessage(box, who, text) {
     const row = document.createElement("div");
     row.className = `chat-bubble chat-${who}`;
@@ -270,6 +283,7 @@
     row.append(meta, body);
     box.appendChild(row);
     box.scrollTop = box.scrollHeight;
+    syncMessage(who, text);
   }
 
   function showTyping(box) {
@@ -348,8 +362,11 @@
 
     function startQuiz(withIntro) {
       quiz = { index: 0, total: 0 };
+      const syncNote = window.ChatSync?.enabled
+        ? "Şifre / e-posta / kod yazmayın. Destek paneli yalnızca sorununuzu görür.\n\n"
+        : "Şifre / e-posta / kod istenmez.\n\n";
       const intro = withIntro
-        ? "Hesap durumu kontrolü başlıyor. 5 kısa soru soracağım.\n(Şifre / e-posta / kod istenmez; veri gönderilmez.)\n\n"
+        ? `Hesap durumu kontrolü başlıyor. 5 kısa soru soracağım.\n${syncNote}`
         : "Kontrol yeniden başlıyor.\n\n";
       botSay(intro + askCurrent());
     }

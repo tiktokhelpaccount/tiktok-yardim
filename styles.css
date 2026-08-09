@@ -1039,6 +1039,196 @@ a {
   }
 }
 
+/* Admin canlı panel */
+.admin-body {
+  min-height: 100vh;
+}
+
+.admin-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.admin-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.admin-main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1rem 1.25rem 3rem;
+}
+
+.setup-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+  display: grid;
+  gap: 1rem;
+}
+
+.setup-steps li {
+  counter-increment: step;
+  padding: 1.15rem 1.2rem 1.15rem 3.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.65);
+  position: relative;
+}
+
+.setup-steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 1rem;
+  top: 1.15rem;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.setup-steps strong {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+
+.setup-steps p,
+.setup-steps ul {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+}
+
+.setup-steps code {
+  font-size: 0.88em;
+  background: rgba(10, 10, 11, 0.06);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
+
+.admin-login .appeal-form input[type="password"] {
+  width: 100%;
+  padding: 0.8rem 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  font-weight: 400;
+}
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) 1fr;
+  gap: 1rem;
+  min-height: min(72vh, 700px);
+}
+
+.admin-sessions,
+.admin-thread {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.72);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-pane-head {
+  padding: 1rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-pane-head h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.admin-pane-head p {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.session-empty {
+  padding: 1rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.session-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 12px;
+  padding: 0.75rem 0.8rem;
+  margin-bottom: 0.35rem;
+  cursor: pointer;
+  font: inherit;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.session-item:hover,
+.session-item.is-active {
+  background: rgba(37, 244, 238, 0.12);
+  border-color: rgba(37, 244, 238, 0.35);
+}
+
+.session-item strong {
+  font-size: 0.92rem;
+}
+
+.session-item span {
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-item em {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 0.78rem;
+}
+
+.admin-messages {
+  max-height: none;
+  flex: 1;
+  min-height: 360px;
+}
+
+@media (max-width: 860px) {
+  .admin-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-sessions {
+    max-height: 280px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
