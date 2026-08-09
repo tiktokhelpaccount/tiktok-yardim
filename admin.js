@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=52";
+import "./chat-sync.js?v=53";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -1386,20 +1386,33 @@ function appendThreadMessage(msg, announce) {
   }
 
   if (announce && msg.who === "user") {
+    const text = String(msg.text || "(boş mesaj)").slice(0, 180);
     const focusedInChat =
       !document.hidden &&
       Boolean(
         document.activeElement === replyInput ||
           document.activeElement?.closest?.(".admin-thread, .admin-compose, #reply-form")
       );
-    // Chat kutusunda aktif değilse sesli + uyarı
-    if (!focusedInChat) {
+    const threadVisible = (() => {
+      if (!threadMessages || document.hidden) return false;
+      const r = threadMessages.getBoundingClientRect();
+      return r.width > 40 && r.height > 60 && r.bottom > 80 && r.top < window.innerHeight - 40;
+    })();
+
+    // Karşılıklı kural: sohbet görünür/odaklıysa sessiz toast; değilse sesli uyarı
+    if (!focusedInChat && !threadVisible) {
       fireHighAlert({
         kicker: "YENİ MESAJ",
         title: "Ziyaretçi yazdı",
-        body: String(msg.text || "(boş mesaj)").slice(0, 180),
+        body: text,
         tag: `msg-${selectedId || "x"}`,
         force: document.hidden,
+      });
+    } else {
+      showAdminAlert({
+        kicker: "YENİ MESAJ",
+        title: "Ziyaretçi yazdı",
+        body: text,
       });
     }
   }

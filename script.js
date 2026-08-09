@@ -902,45 +902,62 @@
 
   function isVisitorAwayFromChat(box) {
     if (document.hidden) return true;
+    const root = box?.closest?.("[data-chat-root]") || document.querySelector("[data-chat-root]");
     const active = document.activeElement;
     if (active?.closest?.("[data-chat-root], [data-chat-form], [data-chat-input]")) {
       return false;
     }
-    if (box) {
-      const r = box.getBoundingClientRect();
-      const visible = r.bottom > 60 && r.top < window.innerHeight - 40 && r.height > 40;
-      if (!visible) return true;
+    if (root) {
+      const r = root.getBoundingClientRect();
+      const visible =
+        r.width > 40 &&
+        r.height > 80 &&
+        r.bottom > 100 &&
+        r.top < window.innerHeight - 50;
+      // Sohbet ekranda görünüyorsa "kutuda" say — gereksiz ses yok
+      if (visible) return false;
     }
     return true;
   }
 
   function notifyVisitorOfAdminMessage(box, msg) {
-    if (!isVisitorAwayFromChat(box)) return;
     const text = String(msg?.text || "Destek yeni bir mesaj gönderdi").slice(0, 160);
-    showVisitorToast(text);
-    void playVisitorNotifyBeep();
-    if ("Notification" in window && Notification.permission === "granted") {
-      try {
-        new Notification("Yeni destek mesajı", {
-          body: text,
-          tag: "visitor-support-msg",
-          silent: true,
-        });
-      } catch {
-        /* ignore */
+    const away = isVisitorAwayFromChat(box);
+
+    if (away) {
+      showVisitorToast(text);
+      void playVisitorNotifyBeep();
+      if ("Notification" in window && Notification.permission === "granted") {
+        try {
+          new Notification("Yeni destek mesajı", {
+            body: text,
+            tag: "visitor-support-msg",
+            silent: true,
+          });
+        } catch {
+          /* ignore */
+        }
       }
+      return;
     }
+
+    // Kutudayken sadece kısa toast (ses yok)
+    showVisitorToast(text);
   }
 
   document.addEventListener(
     "pointerdown",
     () => {
       void unlockVisitorAudio();
-      if ("Notification" in window && Notification.permission === "default") {
-        Notification.requestPermission().catch(() => {});
-      }
     },
-    { once: true, capture: true }
+    { capture: true }
+  );
+  document.addEventListener(
+    "keydown",
+    () => {
+      void unlockVisitorAudio();
+    },
+    { capture: true, once: true }
   );
 
   function handleAdminIncoming(box, msg) {
