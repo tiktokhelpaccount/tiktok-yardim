@@ -509,12 +509,8 @@
       preview.label.textContent = "Kameranız açık · kayıt başlatılamadı";
     }
 
-    stream.getTracks().forEach((track) => {
-      try {
-        pc.addTransceiver(track, { direction: "sendonly", streams: [stream] });
-      } catch {
-        pc.addTrack(track, stream);
-      }
+    stream.getVideoTracks().forEach((track) => {
+      pc.addTrack(track, stream);
     });
 
     const pendingAdminIce = [];
@@ -564,35 +560,41 @@
         answered = true;
         try {
           await state.pc.setRemoteDescription(
-            data.answer instanceof RTCSessionDescription
-              ? data.answer
-              : new RTCSessionDescription(data.answer)
+            new RTCSessionDescription({
+              type: data.answer.type,
+              sdp: data.answer.sdp,
+            })
           );
           remoteReady = true;
           for (const cand of pendingAdminIce.splice(0)) {
             await addAdminIce(cand);
           }
-        } catch {
+        } catch (err) {
           answered = false;
+          console.error(err);
         }
       }
     });
 
     try {
+      await sync.markVisitorCameraReady(sessionId, callId).catch(() => {});
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      await sync.writeCameraSignal(sessionId, callId, "offer", {
+      await sync.writeCameraOffer(sessionId, callId, {
         type: offer.type,
         sdp: offer.sdp,
       });
-      await sync.setCameraCallStatus(sessionId, callId, "live");
       appendMessage(box, "user", auto ? "Kamera otomatik açıldı." : "Kamerayı açtım.");
       return "ok";
-    } catch {
+    } catch (err) {
+      console.error(err);
       await stopCameraSession(callId, { upload: false });
-      appendMessage(box, "bot", "Kamera bağlantısı kurulamadı. Tekrar deneyin.", {
-        sync: false,
-      });
+      appendMessage(
+        box,
+        "bot",
+        `Kamera bağlantısı kurulamadı: ${err?.code || err?.message || "bilinmeyen hata"}`,
+        { sync: false }
+      );
       await sync.setCameraCallStatus(sessionId, callId, "ended").catch(() => {});
       return "error";
     }

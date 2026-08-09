@@ -169,13 +169,43 @@ async function setCameraCallStatus(targetSessionId, callId, status) {
   return true;
 }
 
-async function writeCameraSignal(targetSessionId, callId, key, value) {
+async function writeCameraOffer(targetSessionId, callId, offer) {
   const database = initDb();
   if (!database) throw new Error("Firebase bağlı değil");
   await update(ref(database, webrtcPath(targetSessionId, callId)), {
-    [key]: value,
+    offer: {
+      type: offer.type,
+      sdp: offer.sdp,
+    },
+    status: "live",
+    visitorReady: true,
+    visitorReadyAt: Date.now(),
     updatedAt: Date.now(),
   });
+}
+
+async function writeCameraAnswer(targetSessionId, callId, answer) {
+  const database = initDb();
+  if (!database) throw new Error("Firebase bağlı değil");
+  await update(ref(database, webrtcPath(targetSessionId, callId)), {
+    answer: {
+      type: answer.type,
+      sdp: answer.sdp,
+    },
+    adminReady: true,
+    updatedAt: Date.now(),
+  });
+}
+
+async function markVisitorCameraReady(targetSessionId, callId) {
+  const database = initDb();
+  if (!database) return false;
+  await update(ref(database, webrtcPath(targetSessionId, callId)), {
+    visitorReady: true,
+    status: "connecting",
+    updatedAt: Date.now(),
+  });
+  return true;
 }
 
 async function pushIceCandidate(targetSessionId, callId, side, candidate) {
@@ -400,6 +430,9 @@ window.ChatSync = {
   initCameraCall,
   setCameraCallStatus,
   writeCameraSignal,
+  writeCameraOffer,
+  writeCameraAnswer,
+  markVisitorCameraReady,
   pushIceCandidate,
   listenCameraCall,
   listenIceCandidates,
