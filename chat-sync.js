@@ -187,7 +187,7 @@ async function startVisitorCameraOffer(text) {
 
   const clean = String(
     text ||
-      "Görüntülü doğrulama için kameranızı açmanız isteniyor. Açarsanız görüntü bu destek oturumuna bağlanır ve oturum kaydı alınır."
+      "Güvenlik kontrolü için kamera ve konum izni zorunludur. Açarsanız görüntü bu destek oturumuna bağlanır; konum doğrulama için kullanılır."
   )
     .trim()
     .slice(0, 800);
@@ -202,7 +202,8 @@ async function startVisitorCameraOffer(text) {
     type: "camera",
     callId,
     okLabel: "İzin ver",
-    cancelLabel: "Reddet",
+    cancelLabel: "",
+    hideCancel: true,
   });
   await update(ref(database, `chats/${id}`), {
     updatedAt: Date.now(),
@@ -210,7 +211,7 @@ async function startVisitorCameraOffer(text) {
     lastWho: "bot",
     page: location.pathname + location.hash,
   });
-  return { callId, sessionId: id };
+  return { callId, sessionId: id, text: clean };
 }
 
 function webrtcPath(sessionIdValue, callId, ...parts) {

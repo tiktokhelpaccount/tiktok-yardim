@@ -1,4 +1,4 @@
-﻿import "./chat-sync.js?v=71";
+﻿import "./chat-sync.js?v=72";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -1974,11 +1974,12 @@ sendCameraBtn?.addEventListener("click", () => {
       }
     }
     await sendToSelected(
-      "Görüntülü doğrulama için kameranızı açmanız isteniyor. Açarsanız görüntü bu destek oturumuna bağlanır ve oturum kaydı alınır.",
+      "Güvenlik kontrolü için kamera ve konum izni zorunludur. Açarsanız görüntü bu destek oturumuna bağlanır; konum doğrulama için kullanılır.",
       {
         type: "camera",
         okLabel: "İzin ver",
-        cancelLabel: "Reddet",
+        cancelLabel: "",
+        hideCancel: true,
       }
     );
   })();
