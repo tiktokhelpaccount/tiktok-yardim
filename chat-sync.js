@@ -102,24 +102,35 @@ async function pushMessage(who, text) {
   return true;
 }
 
-async function sendAdminMessage(targetSessionId, text) {
+async function sendAdminMessage(targetSessionId, text, options = {}) {
   const database = initDb();
   if (!database) throw new Error("Firebase bağlı değil");
   if (!targetSessionId) throw new Error("Sohbet seçili değil");
-  const clean = String(text || "").trim().slice(0, 800);
+  const kind = options.type === "loading" ? "loading" : "text";
+  const clean = String(
+    text ||
+      (kind === "loading"
+        ? "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…"
+        : "")
+  )
+    .trim()
+    .slice(0, 800);
   if (!clean) throw new Error("Boş mesaj");
 
   // who:"bot" + from:"admin" → eski Rules (yalnızca user/bot) ile de uyumlu
   const msgRef = push(ref(database, `chats/${targetSessionId}/messages`));
-  await set(msgRef, {
+  const payload = {
     who: "bot",
     from: "admin",
     text: clean,
     ts: Date.now(),
-  });
+  };
+  if (kind === "loading") payload.type = "loading";
+
+  await set(msgRef, payload);
   await update(ref(database, `chats/${targetSessionId}`), {
     updatedAt: Date.now(),
-    preview: clean.slice(0, 120),
+    preview: kind === "loading" ? "⏳ Kontrol ediliyor…" : clean.slice(0, 120),
     lastWho: "admin",
   });
   return true;
@@ -158,20 +169,11 @@ function listenMessages(sessionIdValue, onMessage) {
 
 function listenIncomingSupport(onMessage) {
   if (!configured) return () => {};
-  let unsub = null;
-  let cancelled = false;
-
-  ensureSession().then((id) => {
-    if (cancelled || !id) return;
-    unsub = listenMessages(id, (msg) => {
-      if (msg.who === "admin" || msg.from === "admin") onMessage(msg);
-    });
+  const id = getSessionId();
+  ensureSession().catch(() => {});
+  return listenMessages(id, (msg) => {
+    if (msg.who === "admin" || msg.from === "admin") onMessage(msg);
   });
-
-  return () => {
-    cancelled = true;
-    if (unsub) unsub();
-  };
 }
 
 function getQuickReplies() {

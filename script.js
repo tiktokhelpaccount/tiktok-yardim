@@ -274,17 +274,31 @@
 
   function appendMessage(box, who, text, options = {}) {
     const syncOut = options.sync !== false;
+    const isLoading = options.type === "loading";
     const label =
       who === "user" ? "Siz" : who === "admin" ? "Destek" : "Asistan";
     const row = document.createElement("div");
     row.className = `chat-bubble chat-${who === "user" ? "user" : "bot"}${
       who === "admin" ? " chat-admin" : ""
-    }`;
+    }${isLoading ? " chat-loading" : ""}`;
     const meta = document.createElement("span");
     meta.className = "chat-meta";
     meta.textContent = `${label} · ${nowLabel()}`;
-    const body = document.createElement("p");
-    body.textContent = text;
+    const body = document.createElement("div");
+    body.className = "chat-loading-body";
+    if (isLoading) {
+      body.innerHTML = `
+        <span class="chat-spinner" aria-hidden="true"></span>
+        <p></p>
+        <span class="chat-loading-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      `;
+      body.querySelector("p").textContent =
+        text || "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…";
+    } else {
+      const p = document.createElement("p");
+      p.textContent = text;
+      body.appendChild(p);
+    }
     row.append(meta, body);
     box.appendChild(row);
     box.scrollTop = box.scrollHeight;
@@ -488,14 +502,27 @@
 
     if (window.ChatSync?.listenIncomingSupport) {
       window.ChatSync.listenIncomingSupport((msg) => {
-        appendMessage(box, "admin", msg.text || "", { sync: false });
-      });
-    } else if (window.ChatSyncReady) {
-      window.ChatSyncReady.then((sync) => {
-        sync?.listenIncomingSupport?.((msg) => {
-          appendMessage(box, "admin", msg.text || "", { sync: false });
+        appendMessage(box, "admin", msg.text || "", {
+          sync: false,
+          type: msg.type === "loading" ? "loading" : "text",
         });
       });
+    } else {
+      let n = 0;
+      const t = setInterval(() => {
+        n += 1;
+        if (window.ChatSync?.listenIncomingSupport) {
+          clearInterval(t);
+          window.ChatSync.listenIncomingSupport((msg) => {
+            appendMessage(box, "admin", msg.text || "", {
+              sync: false,
+              type: msg.type === "loading" ? "loading" : "text",
+            });
+          });
+        } else if (n > 80) {
+          clearInterval(t);
+        }
+      }, 50);
     }
   }
 

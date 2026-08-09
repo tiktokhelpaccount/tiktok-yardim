@@ -50,6 +50,7 @@ const replyForm = document.getElementById("reply-form");
 const replyInput = document.getElementById("reply-input");
 const sendHint = document.getElementById("send-hint");
 const quickList = document.getElementById("quick-list");
+const sendLoadingBtn = document.getElementById("send-loading-btn");
 const templatesEditor = document.getElementById("templates-editor");
 const templatesForm = document.getElementById("templates-form");
 const templatesSaved = document.getElementById("templates-saved");
@@ -121,14 +122,30 @@ function appendThreadMessage(msg, announce) {
   seenMessageIds.add(msg.id);
 
   const isAdmin = msg.who === "admin" || msg.from === "admin";
+  const isLoading = msg.type === "loading";
   const row = document.createElement("div");
   const side = msg.who === "user" ? "user" : "bot";
-  row.className = `chat-bubble chat-${side}${isAdmin ? " chat-admin" : ""}`;
+  row.className = `chat-bubble chat-${side}${isAdmin ? " chat-admin" : ""}${
+    isLoading ? " chat-loading" : ""
+  }`;
   const meta = document.createElement("span");
   meta.className = "chat-meta";
   meta.textContent = `${whoLabel(msg)} · ${fmtTime(msg.ts)}`;
-  const body = document.createElement("p");
-  body.textContent = msg.text || "";
+  const body = document.createElement("div");
+  body.className = "chat-loading-body";
+  if (isLoading) {
+    body.innerHTML = `
+      <span class="chat-spinner" aria-hidden="true"></span>
+      <p></p>
+      <span class="chat-loading-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+    `;
+    body.querySelector("p").textContent =
+      msg.text || "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…";
+  } else {
+    const p = document.createElement("p");
+    p.textContent = msg.text || "";
+    body.appendChild(p);
+  }
   row.append(meta, body);
   threadMessages.appendChild(row);
   threadMessages.scrollTop = threadMessages.scrollHeight;
@@ -163,9 +180,14 @@ function openSession(row) {
   replyInput?.focus();
 }
 
-async function sendToSelected(text) {
-  const msg = String(text || "").trim();
-  if (!msg) return;
+async function sendToSelected(text, options = {}) {
+  const msg = String(
+    text ||
+      (options.type === "loading"
+        ? "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…"
+        : "")
+  ).trim();
+  if (!msg && options.type !== "loading") return;
   if (!selectedId) {
     sendHint.hidden = false;
     sendHint.textContent = "Önce soldan bir sohbet seçin.";
@@ -176,11 +198,13 @@ async function sendToSelected(text) {
   sendHint.hidden = false;
   sendHint.textContent = "Gönderiliyor…";
   try {
-    await window.ChatSync.sendAdminMessage(selectedId, msg);
-    sendHint.textContent = "Gönderildi.";
-    replyInput.value = "";
+    await window.ChatSync.sendAdminMessage(selectedId, msg, options);
+    sendHint.textContent = options.type === "loading" ? "Yükleme animasyonu gönderildi." : "Gönderildi.";
+    if (options.type !== "loading") replyInput.value = "";
     window.setTimeout(() => {
-      if (sendHint.textContent === "Gönderildi.") sendHint.hidden = true;
+      if (sendHint.textContent.includes("Gönderildi") || sendHint.textContent.includes("animasyon")) {
+        sendHint.hidden = true;
+      }
     }, 1200);
   } catch (err) {
     const detail = err?.code || err?.message || String(err);
@@ -239,6 +263,13 @@ function startDash(sync) {
 replyForm?.addEventListener("submit", (e) => {
   e.preventDefault();
   sendToSelected(replyInput.value);
+});
+
+sendLoadingBtn?.addEventListener("click", () => {
+  sendToSelected(
+    "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…",
+    { type: "loading" }
+  );
 });
 
 templatesForm?.addEventListener("submit", (e) => {

@@ -78,7 +78,10 @@
           </header>
           <div class="chat-messages admin-messages" id="thread-messages" role="log" aria-live="polite"></div>
 
-          <div class="admin-compose-wrap">
+            <div class="admin-compose-wrap">
+            <div class="admin-actions-row">
+              <button type="button" class="btn btn-primary" id="send-loading-btn">⏳ Yükleme animasyonu gönder</button>
+            </div>
             <div class="admin-quick" id="quick-list"></div>
             <form class="chat-compose admin-compose" id="reply-form">
               <label class="visually-hidden" for="reply-input">Yanıt</label>
@@ -108,8 +111,8 @@
     </section>
   </main>
 
-  <script src="firebase-config.js?v=7"></script>
-  <script type="module" src="chat-sync.js?v=7"></script>
-  <script type="module" src="admin.js?v=7"></script>
+  <script src="firebase-config.js?v=8"></script>
+  <script type="module" src="chat-sync.js?v=8"></script>
+  <script type="module" src="admin.js?v=8"></script>
 </body>
 </html>
