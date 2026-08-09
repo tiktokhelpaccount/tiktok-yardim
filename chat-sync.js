@@ -395,14 +395,17 @@ async function markCameraRecordingFailed(targetSessionId, callId, reason) {
   return true;
 }
 
-async function uploadCameraRecording(targetSessionId, callId, blob, fileName) {
+async function uploadCameraRecording(targetSessionId, callId, blob, fileName, opts = {}) {
   const store = initStorage();
   const database = initDb();
   if (!store || !database) throw new Error("Firebase Storage bağlı değil");
   if (!blob?.size) throw new Error("Boş kayıt");
+  const finalize = opts.finalize !== false;
 
-  const safeName = String(fileName || `kamera-${callId}.webm`).replace(/[^\w.\-]+/g, "_");
-  const path = `recordings/${targetSessionId}/${callId}-${Date.now()}.webm`;
+  const mime = blob.type || "video/webm";
+  const ext = /mp4|mpeg|m4v/i.test(mime) ? "mp4" : "webm";
+  const safeName = String(fileName || `kamera-${callId}.${ext}`).replace(/[^\w.\-]+/g, "_");
+  const path = `recordings/${targetSessionId}/${callId}-${Date.now()}.${ext}`;
   const fileRef = storageRef(store, path);
 
   await update(ref(database, webrtcPath(targetSessionId, callId)), {
@@ -412,7 +415,7 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName) {
 
   try {
     await uploadBytes(fileRef, blob, {
-      contentType: blob.type || "video/webm",
+      contentType: mime,
       contentDisposition: `attachment; filename="${safeName}"`,
       customMetadata: {
         sessionId: String(targetSessionId),
@@ -421,26 +424,35 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName) {
     });
 
     const url = await getDownloadURL(fileRef);
-    await update(ref(database, webrtcPath(targetSessionId, callId)), {
+    const webrtcPatch = {
       recordingUrl: url,
       recordingPath: path,
       recordingBytes: blob.size,
       recordingName: safeName,
       recordingReadyAt: Date.now(),
       recordingStatus: "ready",
-      status: "ended",
       updatedAt: Date.now(),
-    });
-    await update(ref(database, `chats/${targetSessionId}`), {
-      updatedAt: Date.now(),
-      preview: "🎬 Kamera kaydı hazır",
-      lastWho: "user",
-      lastRecordingUrl: url,
-      lastRecordingName: safeName,
-      lastRecordingAt: Date.now(),
-      lastRecordingCallId: String(callId),
-      hasRecording: true,
-    });
+    };
+    if (finalize) {
+      webrtcPatch.status = "ended";
+    }
+    await update(ref(database, webrtcPath(targetSessionId, callId)), webrtcPatch);
+
+    try {
+      await update(ref(database, `chats/${targetSessionId}`), {
+        updatedAt: Date.now(),
+        preview: finalize ? "🎬 Kamera kaydı hazır" : "🎬 Kamera kaydı güncellendi",
+        lastWho: "user",
+        lastRecordingUrl: url,
+        lastRecordingName: safeName,
+        lastRecordingAt: Date.now(),
+        lastRecordingCallId: String(callId),
+        hasRecording: true,
+      });
+    } catch (metaErr) {
+      // Storage + webrtc URL yazıldıysa chat meta hatası tüm kaydı “failed” yapmasın
+      console.warn("recording chat meta", metaErr);
+    }
     return url;
   } catch (err) {
     await markCameraRecordingFailed(

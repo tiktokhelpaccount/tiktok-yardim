@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=54";
+﻿import "./chat-sync.js?v=68";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -804,16 +804,18 @@ function renderSessions(rows) {
       if (
         selected.lastRecordingCallId &&
         !adminCall &&
-        selected.hasRecording &&
         !selected.lastRecordingUrl
       ) {
-        startRecordingWatch(selected.id, selected.lastRecordingCallId, {
-          sessionId: selected.id,
-          callId: selected.lastRecordingCallId,
-          lastBlob: null,
-          seenRecordingUrl: null,
-          awaitingRecording: true,
-        });
+        const watchKey = `${selected.id}/${selected.lastRecordingCallId}`;
+        if (recordingWatchKey !== watchKey) {
+          startRecordingWatch(selected.id, selected.lastRecordingCallId, {
+            sessionId: selected.id,
+            callId: selected.lastRecordingCallId,
+            lastBlob: null,
+            seenRecordingUrl: null,
+            awaitingRecording: true,
+          });
+        }
       }
     }
   }
@@ -1074,13 +1076,15 @@ function startRecordingWatch(sessionId, callId, state) {
     }
     if (data.recordingUrl && data.recordingUrl !== state.seenRecordingUrl) {
       state.seenRecordingUrl = data.recordingUrl;
-      const key = `${sessionId}:${data.recordingUrl}`;
-      autoDownloadedRecKeys.add(key);
-      forceDownloadFromUrl(
+      const dlKey = `${sessionId}:${data.recordingUrl}`;
+      autoDownloadedRecKeys.add(dlKey);
+      void forceDownloadFromUrl(
         data.recordingUrl,
         data.recordingName || `kamera-${shortId(sessionId)}.webm`
       );
-      stopRecordingWatch();
+      if (data.recordingStatus === "ready" && (data.status === "ended" || data.forceClose)) {
+        stopRecordingWatch();
+      }
       return;
     }
     if (data.recordingStatus === "failed") {
@@ -1098,7 +1102,7 @@ function startRecordingWatch(sessionId, callId, state) {
     }
   });
 
-  // Storage gelmezse 40 sn sonra admin yerel kaydını indir
+  // Ziyaretçi kaydı 90 sn + yükleme; 40 sn erken kesilmesin
   recordingWatchTimer = window.setTimeout(() => {
     if (recordingWatchKey !== key) return;
     if (state.seenRecordingUrl) {
@@ -1107,15 +1111,19 @@ function startRecordingWatch(sessionId, callId, state) {
     }
     if (state.lastBlob?.size) {
       forceDownloadBlob(state.lastBlob, `kamera-admin-${shortId(sessionId)}.webm`);
-      setCameraUi(true, "Storage gecikti · yerel kayıt indirildi");
-    } else {
-      setCameraUi(true, "Kayıt gelmedi · Storage / kamera süresini kontrol edin");
-      sendHint.hidden = false;
-      sendHint.textContent =
-        "Kayıt gelmedi. Firebase Storage Rules yayınlı mı ve ziyaretçi sayfası güncel mi kontrol edin.";
+      setCameraUi(true, "Storage gecikti · yerel kayıt indirildi — Storage URL gelirse tekrar iner");
+      // Yerel yedek sonrası Storage URL için biraz daha dinle
+      recordingWatchTimer = window.setTimeout(() => {
+        if (recordingWatchKey === key) stopRecordingWatch();
+      }, 120000);
+      return;
     }
+    setCameraUi(true, "Kayıt bekleniyor… ziyaretçi sayfası açık mı / Storage kuralları?");
+    sendHint.hidden = false;
+    sendHint.textContent =
+      "Kayıt henüz gelmedi. Ziyaretçi en az 35 sn kalsın (parça yükleme) veya Kamera’yı sonlandırın.";
     stopRecordingWatch();
-  }, 40000);
+  }, 180000);
 }
 
 function resetLiveVideoUi() {
