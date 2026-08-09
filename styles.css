@@ -1370,52 +1370,80 @@ a {
   font-style: normal;
 }
 
-.support-popup {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  display: grid;
-  place-items: center;
-  padding: 1.25rem;
-  background: rgba(10, 10, 11, 0.55);
-  animation: rise-in 0.22s ease both;
+.chat-inline-prompt {
+  align-self: stretch;
+  margin: 0.25rem 0 0.5rem;
+  padding: 0.9rem 0.95rem;
+  border-radius: 16px;
+  border: 1px solid rgba(37, 244, 238, 0.45);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 243, 238, 0.95));
+  box-shadow: 0 8px 24px rgba(10, 10, 11, 0.08);
+  animation: rise-in 0.25s ease both;
 }
 
-.support-popup-card {
-  width: min(92vw, 420px);
-  padding: 1.35rem 1.25rem 1.2rem;
-  border-radius: 18px;
-  background: #fff;
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
-}
-
-.support-popup-text {
-  margin: 0 0 1.15rem;
-  font-size: 1.05rem;
-  line-height: 1.45;
+.chat-inline-prompt-title {
+  margin: 0 0 0.7rem;
+  font-size: 0.95rem;
+  font-weight: 600;
   color: var(--ink);
+  line-height: 1.4;
   white-space: pre-wrap;
 }
 
-.support-popup-actions {
+.chat-inline-prompt-input {
+  width: 100%;
+  min-height: 4.2rem;
+  margin: 0 0 0.7rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  font: inherit;
+  resize: vertical;
+}
+
+.chat-inline-prompt-input:focus {
+  outline: none;
+  border-color: rgba(37, 244, 238, 0.8);
+  box-shadow: 0 0 0 4px rgba(37, 244, 238, 0.16);
+}
+
+.chat-inline-prompt-input.is-invalid {
+  border-color: rgba(254, 44, 85, 0.7);
+  box-shadow: 0 0 0 4px rgba(254, 44, 85, 0.12);
+}
+
+.chat-inline-prompt-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.55rem;
+  gap: 0.5rem;
 }
 
-.support-popup-actions .btn {
+.chat-inline-prompt-actions .btn {
   width: 100%;
+  padding: 0.7rem 0.9rem;
 }
 
-.support-popup-actions .btn-ghost {
+.chat-inline-prompt-actions .btn-ghost {
   border-color: var(--line);
   color: var(--ink);
 }
 
+.admin-check {
+  display: flex !important;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 500 !important;
+}
+
+.admin-check input {
+  width: auto !important;
+}
+
 @media (max-width: 520px) {
   .admin-popup-btns-edit,
-  .support-popup-actions {
+  .chat-inline-prompt-actions {
     grid-template-columns: 1fr;
   }
 }

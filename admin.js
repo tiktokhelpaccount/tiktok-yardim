@@ -55,6 +55,8 @@ const sendPopupBtn = document.getElementById("send-popup-btn");
 const popupText = document.getElementById("popup-text");
 const popupOk = document.getElementById("popup-ok");
 const popupCancel = document.getElementById("popup-cancel");
+const popupWithInput = document.getElementById("popup-with-input");
+const popupPlaceholder = document.getElementById("popup-placeholder");
 const templatesEditor = document.getElementById("templates-editor");
 const templatesForm = document.getElementById("templates-form");
 const templatesSaved = document.getElementById("templates-saved");
@@ -150,7 +152,9 @@ function appendThreadMessage(msg, announce) {
     p.textContent = `Popup: ${msg.text || ""}`;
     const tags = document.createElement("em");
     tags.className = "popup-btn-tags";
-    tags.textContent = `${msg.okLabel || "Tamam"} / ${msg.cancelLabel || "İptal"}`;
+    tags.textContent = `${msg.okLabel || "Tamam"} / ${msg.cancelLabel || "İptal"}${
+      msg.withInput ? " · metin kutusu" : ""
+    }`;
     body.append(p, tags);
   } else {
     const p = document.createElement("p");
@@ -297,6 +301,8 @@ sendPopupBtn?.addEventListener("click", () => {
     type: "popup",
     okLabel: popupOk?.value || "Tamam",
     cancelLabel: popupCancel?.value || "İptal",
+    withInput: Boolean(popupWithInput?.checked),
+    placeholder: popupPlaceholder?.value || "Yanıtınızı yazın…",
   });
 });
 

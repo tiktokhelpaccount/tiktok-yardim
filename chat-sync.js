@@ -135,6 +135,10 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
   if (kind === "popup") {
     payload.okLabel = okLabel;
     payload.cancelLabel = cancelLabel;
+    payload.withInput = Boolean(options.withInput);
+    if (options.placeholder) {
+      payload.placeholder = String(options.placeholder).trim().slice(0, 120);
+    }
   }
 
   await set(msgRef, payload);

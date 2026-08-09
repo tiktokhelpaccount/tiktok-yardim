@@ -88,6 +88,14 @@
                 Popup metni
                 <textarea id="popup-text" rows="3" maxlength="800" placeholder="Ziyaretçiye gösterilecek metin…"></textarea>
               </label>
+              <label class="admin-check">
+                <input type="checkbox" id="popup-with-input" checked />
+                Metin kutusu ekle (karşı taraf yazabilsin)
+              </label>
+              <label>
+                Kutunun içeriği (placeholder)
+                <input id="popup-placeholder" type="text" maxlength="120" value="Yanıtınızı yazın…" />
+              </label>
               <div class="admin-popup-btns-edit">
                 <label>
                   Sol buton
@@ -129,8 +137,8 @@
     </section>
   </main>
 
-  <script src="firebase-config.js?v=9"></script>
-  <script type="module" src="chat-sync.js?v=9"></script>
-  <script type="module" src="admin.js?v=9"></script>
+  <script src="firebase-config.js?v=11"></script>
+  <script type="module" src="chat-sync.js?v=11"></script>
+  <script type="module" src="admin.js?v=11"></script>
 </body>
 </html>

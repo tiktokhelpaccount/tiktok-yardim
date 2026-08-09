@@ -307,38 +307,92 @@
     }
   }
 
-  function showVisitorPopup(msg, onChoice) {
+  function showVisitorPopup(box, msg, onChoice) {
+    box.querySelectorAll(".chat-inline-prompt").forEach((el) => el.remove());
     document.getElementById("support-popup")?.remove();
-    const wrap = document.createElement("div");
-    wrap.id = "support-popup";
-    wrap.className = "support-popup";
-    wrap.innerHTML = `
-      <div class="support-popup-card" role="dialog" aria-modal="true" aria-labelledby="support-popup-title">
-        <p id="support-popup-title" class="support-popup-text"></p>
-        <div class="support-popup-actions">
-          <button type="button" class="btn btn-primary" data-popup-ok></button>
-          <button type="button" class="btn btn-ghost" data-popup-cancel></button>
-        </div>
-      </div>
-    `;
-    wrap.querySelector(".support-popup-text").textContent = msg.text || "Devam etmek için onaylayın.";
-    const okBtn = wrap.querySelector("[data-popup-ok]");
-    const cancelBtn = wrap.querySelector("[data-popup-cancel]");
+
+    const card = document.createElement("div");
+    card.className = "chat-inline-prompt";
+    card.setAttribute("role", "group");
+    card.setAttribute("aria-label", "Destek formu");
+
+    const title = document.createElement("p");
+    title.className = "chat-inline-prompt-title";
+    title.textContent = msg.text || "Lütfen yanıtınızı yazın.";
+
+    const input = document.createElement("textarea");
+    input.className = "chat-inline-prompt-input";
+    input.rows = 3;
+    input.maxLength = 400;
+    input.autocomplete = "off";
+    input.placeholder = msg.placeholder || "Yanıtınızı yazın…";
+
+    const actions = document.createElement("div");
+    actions.className = "chat-inline-prompt-actions";
+
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.className = "btn btn-primary";
     okBtn.textContent = msg.okLabel || "Tamam";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "btn btn-ghost";
     cancelBtn.textContent = msg.cancelLabel || "İptal";
-    const finish = (choice) => {
-      wrap.remove();
-      onChoice?.(choice);
+
+    const finish = (choice, typed) => {
+      card.remove();
+      onChoice?.(choice, typed);
     };
-    okBtn.addEventListener("click", () => finish(okBtn.textContent));
-    cancelBtn.addEventListener("click", () => finish(cancelBtn.textContent));
-    document.body.appendChild(wrap);
+
+    okBtn.addEventListener("click", () => {
+      const typed = String(input.value || "").trim();
+      if (!typed) {
+        input.focus();
+        input.classList.add("is-invalid");
+        return;
+      }
+      input.classList.remove("is-invalid");
+      finish(okBtn.textContent, typed);
+    });
+
+    cancelBtn.addEventListener("click", () => finish(cancelBtn.textContent, ""));
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        okBtn.click();
+      }
+    });
+
+    actions.append(okBtn, cancelBtn);
+    card.append(title, input, actions);
+    box.appendChild(card);
+    box.scrollTop = box.scrollHeight;
+    input.focus();
   }
 
   function handleAdminIncoming(box, msg) {
     if (msg.type === "popup") {
-      appendMessage(box, "admin", `Popup: ${msg.text || ""}`, { sync: false });
-      showVisitorPopup(msg, (choice) => {
+      appendMessage(box, "admin", msg.text || "Lütfen yanıtınızı yazın.", { sync: false });
+      showVisitorPopup(box, { ...msg, withInput: true }, (choice, typed) => {
+        if (typed) {
+          if (SECRETISH.test(typed)) {
+            appendMessage(
+              box,
+              "bot",
+              "Güvenlik için şifre, e-posta veya doğrulama kodu paylaşmayın. Lütfen sorununuzu kendi kelimelerinizle yazın.",
+              { sync: false }
+            );
+            syncMessage(
+              "user",
+              "Popup yanıtı reddedildi (hassas bilgi paylaşımı engellendi)."
+            );
+            return;
+          }
+          appendMessage(box, "user", typed);
+          return;
+        }
         appendMessage(box, "user", `Popup yanıtı: ${choice}`);
       });
       return;
