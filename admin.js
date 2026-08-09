@@ -395,23 +395,68 @@ async function joinAdminCamera(sessionId, callId) {
   };
   adminCall = state;
 
-  pc.ontrack = (ev) => {
-    if (adminCall !== state || callEnded) return;
-    const stream = ev.streams?.[0] || new MediaStream([ev.track]);
-    if (adminRemoteVideo) {
-      adminRemoteVideo.srcObject = stream;
+  const attachLiveVideo = (stream, track) => {
+    if (!adminRemoteVideo || !stream) return;
+    adminRemoteVideo.srcObject = stream;
+    adminRemoteVideo.muted = true;
+    adminRemoteVideo.autoplay = true;
+    adminRemoteVideo.playsInline = true;
+    const kick = () => {
       adminRemoteVideo.play?.().catch(() => {});
+    };
+    kick();
+    adminRemoteVideo.onloadedmetadata = kick;
+    if (track) {
+      track.addEventListener("unmute", () => {
+        // Chrome bazen ilk frameden önce siyah gösterir
+        adminRemoteVideo.srcObject = stream;
+        kick();
+        setCameraUi(true, "Canlı görüntü");
+      });
+      if (track.muted === false) {
+        setCameraUi(true, "Canlı görüntü");
+      }
     }
     showCameraPopup();
-    const tryStart = () => {
-      if (adminCall !== state || state.recorder || callEnded) return;
-      if (!startAdminRecording(stream, state)) {
-        setCameraUi(true, "Canlı bağlantı");
+  };
+
+  pc.ontrack = (ev) => {
+    if (adminCall !== state || callEnded) return;
+    const track = ev.track;
+    const stream = ev.streams?.[0] || new MediaStream([track]);
+    if (track && track.kind === "video") {
+      attachLiveVideo(stream, track);
+      // Gösterim için orijinal track; kayıt için clone (siyah ekranı önler)
+      try {
+        const clone = track.clone();
+        const recordStream = new MediaStream([clone]);
+        window.setTimeout(() => {
+          if (adminCall !== state || state.recorder || callEnded) return;
+          startAdminRecording(recordStream, state);
+        }, 800);
+      } catch {
+        setCameraUi(true, "Canlı görüntü");
       }
-    };
-    tryStart();
-    window.setTimeout(tryStart, 400);
-    window.setTimeout(tryStart, 1200);
+    }
+  };
+
+  pc.onconnectionstatechange = () => {
+    if (adminCall !== state) return;
+    const s = pc.connectionState;
+    if (s === "connected") setCameraUi(true, "Canlı görüntü bağlı");
+    if (s === "failed") setCameraUi(true, "Bağlantı başarısız — ağ/firewall");
+    if (s === "disconnected") setCameraUi(true, "Bağlantı koptu…");
+  };
+
+  pc.oniceconnectionstatechange = () => {
+    if (adminCall !== state) return;
+    const s = pc.iceConnectionState;
+    if (s === "connected" || s === "completed") {
+      setCameraUi(true, "Canlı görüntü (ICE OK)");
+    }
+    if (s === "failed") {
+      setCameraUi(true, "ICE başarısız — TURN denendi, ağ engeli olabilir");
+    }
   };
 
   pc.onicecandidate = (ev) => {
@@ -496,17 +541,23 @@ async function joinAdminCamera(sessionId, callId) {
       return;
     }
     if (data.status === "requested") {
+      clearRecordingLink();
       setCameraUi(true, "Ziyaretçi onayı bekleniyor…");
     }
     if (data.status === "live") {
-      setCameraUi(true, "Canlı · ziyaretçi kaydı alınıyor…");
+      clearRecordingLink();
+      setCameraUi(true, "Bağlanıyor · canlı video bekleniyor…");
     }
     // Bitmiş oturumun eski offer/answer'ına bağlanma
     if (callEnded) return;
     if (data.offer && !answered && state.pc) {
       answered = true;
       try {
-        await state.pc.setRemoteDescription(data.offer);
+        await state.pc.setRemoteDescription(
+          data.offer instanceof RTCSessionDescription
+            ? data.offer
+            : new RTCSessionDescription(data.offer)
+        );
         remoteReady = true;
         for (const cand of pendingVisitorIce.splice(0)) {
           await addVisitorIce(cand);
@@ -517,7 +568,7 @@ async function joinAdminCamera(sessionId, callId) {
           type: answer.type,
           sdp: answer.sdp,
         });
-        setCameraUi(true, "Bağlanıyor · canlı video bekleniyor…");
+        setCameraUi(true, "Yanıt gönderildi · video bekleniyor…");
       } catch (err) {
         answered = false;
         setCameraUi(true, `Bağlantı hatası: ${err?.message || err}`);

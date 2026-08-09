@@ -527,7 +527,13 @@
       preview.label.textContent = "Kameranız açık · kayıt başlatılamadı";
     }
 
-    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+    stream.getTracks().forEach((track) => {
+      try {
+        pc.addTransceiver(track, { direction: "sendonly", streams: [stream] });
+      } catch {
+        pc.addTrack(track, stream);
+      }
+    });
 
     const pendingAdminIce = [];
     let remoteReady = false;
@@ -537,6 +543,12 @@
         sync
           .pushIceCandidate(sessionId, callId, "visitor", ev.candidate.toJSON())
           .catch(() => {});
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (state.label && pc.connectionState === "connected") {
+        state.label.textContent = "Kameranız açık · admin’e bağlı · kayıt alınıyor";
       }
     };
 
@@ -569,19 +581,23 @@
       if (data.answer && !answered) {
         answered = true;
         try {
-          await state.pc.setRemoteDescription(data.answer);
+          await state.pc.setRemoteDescription(
+            data.answer instanceof RTCSessionDescription
+              ? data.answer
+              : new RTCSessionDescription(data.answer)
+          );
           remoteReady = true;
           for (const cand of pendingAdminIce.splice(0)) {
             await addAdminIce(cand);
           }
         } catch {
-          /* ignore */
+          answered = false;
         }
       }
     });
 
     try {
-      const offer = await pc.createOffer({ offerToReceiveVideo: false });
+      const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await sync.writeCameraSignal(sessionId, callId, "offer", {
         type: offer.type,
