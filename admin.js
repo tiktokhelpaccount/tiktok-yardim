@@ -1,3 +1,5 @@
+import "./chat-sync.js";
+
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
   if (window.ChatSyncReady) return window.ChatSyncReady;
@@ -5,9 +7,20 @@ async function ready() {
     let n = 0;
     const t = setInterval(() => {
       n += 1;
-      if (window.ChatSync || n > 60) {
+      if (window.ChatSyncReady) {
         clearInterval(t);
-        resolve(window.ChatSync || null);
+        Promise.resolve(window.ChatSyncReady).then(resolve);
+        return;
+      }
+      if (window.ChatSync) {
+        clearInterval(t);
+        resolve(window.ChatSync);
+        return;
+      }
+      // Firebase CDN geç yüklenebilir — 15 sn bekle
+      if (n > 300) {
+        clearInterval(t);
+        resolve(null);
       }
     }, 50);
   });
@@ -1040,7 +1053,14 @@ loginForm?.addEventListener("submit", (e) => {
 });
 
 const sync = await ready();
-if (!sync || sync.needsSetup) {
+if (!sync) {
+  show("setup");
+  const lede = document.querySelector("#setup-panel .lede");
+  if (lede) {
+    lede.textContent =
+      "Firebase scriptleri yüklenemedi veya çok yavaş. Ctrl+F5 ile yenileyin. İnternet/engelleyici varsa kapatın.";
+  }
+} else if (sync.needsSetup) {
   show("setup");
 } else if (authOk()) {
   startDash(sync);
