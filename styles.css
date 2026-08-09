@@ -1398,6 +1398,16 @@ a {
   line-height: 1.4;
 }
 
+.chat-camera-stop {
+  width: 100%;
+  margin-top: 0.55rem;
+}
+
+.chat-camera-video.is-camera-hidden,
+.chat-camera-video[hidden] {
+  display: none !important;
+}
+
 .admin-camera-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;

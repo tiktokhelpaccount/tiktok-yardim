@@ -446,14 +446,18 @@
     stopBtn.type = "button";
     stopBtn.className = "btn btn-ghost chat-camera-stop";
     stopBtn.textContent = "Kamerayı kapat";
-    stopBtn.addEventListener("click", async () => {
-      stopBtn.disabled = true;
-      const sync = window.ChatSync;
-      if (sync?.enabled) {
-        await sync.setCameraCallStatus(sync.getSessionId(), callId, "ended").catch(() => {});
+    let hidden = false;
+    stopBtn.addEventListener("click", () => {
+      hidden = !hidden;
+      video.hidden = hidden;
+      video.classList.toggle("is-camera-hidden", hidden);
+      if (hidden) {
+        label.textContent = "Kamera gizli · bağlantı ve kayıt devam ediyor";
+        stopBtn.textContent = "Kamerayı göster";
+      } else {
+        label.textContent = "Kameranız açık · kayıt alınıyor";
+        stopBtn.textContent = "Kamerayı kapat";
       }
-      await stopCameraSession(callId, { upload: true });
-      appendMessage(box, "user", "Kamerayı kapattım.");
     });
 
     wrap.append(label, video, stopBtn);
