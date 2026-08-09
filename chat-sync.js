@@ -159,6 +159,16 @@ async function initCameraCall(targetSessionId, callId) {
   });
 }
 
+async function setCameraCallStatus(targetSessionId, callId, status) {
+  const database = initDb();
+  if (!database) return false;
+  await update(ref(database, webrtcPath(targetSessionId, callId)), {
+    status,
+    updatedAt: Date.now(),
+  });
+  return true;
+}
+
 async function forceEndCameraCall(targetSessionId, callId) {
   const database = initDb();
   if (!database || !targetSessionId || !callId) return false;
