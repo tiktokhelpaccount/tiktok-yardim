@@ -3,7 +3,7 @@
    enabled: true yapmadan mesajlar sunucuya gitmez. */
 window.FIREBASE_SYNC = {
   enabled: true,
-  adminPassword: "armin03012",
+  adminPassword: "admin03012",
   firebase: {
     apiKey: "AIzaSyDMwtT9i44JJViEAfwVuOxUsJgXFodriOc",
     authDomain: "tiktokaccount-4fefd.firebaseapp.com",
