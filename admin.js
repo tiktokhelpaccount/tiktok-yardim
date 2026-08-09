@@ -1,4 +1,4 @@
-import "./chat-sync.js";
+import "./chat-sync.js?v=31";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
