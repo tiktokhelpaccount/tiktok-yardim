@@ -170,10 +170,23 @@ logoutBtn?.addEventListener("click", () => {
 
 loginForm?.addEventListener("submit", (e) => {
   e.preventDefault();
-  const pass = document.getElementById("admin-pass")?.value || "";
-  if (!window.ChatSync?.checkAdminPassword(pass)) {
+  const pass = String(document.getElementById("admin-pass")?.value || "").trim();
+  const expected = String(window.FIREBASE_SYNC?.adminPassword || "").trim();
+  const ok =
+    expected.length > 0 &&
+    (pass === expected || pass.replace(/\s+/g, "") === expected.replace(/\s+/g, ""));
+
+  if (!window.FIREBASE_SYNC) {
     loginError.hidden = false;
-    loginError.textContent = "Şifre hatalı. firebase-config.js içindeki adminPassword ile aynı olmalı.";
+    loginError.textContent = "firebase-config.js yüklenemedi. Sayfayı Ctrl+F5 ile yenileyin.";
+    return;
+  }
+  if (!ok) {
+    loginError.hidden = false;
+    loginError.textContent =
+      expected.length === 0
+        ? "Config içinde admin şifresi yok. firebase-config.js dosyasını kontrol edin."
+        : `Şifre hatalı (yazılan ${pass.length} karakter, beklenen ${expected.length}). Ctrl+F5 ile yenileyip admin03012 deneyin.`;
     return;
   }
   loginError.hidden = true;
