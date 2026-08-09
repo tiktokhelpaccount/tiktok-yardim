@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=44";
+import "./chat-sync.js?v=45";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -111,6 +111,8 @@ let alertAudioCtx = null;
 let titleFlashTimer = null;
 let originalTitle = document.title;
 let alertHideTimer = null;
+let alertSoundTimer = null;
+let alertSounding = false;
 
 function ensureAlertAudio() {
   if (alertAudioCtx) return alertAudioCtx;
@@ -146,30 +148,55 @@ function playAlertBeeps() {
   });
 }
 
+function stopAlertSound() {
+  alertSounding = false;
+  if (alertSoundTimer) {
+    clearInterval(alertSoundTimer);
+    alertSoundTimer = null;
+  }
+}
+
+function startAlertSoundLoop() {
+  stopAlertSound();
+  alertSounding = true;
+  playAlertBeeps();
+  // Tamam’a basılana kadar tekrar et
+  alertSoundTimer = window.setInterval(() => {
+    if (!alertSounding) return;
+    playAlertBeeps();
+  }, 1100);
+}
+
 function flashDocumentTitle(text) {
   if (titleFlashTimer) clearInterval(titleFlashTimer);
   let on = false;
-  let n = 0;
   originalTitle = originalTitle || document.title;
   titleFlashTimer = window.setInterval(() => {
-    on = !on;
-    document.title = on ? `● ${text}` : originalTitle;
-    n += 1;
-    if (n > 8) {
+    if (!alertSounding) {
       clearInterval(titleFlashTimer);
       titleFlashTimer = null;
       document.title = originalTitle;
+      return;
     }
+    on = !on;
+    document.title = on ? `● ${text}` : originalTitle;
   }, 700);
 }
 
 function hideAdminAlert() {
+  stopAlertSound();
   if (alertOverlay) alertOverlay.hidden = true;
   document.body.classList.remove("is-alert-flash");
   if (alertHideTimer) {
     clearTimeout(alertHideTimer);
     alertHideTimer = null;
   }
+  if (titleFlashTimer) {
+    clearInterval(titleFlashTimer);
+    titleFlashTimer = null;
+  }
+  document.title = originalTitle || document.title;
+  if (liveBadge) liveBadge.classList.remove("is-ping");
 }
 
 function showAdminAlert({ kicker, title, body }) {
@@ -177,8 +204,11 @@ function showAdminAlert({ kicker, title, body }) {
   if (alertTitle) alertTitle.textContent = title || "Bildirim";
   if (alertBody) alertBody.textContent = body || "";
   if (alertOverlay) alertOverlay.hidden = false;
-  if (alertHideTimer) clearTimeout(alertHideTimer);
-  alertHideTimer = window.setTimeout(hideAdminAlert, 4500);
+  // Otomatik kapanmaz — sadece Tamam ile
+  if (alertHideTimer) {
+    clearTimeout(alertHideTimer);
+    alertHideTimer = null;
+  }
 }
 
 function pushDesktopNotification(title, body, tag) {
@@ -188,8 +218,8 @@ function pushDesktopNotification(title, body, tag) {
     new Notification(title, {
       body: String(body || "").slice(0, 140),
       tag: tag || `alert-${Date.now()}`,
-      requireInteraction: false,
-      silent: false,
+      requireInteraction: true,
+      silent: true,
     });
   } catch {
     /* ignore */
@@ -198,19 +228,11 @@ function pushDesktopNotification(title, body, tag) {
 
 function fireHighAlert({ kicker, title, body, tag }) {
   if (!alertsArmed) return;
-  playAlertBeeps();
   showAdminAlert({ kicker, title, body });
-  // Sekme gizliyse başlık + masaüstü bildirimi yeterli
-  if (document.hidden) {
-    flashDocumentTitle(title);
-    pushDesktopNotification(title, body, tag);
-  } else {
-    pushDesktopNotification(title, body, tag);
-  }
-  if (liveBadge) {
-    liveBadge.classList.add("is-ping");
-    window.setTimeout(() => liveBadge.classList.remove("is-ping"), 2500);
-  }
+  startAlertSoundLoop();
+  flashDocumentTitle(title);
+  pushDesktopNotification(title, body, tag);
+  if (liveBadge) liveBadge.classList.add("is-ping");
 }
 
 async function armAlerts() {
@@ -233,7 +255,7 @@ async function armAlerts() {
       ? "🔔 Alarmlar açık"
       : "🔔 Sesli alarm açık (masaüstü kapalı)";
   }
-  // Test bip (kısa) — tarayıcı ses kilidini açar
+  // Kurulum testi: tek bip (döngü yok)
   playAlertBeeps();
 }
 
