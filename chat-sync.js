@@ -169,6 +169,15 @@ async function setCameraCallStatus(targetSessionId, callId, status) {
   return true;
 }
 
+async function writeCameraSignal(targetSessionId, callId, key, value) {
+  const database = initDb();
+  if (!database) throw new Error("Firebase bağlı değil");
+  await update(ref(database, webrtcPath(targetSessionId, callId)), {
+    [key]: value,
+    updatedAt: Date.now(),
+  });
+}
+
 async function writeCameraOffer(targetSessionId, callId, offer) {
   const database = initDb();
   if (!database) throw new Error("Firebase bağlı değil");
