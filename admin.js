@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=31";
+import "./chat-sync.js?v=32";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -859,9 +859,27 @@ async function endActiveCameraSession() {
     setEndCameraVisible(false);
     return;
   }
-  setCameraUi(true, "Kapatıldı · ziyaretçi kaydı yükleniyor…");
+  const { sessionId, callId } = call;
+  setCameraUi(true, "Oturum sonlandırılıyor…");
   adminCameraBox?.classList.remove("is-recording");
   setEndCameraVisible(false);
+
+  // Önce Firebase’e bitiş yaz — ziyaretçi kamerayı hemen kapatsın
+  if (sessionId && callId && window.ChatSync) {
+    const endFn = window.ChatSync.forceEndCameraCall || window.ChatSync.setCameraCallStatus;
+    try {
+      if (window.ChatSync.forceEndCameraCall) {
+        await window.ChatSync.forceEndCameraCall(sessionId, callId);
+      } else {
+        await window.ChatSync.setCameraCallStatus(sessionId, callId, "ended");
+      }
+    } catch (err) {
+      console.error(err);
+      sendHint.hidden = false;
+      sendHint.textContent = `Sonlandırılamadı: ${err?.message || err}`;
+    }
+  }
+
   try {
     call.unsubIce?.();
     call.unsubIce = null;
@@ -878,13 +896,11 @@ async function endActiveCameraSession() {
     /* ignore */
   }
   if (adminRemoteVideo) adminRemoteVideo.srcObject = null;
-  if (call.sessionId && call.callId && window.ChatSync) {
-    await window.ChatSync.setCameraCallStatus(call.sessionId, call.callId, "ended").catch(() => {});
-  }
+
   sendHint.hidden = false;
   sendHint.textContent =
-    "Oturum sonlandırıldı. Ziyaretçi kaydı yüklenince otomatik iner.";
-  setCameraUi(true, "Kayıt yüklenmesi bekleniyor…");
+    "Oturum sonlandırıldı. Ziyaretçi kamerası kapanır; kayıt gelince iner.";
+  setCameraUi(true, "Ziyaretçi kamerası kapatıldı · kayıt bekleniyor…");
   setEndCameraVisible(false);
   if (reopenCameraBtn) reopenCameraBtn.hidden = false;
   window.setTimeout(() => {

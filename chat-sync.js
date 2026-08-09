@@ -159,11 +159,14 @@ async function initCameraCall(targetSessionId, callId) {
   });
 }
 
-async function setCameraCallStatus(targetSessionId, callId, status) {
+async function forceEndCameraCall(targetSessionId, callId) {
   const database = initDb();
-  if (!database) return false;
+  if (!database || !targetSessionId || !callId) return false;
   await update(ref(database, webrtcPath(targetSessionId, callId)), {
-    status,
+    status: "ended",
+    forceClose: true,
+    endedBy: "admin",
+    endedAt: Date.now(),
     updatedAt: Date.now(),
   });
   return true;
@@ -438,6 +441,7 @@ window.ChatSync = {
   listenIncomingSupport,
   initCameraCall,
   setCameraCallStatus,
+  forceEndCameraCall,
   writeCameraSignal,
   writeCameraOffer,
   writeCameraAnswer,

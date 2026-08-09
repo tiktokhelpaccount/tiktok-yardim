@@ -390,39 +390,42 @@
       /* ignore */
     }
 
+    // Önce kaydı bitir (track’ler hâlâ açıkken)
     const blob = await stopVisitorRecorder(state);
+
+    // Kamerayı hemen kapat / önizlemeyi kaldır
+    try {
+      state.pc?.close();
+    } catch {
+      /* ignore */
+    }
+    try {
+      state.stream?.getTracks()?.forEach((t) => t.stop());
+      if (state.video?.srcObject) state.video.srcObject = null;
+      state.wrap?.remove();
+    } catch {
+      /* ignore */
+    }
+
     const sync = window.ChatSync;
     if (upload && blob?.size && sync?.enabled) {
       try {
-        if (state.label) {
-          state.label.textContent = "Kayıt yükleniyor…";
-        }
         await sync.uploadCameraRecording(
           sync.getSessionId(),
           callId,
           blob,
           `kamera-${String(callId).slice(0, 8)}.webm`
         );
-        if (state.label) state.label.textContent = "Kayıt gönderildi";
+        syncMessage("user", "Kamera oturumu sonlandı; kayıt gönderildi.");
       } catch (err) {
         console.error(err);
-        if (state.label) {
-          state.label.textContent = `Kayıt yüklenemedi: ${err?.code || err?.message || err}`;
-        }
         syncMessage(
           "user",
-          `Kamera kaydı yüklenemedi (${err?.code || err?.message || "hata"}).`
+          `Kamera kapandı; kayıt yüklenemedi (${err?.code || err?.message || "hata"}).`
         );
       }
-    }
-
-    try {
-      state.pc?.close();
-      state.stream?.getTracks()?.forEach((t) => t.stop());
-      if (state.video?.srcObject) state.video.srcObject = null;
-      state.wrap?.remove();
-    } catch {
-      /* ignore */
+    } else if (upload) {
+      syncMessage("user", "Kamera oturumu karşı tarafça sonlandırıldı.");
     }
   }
 
@@ -550,12 +553,22 @@
     let answered = false;
     let ending = false;
     state.unsubAnswer = sync.listenCameraCall(sessionId, callId, async (data) => {
-      if (!data || !state.pc) return;
-      if ((data.status === "ended" || data.status === "denied") && !ending) {
+      if (!data) return;
+      const shouldEnd =
+        data.status === "ended" ||
+        data.status === "denied" ||
+        data.forceClose === true;
+      if (shouldEnd && !ending) {
         ending = true;
-        await stopCameraSession(callId, { upload: data.status === "ended" });
+        await stopCameraSession(callId, {
+          upload: data.status === "ended" || data.forceClose === true,
+        });
+        appendMessage(box, "bot", "Destek kamerayı kapattı / oturumu sonlandırdı.", {
+          sync: false,
+        });
         return;
       }
+      if (!state.pc) return;
       if (data.answer && !answered) {
         answered = true;
         try {
