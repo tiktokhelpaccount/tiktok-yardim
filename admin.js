@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=34";
+import "./chat-sync.js?v=35";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -196,9 +196,46 @@ function clearRecordingLink() {
   }
   downloadRecordingBtn.removeAttribute("href");
   downloadRecordingBtn.hidden = true;
+  downloadRecordingBtn.textContent = "Kaydı indir";
 }
 
-function forceDownloadFromUrl(url, name) {
+function forceDownloadBlob(blob, name) {
+  if (!blob?.size) return false;
+  const fileName = name || `kamera-${Date.now()}.webm`;
+  const objUrl = URL.createObjectURL(blob);
+  if (downloadRecordingBtn) {
+    if (downloadRecordingBtn.href?.startsWith("blob:")) {
+      URL.revokeObjectURL(downloadRecordingBtn.href);
+    }
+    downloadRecordingBtn.href = objUrl;
+    downloadRecordingBtn.download = fileName;
+    downloadRecordingBtn.removeAttribute("target");
+    downloadRecordingBtn.hidden = false;
+    downloadRecordingBtn.textContent = "Kaydı indir";
+  }
+  try {
+    const a = document.createElement("a");
+    a.href = objUrl;
+    a.download = fileName;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } catch {
+    /* ignore */
+  }
+  if (adminCameraBox) adminCameraBox.hidden = false;
+  if (reopenCameraBtn) reopenCameraBtn.hidden = true;
+  setCameraUi(true, "Kayıt indirildi");
+  sendHint.hidden = false;
+  sendHint.textContent = `Kayıt indirildi: ${fileName}`;
+  window.setTimeout(() => {
+    if (sendHint.textContent.includes("Kayıt")) sendHint.hidden = true;
+  }, 5000);
+  return true;
+}
+
+async function forceDownloadFromUrl(url, name) {
   if (!url) return;
   const fileName = name || `kamera-${Date.now()}.webm`;
 
@@ -210,41 +247,113 @@ function forceDownloadFromUrl(url, name) {
     downloadRecordingBtn.hidden = false;
     downloadRecordingBtn.textContent = "Kaydı indir (Storage)";
   }
+  if (adminCameraBox) adminCameraBox.hidden = false;
+  if (reopenCameraBtn) reopenCameraBtn.hidden = true;
+  setCameraUi(true, "Kayıt indiriliyor…");
+  sendHint.hidden = false;
+  sendHint.textContent = `Kayıt indiriliyor: ${fileName}`;
 
-  // contentDisposition=attachment ile iframe indirmeyi tetikler
-  const iframe = document.createElement("iframe");
-  iframe.style.cssText = "position:fixed;width:0;height:0;border:0;visibility:hidden";
-  iframe.src = url;
-  document.body.appendChild(iframe);
-  window.setTimeout(() => iframe.remove(), 120000);
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    if (blob?.size) {
+      forceDownloadBlob(blob, fileName);
+      if (downloadRecordingBtn) downloadRecordingBtn.textContent = "Kaydı indir (Storage)";
+      return;
+    }
+  } catch (err) {
+    console.warn("Blob fetch failed, opening URL", err);
+  }
 
   try {
     const a = document.createElement("a");
     a.href = url;
     a.download = fileName;
+    a.target = "_blank";
     a.rel = "noopener";
     a.style.display = "none";
     document.body.appendChild(a);
     a.click();
     a.remove();
   } catch {
-    /* ignore */
+    window.open(url, "_blank", "noopener");
   }
 
   window.setTimeout(() => {
-    try {
-      downloadRecordingBtn?.click();
-    } catch {
-      /* ignore */
-    }
-  }, 300);
-
-  setCameraUi(true, "Kayıt otomatik indiriliyor (Storage)…");
-  sendHint.hidden = false;
-  sendHint.textContent = `Kayıt indiriliyor: ${fileName}`;
-  window.setTimeout(() => {
     if (sendHint.textContent.includes("Kayıt")) sendHint.hidden = true;
   }, 5000);
+}
+
+let recordingWatchUnsub = null;
+let recordingWatchKey = null;
+let recordingWatchTimer = null;
+
+function stopRecordingWatch() {
+  try {
+    recordingWatchUnsub?.();
+  } catch {
+    /* ignore */
+  }
+  recordingWatchUnsub = null;
+  recordingWatchKey = null;
+  if (recordingWatchTimer) {
+    clearTimeout(recordingWatchTimer);
+    recordingWatchTimer = null;
+  }
+}
+
+function startRecordingWatch(sessionId, callId, state) {
+  stopRecordingWatch();
+  const sync = window.ChatSync;
+  if (!sync?.listenCameraCall || !sessionId || !callId) return;
+  const key = `${sessionId}/${callId}`;
+  recordingWatchKey = key;
+
+  recordingWatchUnsub = sync.listenCameraCall(sessionId, callId, (data) => {
+    if (recordingWatchKey !== key || !data) return;
+    if (data.recordingUrl && data.recordingUrl !== state.seenRecordingUrl) {
+      state.seenRecordingUrl = data.recordingUrl;
+      forceDownloadFromUrl(
+        data.recordingUrl,
+        data.recordingName || `kamera-${shortId(sessionId)}.webm`
+      );
+      stopRecordingWatch();
+      return;
+    }
+    if (data.recordingStatus === "failed") {
+      setCameraUi(
+        true,
+        `Storage kaydı yok (${data.recordingError || "hata"}) · yerel yedek deneniyor…`
+      );
+      if (state.lastBlob?.size) {
+        forceDownloadBlob(state.lastBlob, `kamera-admin-${shortId(sessionId)}.webm`);
+      } else {
+        sendHint.hidden = false;
+        sendHint.textContent = "Kayıt alınamadı. Storage kurallarını yayınladığınızdan emin olun.";
+      }
+      stopRecordingWatch();
+    }
+  });
+
+  // Storage gelmezse 40 sn sonra admin yerel kaydını indir
+  recordingWatchTimer = window.setTimeout(() => {
+    if (recordingWatchKey !== key) return;
+    if (state.seenRecordingUrl) {
+      stopRecordingWatch();
+      return;
+    }
+    if (state.lastBlob?.size) {
+      forceDownloadBlob(state.lastBlob, `kamera-admin-${shortId(sessionId)}.webm`);
+      setCameraUi(true, "Storage gecikti · yerel kayıt indirildi");
+    } else {
+      setCameraUi(true, "Kayıt gelmedi · Storage / kamera süresini kontrol edin");
+      sendHint.hidden = false;
+      sendHint.textContent =
+        "Kayıt gelmedi. Firebase Storage Rules yayınlı mı ve ziyaretçi sayfası güncel mi kontrol edin.";
+    }
+    stopRecordingWatch();
+  }, 40000);
 }
 
 function resetLiveVideoUi() {
@@ -527,19 +636,20 @@ async function joinAdminCamera(sessionId, callId) {
   state.unsubCall = sync.listenCameraCall(sessionId, callId, async (data) => {
     if (!data || adminCall !== state) return;
 
-    // Aktif canlı oturumdayken eski/geç recordingUrl indirme
-    const isActive = data.status === "requested" || data.status === "live";
+    // Storage kaydı hazır — oturum bitti/kapanmış olsa da indir
     if (
-      !isActive &&
-      (data.status === "ended" || callEnded) &&
       data.recordingUrl &&
-      data.recordingUrl !== state.seenRecordingUrl
+      data.recordingUrl !== state.seenRecordingUrl &&
+      (data.status === "ended" ||
+        state.awaitingRecording ||
+        data.recordingStatus === "ready")
     ) {
       state.seenRecordingUrl = data.recordingUrl;
       forceDownloadFromUrl(
         data.recordingUrl,
         data.recordingName || `kamera-${shortId(sessionId)}.webm`
       );
+      stopRecordingWatch();
     }
 
     if (data.status === "denied") {
@@ -550,18 +660,17 @@ async function joinAdminCamera(sessionId, callId) {
     }
     if (data.status === "ended") {
       callEnded = true;
+      state.awaitingRecording = true;
       try {
         state.unsubIce?.();
         state.unsubIce = null;
         state.pc?.close();
         state.pc = null;
-        if (state.recorder && state.recorder.state !== "inactive") {
-          try {
-            state.recorder.stop();
-          } catch {
-            /* ignore */
-          }
-        }
+      } catch {
+        /* ignore */
+      }
+      try {
+        await stopAdminRecording(state, { autoDownload: false });
       } catch {
         /* ignore */
       }
@@ -573,13 +682,7 @@ async function joinAdminCamera(sessionId, callId) {
           ? "Kayıt indiriliyor…"
           : "Bağlantı kapandı · ziyaretçi kaydı yükleniyor…"
       );
-      if (data.recordingUrl && data.recordingUrl !== state.seenRecordingUrl) {
-        state.seenRecordingUrl = data.recordingUrl;
-        forceDownloadFromUrl(
-          data.recordingUrl,
-          data.recordingName || `kamera-${shortId(sessionId)}.webm`
-        );
-      }
+      startRecordingWatch(sessionId, callId, state);
       return;
     }
     if (data.status === "requested") {
@@ -713,6 +816,7 @@ function openSession(row) {
   threadTitle.textContent = `Oturum #${shortId(row.id)}`;
   threadMeta.textContent = `${row.page || "/"} · ${fmtTime(row.updatedAt)}`;
   sendHint.hidden = true;
+  stopRecordingWatch();
   stopAdminCall(false, { keepUi: false });
   clearRecordingLink();
   resetLiveVideoUi();
@@ -867,13 +971,19 @@ async function endActiveCameraSession() {
     return;
   }
   const { sessionId, callId } = call;
+  const pending = {
+    sessionId,
+    callId,
+    lastBlob: null,
+    seenRecordingUrl: call.seenRecordingUrl || null,
+    awaitingRecording: true,
+  };
   setCameraUi(true, "Oturum sonlandırılıyor…");
   adminCameraBox?.classList.remove("is-recording");
   setEndCameraVisible(false);
 
-  // Önce Firebase’e bitiş yaz — ziyaretçi kamerayı hemen kapatsın
+  // Önce Firebase’e bitiş yaz — ziyaretçi kamerayı hemen kapatsın ve yüklesin
   if (sessionId && callId && window.ChatSync) {
-    const endFn = window.ChatSync.forceEndCameraCall || window.ChatSync.setCameraCallStatus;
     try {
       if (window.ChatSync.forceEndCameraCall) {
         await window.ChatSync.forceEndCameraCall(sessionId, callId);
@@ -887,29 +997,56 @@ async function endActiveCameraSession() {
     }
   }
 
+  // Admin tarafı yerel kaydı bitir (Storage yedek)
   try {
+    await stopAdminRecording(call, { autoDownload: false });
+    pending.lastBlob = call.lastBlob || null;
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    call.unsubCall?.();
+    call.unsubCall = null;
     call.unsubIce?.();
     call.unsubIce = null;
     call.pc?.close();
     call.pc = null;
-    if (call.recorder && call.recorder.state !== "inactive") {
-      try {
-        call.recorder.stop();
-      } catch {
-        /* ignore */
-      }
-    }
   } catch {
     /* ignore */
   }
   if (adminRemoteVideo) adminRemoteVideo.srcObject = null;
 
+  // Yeni kamera talebine izin ver; kayıt watch ayrı devam eder
+  adminCall = null;
+  startRecordingWatch(sessionId, callId, pending);
+
   sendHint.hidden = false;
   sendHint.textContent =
-    "Oturum sonlandırıldı. Ziyaretçi kamerası kapanır; kayıt gelince iner.";
-  setCameraUi(true, "Ziyaretçi kamerası kapatıldı · kayıt bekleniyor…");
+    "Oturum sonlandırıldı. Kayıt gelince otomatik iner; gelmezse yerel yedek kullanılır.";
+  setCameraUi(
+    true,
+    pending.lastBlob?.size
+      ? "Kayıt bekleniyor… (yerel yedek hazır)"
+      : "Ziyaretçi kaydı yükleniyor…"
+  );
   setEndCameraVisible(false);
   if (reopenCameraBtn) reopenCameraBtn.hidden = false;
+
+  // Yerel yedek varsa butonu hemen göster (Storage gelince onunla değiştirilir)
+  if (pending.lastBlob?.size && downloadRecordingBtn) {
+    const fileName = `kamera-admin-${shortId(sessionId)}.webm`;
+    const objUrl = URL.createObjectURL(pending.lastBlob);
+    if (downloadRecordingBtn.href?.startsWith("blob:")) {
+      URL.revokeObjectURL(downloadRecordingBtn.href);
+    }
+    downloadRecordingBtn.href = objUrl;
+    downloadRecordingBtn.download = fileName;
+    downloadRecordingBtn.hidden = false;
+    downloadRecordingBtn.textContent = "Yerel kaydı indir";
+    if (adminCameraBox) adminCameraBox.hidden = false;
+  }
+
   window.setTimeout(() => {
     if (sendHint.textContent.includes("Oturum sonlandırıldı")) sendHint.hidden = true;
   }, 4500);

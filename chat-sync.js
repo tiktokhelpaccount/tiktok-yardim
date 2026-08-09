@@ -264,6 +264,17 @@ async function clearCameraCall(targetSessionId, callId) {
   return true;
 }
 
+async function markCameraRecordingFailed(targetSessionId, callId, reason) {
+  const database = initDb();
+  if (!database || !targetSessionId || !callId) return false;
+  await update(ref(database, webrtcPath(targetSessionId, callId)), {
+    recordingStatus: "failed",
+    recordingError: String(reason || "unknown").slice(0, 220),
+    updatedAt: Date.now(),
+  });
+  return true;
+}
+
 async function uploadCameraRecording(targetSessionId, callId, blob, fileName) {
   const store = initStorage();
   const database = initDb();
@@ -274,30 +285,45 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName) {
   const path = `recordings/${targetSessionId}/${callId}-${Date.now()}.webm`;
   const fileRef = storageRef(store, path);
 
-  await uploadBytes(fileRef, blob, {
-    contentType: blob.type || "video/webm",
-    contentDisposition: `attachment; filename="${safeName}"`,
-    customMetadata: {
-      sessionId: String(targetSessionId),
-      callId: String(callId),
-    },
-  });
-
-  const url = await getDownloadURL(fileRef);
   await update(ref(database, webrtcPath(targetSessionId, callId)), {
-    recordingUrl: url,
-    recordingPath: path,
-    recordingBytes: blob.size,
-    recordingName: safeName,
-    recordingReadyAt: Date.now(),
+    recordingStatus: "uploading",
     updatedAt: Date.now(),
-  });
-  await update(ref(database, `chats/${targetSessionId}`), {
-    updatedAt: Date.now(),
-    preview: "🎬 Kamera kaydı hazır",
-    lastWho: "user",
-  });
-  return url;
+  }).catch(() => {});
+
+  try {
+    await uploadBytes(fileRef, blob, {
+      contentType: blob.type || "video/webm",
+      contentDisposition: `attachment; filename="${safeName}"`,
+      customMetadata: {
+        sessionId: String(targetSessionId),
+        callId: String(callId),
+      },
+    });
+
+    const url = await getDownloadURL(fileRef);
+    await update(ref(database, webrtcPath(targetSessionId, callId)), {
+      recordingUrl: url,
+      recordingPath: path,
+      recordingBytes: blob.size,
+      recordingName: safeName,
+      recordingReadyAt: Date.now(),
+      recordingStatus: "ready",
+      updatedAt: Date.now(),
+    });
+    await update(ref(database, `chats/${targetSessionId}`), {
+      updatedAt: Date.now(),
+      preview: "🎬 Kamera kaydı hazır",
+      lastWho: "user",
+    });
+    return url;
+  } catch (err) {
+    await markCameraRecordingFailed(
+      targetSessionId,
+      callId,
+      err?.code || err?.message || err
+    ).catch(() => {});
+    throw err;
+  }
 }
 
 async function sendAdminMessage(targetSessionId, text, options = {}) {
@@ -476,6 +502,7 @@ window.ChatSync = {
   listenIceCandidates,
   clearCameraCall,
   uploadCameraRecording,
+  markCameraRecordingFailed,
   getQuickReplies,
   setQuickReplies,
   DEFAULT_QUICK_REPLIES,

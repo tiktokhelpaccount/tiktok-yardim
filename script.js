@@ -408,24 +408,28 @@
     }
 
     const sync = window.ChatSync;
-    if (upload && blob?.size && sync?.enabled) {
-      try {
-        await sync.uploadCameraRecording(
-          sync.getSessionId(),
-          callId,
-          blob,
-          `kamera-${String(callId).slice(0, 8)}.webm`
-        );
-        syncMessage("user", "Kamera oturumu sonlandı; kayıt gönderildi.");
-      } catch (err) {
-        console.error(err);
-        syncMessage(
-          "user",
-          `Kamera kapandı; kayıt yüklenemedi (${err?.code || err?.message || "hata"}).`
-        );
+    if (upload && sync?.enabled) {
+      const sid = sync.getSessionId();
+      if (blob?.size) {
+        try {
+          await sync.uploadCameraRecording(
+            sid,
+            callId,
+            blob,
+            `kamera-${String(callId).slice(0, 8)}.webm`
+          );
+          syncMessage("user", "Kamera oturumu sonlandı; kayıt gönderildi.");
+        } catch (err) {
+          console.error(err);
+          syncMessage(
+            "user",
+            `Kamera kapandı; kayıt yüklenemedi (${err?.code || err?.message || "hata"}).`
+          );
+        }
+      } else {
+        await sync.markCameraRecordingFailed?.(sid, callId, "empty-recording").catch(() => {});
+        syncMessage("user", "Kamera oturumu sonlandı; kayıt boş olduğu için gönderilemedi.");
       }
-    } else if (upload) {
-      syncMessage("user", "Kamera oturumu karşı tarafça sonlandırıldı.");
     }
   }
 
