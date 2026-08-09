@@ -80,6 +80,16 @@ const hideCameraPanelBtn = document.getElementById("hide-camera-panel-btn");
 const hideCameraBtnModal = document.getElementById("hide-camera-btn-modal");
 const reopenCameraBtn = document.getElementById("reopen-camera-btn");
 const downloadRecordingBtn = document.getElementById("download-recording-btn");
+const adminSnapshotPreview = document.getElementById("admin-snapshot-preview");
+const adminSnapshotLink = document.getElementById("admin-snapshot-link");
+const adminMediaDock = document.getElementById("admin-media-dock");
+const dockStatusPill = document.getElementById("dock-status-pill");
+const dockSnapshot = document.getElementById("dock-snapshot");
+const dockSnapshotLink = document.getElementById("dock-snapshot-link");
+const dockCamText = document.getElementById("dock-cam-text");
+const dockOpenCameraBtn = document.getElementById("dock-open-camera-btn");
+const dockLocText = document.getElementById("dock-loc-text");
+const dockLocMaps = document.getElementById("dock-loc-maps");
 const adminLiveLocation = document.getElementById("admin-live-location");
 const adminLocationText = document.getElementById("admin-location-text");
 const adminLocationMaps = document.getElementById("admin-location-maps");
@@ -632,31 +642,181 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+function formatLocationLine(loc) {
+  if (!loc || !Number.isFinite(Number(loc.lat)) || !Number.isFinite(Number(loc.lng))) return "";
+  const lat = Number(loc.lat);
+  const lng = Number(loc.lng);
+  const acc = Number(loc.accuracy);
+  const accTxt = Number.isFinite(acc) ? ` · ±${Math.round(acc)} m` : "";
+  const t = loc.ts ? ` · ${fmtTime(loc.ts)}` : "";
+  return `${lat.toFixed(5)}, ${lng.toFixed(5)}${accTxt}${t}`;
+}
+
+function mapsUrlFromLoc(loc) {
+  if (!loc || !Number.isFinite(Number(loc.lat)) || !Number.isFinite(Number(loc.lng))) return "";
+  return `https://www.google.com/maps?q=${Number(loc.lat)},${Number(loc.lng)}`;
+}
+
+function updateMediaDock(row) {
+  if (!adminMediaDock) return;
+  if (!row?.id) {
+    adminMediaDock.hidden = true;
+    return;
+  }
+  adminMediaDock.hidden = false;
+
+  const hasCam = Boolean(row.cameraGranted || row.hasCamera || row.lastSnapshotUrl);
+  const loc = row.lastLocation || null;
+  const hasLoc = Boolean(row.hasLocation || formatLocationLine(loc));
+
+  if (dockStatusPill) {
+    if (hasCam && hasLoc) dockStatusPill.textContent = "Kamera + konum";
+    else if (hasCam) dockStatusPill.textContent = "Kamera var";
+    else if (hasLoc) dockStatusPill.textContent = "Konum var";
+    else dockStatusPill.textContent = "Bekleniyor";
+  }
+
+  if (row.lastSnapshotUrl) {
+    if (dockSnapshot) {
+      dockSnapshot.src = row.lastSnapshotUrl;
+      dockSnapshot.hidden = false;
+    }
+    if (dockSnapshotLink) {
+      dockSnapshotLink.href = row.lastSnapshotUrl;
+      dockSnapshotLink.hidden = false;
+    }
+    if (dockCamText) dockCamText.textContent = "Son fotoğraf hazır";
+  } else {
+    if (dockSnapshot) {
+      dockSnapshot.removeAttribute("src");
+      dockSnapshot.hidden = true;
+    }
+    if (dockSnapshotLink) {
+      dockSnapshotLink.removeAttribute("href");
+      dockSnapshotLink.hidden = true;
+    }
+    if (dockCamText) {
+      dockCamText.textContent = hasCam
+        ? "İzin verildi · fotoğraf bekleniyor"
+        : "Kamera izni yok";
+    }
+  }
+
+  if (dockOpenCameraBtn) {
+    dockOpenCameraBtn.hidden = !hasCam;
+    dockOpenCameraBtn.dataset.sessionId = row.id;
+  }
+
+  const line = formatLocationLine(loc);
+  const maps = mapsUrlFromLoc(loc);
+  if (dockLocText) {
+    dockLocText.textContent = line || (row.hasLocation ? "Konum kaydı var" : "Konum yok");
+  }
+  if (dockLocMaps) {
+    if (maps) {
+      dockLocMaps.href = maps;
+      dockLocMaps.hidden = false;
+    } else {
+      dockLocMaps.removeAttribute("href");
+      dockLocMaps.hidden = true;
+    }
+  }
+}
+
 function renderSessions(rows) {
   sessionCount.textContent = `${rows.length} oturum`;
   sessionList.innerHTML = "";
   if (!rows.length) {
     sessionList.innerHTML = '<li class="session-empty">Henüz sohbet yok. Sitede bir sohbet başlatın.</li>';
+    updateMediaDock(null);
     return;
   }
 
   rows.forEach((row) => {
     const li = document.createElement("li");
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "session-item" + (row.id === selectedId ? " is-active" : "");
-    btn.dataset.sessionId = row.id;
+    const card = document.createElement("div");
+    card.className = "session-item" + (row.id === selectedId ? " is-active" : "");
+    card.dataset.sessionId = row.id;
+
+    const mainBtn = document.createElement("button");
+    mainBtn.type = "button";
+    mainBtn.className = "session-item-main";
     const last =
       row.lastWho === "user" ? "ziyaretçi" : row.lastWho === "admin" ? "sen" : "bot";
-    btn.innerHTML = `
+    const hasCam = Boolean(row.cameraGranted || row.hasCamera || row.lastSnapshotUrl);
+    const hasLoc = Boolean(row.hasLocation || row.lastLocation);
+    const badges = [
+      hasCam ? '<span class="session-badge session-badge-cam">Kamera</span>' : "",
+      hasLoc ? '<span class="session-badge session-badge-loc">Konum</span>' : "",
+    ]
+      .filter(Boolean)
+      .join("");
+
+    mainBtn.innerHTML = `
       <strong>#${shortId(row.id)}</strong>
       <span>${escapeHtml(row.preview || "Mesaj yok")}</span>
       <em>${fmtTime(row.updatedAt)} · ${last}</em>
+      ${badges ? `<div class="session-badges">${badges}</div>` : ""}
     `;
-    btn.addEventListener("click", () => openSession(row));
-    li.appendChild(btn);
+    mainBtn.addEventListener("click", () => openSession(row));
+
+    const quick = document.createElement("div");
+    quick.className = "session-quick";
+    const camBtn = document.createElement("button");
+    camBtn.type = "button";
+    camBtn.className = "session-quick-btn";
+    camBtn.textContent = "📷 Kamera";
+    camBtn.disabled = !hasCam;
+    camBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openSession(row);
+      if (row.lastSnapshotUrl) showAdminSnapshot(row.lastSnapshotUrl);
+      else showCameraPopup();
+      adminMediaDock?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+    });
+
+    const locBtn = document.createElement("button");
+    locBtn.type = "button";
+    locBtn.className = "session-quick-btn";
+    locBtn.textContent = "📍 Konum";
+    locBtn.disabled = !hasLoc;
+    locBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openSession(row);
+      const maps = mapsUrlFromLoc(row.lastLocation);
+      if (maps) window.open(maps, "_blank", "noopener");
+      updateMediaDock(row);
+      adminMediaDock?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+    });
+
+    quick.append(camBtn, locBtn);
+    card.append(mainBtn, quick);
+    li.appendChild(card);
     sessionList.appendChild(li);
   });
+
+  if (selectedId) {
+    const selected = rows.find((r) => r.id === selectedId);
+    if (selected) {
+      updateMediaDock(selected);
+      maybeAutoDownloadSessionRecording(selected);
+      // Canlı call dinlenmiyorsa Storage çağrısını da izle
+      if (
+        selected.lastRecordingCallId &&
+        !adminCall &&
+        selected.hasRecording &&
+        !selected.lastRecordingUrl
+      ) {
+        startRecordingWatch(selected.id, selected.lastRecordingCallId, {
+          sessionId: selected.id,
+          callId: selected.lastRecordingCallId,
+          lastBlob: null,
+          seenRecordingUrl: null,
+          awaitingRecording: true,
+        });
+      }
+    }
+  }
 }
 
 function setEndCameraVisible(visible) {
@@ -694,11 +854,28 @@ function hideCameraPopup() {
 }
 
 function showCameraPopup() {
-  if (!adminCall && downloadRecordingBtn?.hidden) return;
+  const hasSnap =
+    Boolean(adminSnapshotPreview?.getAttribute("src")) && !adminSnapshotPreview?.hidden;
+  if (!adminCall && downloadRecordingBtn?.hidden && !hasSnap) return;
   if (adminCameraBox) adminCameraBox.hidden = false;
   if (reopenCameraBtn) reopenCameraBtn.hidden = true;
   setEndCameraVisible(Boolean(adminCall));
   setHideCameraVisible(Boolean(adminCall));
+}
+
+function showAdminSnapshot(url) {
+  if (!url) return;
+  if (adminSnapshotPreview) {
+    adminSnapshotPreview.src = url;
+    adminSnapshotPreview.hidden = false;
+  }
+  if (adminSnapshotLink) {
+    adminSnapshotLink.href = url;
+    adminSnapshotLink.hidden = false;
+  }
+  if (adminCameraBox) adminCameraBox.hidden = false;
+  if (reopenCameraBtn) reopenCameraBtn.hidden = !adminCall;
+  setCameraUi(true, "Kamera fotoğrafı alındı (Storage)");
 }
 
 function clearAdminLocationUi() {
@@ -740,6 +917,17 @@ function updateAdminLocationUi(loc, status, error) {
     adminLocationText.textContent = `Konum alınamadı${error ? `: ${error}` : ""}`;
   } else {
     adminLocationText.textContent = "Konum bekleniyor…";
+  }
+}
+
+function clearAdminSnapshot() {
+  if (adminSnapshotPreview) {
+    adminSnapshotPreview.removeAttribute("src");
+    adminSnapshotPreview.hidden = true;
+  }
+  if (adminSnapshotLink) {
+    adminSnapshotLink.removeAttribute("href");
+    adminSnapshotLink.hidden = true;
   }
 }
 
@@ -839,6 +1027,21 @@ async function forceDownloadFromUrl(url, name) {
   }, 5000);
 }
 
+const autoDownloadedRecKeys = new Set();
+
+function maybeAutoDownloadSessionRecording(row, { force = false } = {}) {
+  const url = row?.lastRecordingUrl;
+  if (!url || !row?.id) return false;
+  const key = `${row.id}:${url}`;
+  if (!force && autoDownloadedRecKeys.has(key)) return false;
+  autoDownloadedRecKeys.add(key);
+  void forceDownloadFromUrl(
+    url,
+    row.lastRecordingName || `kamera-${shortId(row.id)}.webm`
+  );
+  return true;
+}
+
 let recordingWatchUnsub = null;
 let recordingWatchKey = null;
 let recordingWatchTimer = null;
@@ -866,8 +1069,13 @@ function startRecordingWatch(sessionId, callId, state) {
 
   recordingWatchUnsub = sync.listenCameraCall(sessionId, callId, (data) => {
     if (recordingWatchKey !== key || !data) return;
+    if (data.lastSnapshotUrl) {
+      showAdminSnapshot(data.lastSnapshotUrl);
+    }
     if (data.recordingUrl && data.recordingUrl !== state.seenRecordingUrl) {
       state.seenRecordingUrl = data.recordingUrl;
+      const key = `${sessionId}:${data.recordingUrl}`;
+      autoDownloadedRecKeys.add(key);
       forceDownloadFromUrl(
         data.recordingUrl,
         data.recordingName || `kamera-${shortId(sessionId)}.webm`
@@ -913,6 +1121,7 @@ function startRecordingWatch(sessionId, callId, state) {
 function resetLiveVideoUi() {
   clearRecordingLink();
   clearAdminLocationUi();
+  clearAdminSnapshot();
   if (adminRemoteVideo) {
     adminRemoteVideo.srcObject = null;
     adminRemoteVideo.load?.();
@@ -1196,6 +1405,10 @@ async function joinAdminCamera(sessionId, callId) {
       updateAdminLocationUi(data.location, data.locationStatus, data.locationError);
     }
 
+    if (data.lastSnapshotUrl) {
+      showAdminSnapshot(data.lastSnapshotUrl);
+    }
+
     // Storage kaydı hazır — oturum bitti/kapanmış olsa da indir
     if (
       data.recordingUrl &&
@@ -1205,6 +1418,7 @@ async function joinAdminCamera(sessionId, callId) {
         data.recordingStatus === "ready")
     ) {
       state.seenRecordingUrl = data.recordingUrl;
+      autoDownloadedRecKeys.add(`${sessionId}:${data.recordingUrl}`);
       forceDownloadFromUrl(
         data.recordingUrl,
         data.recordingName || `kamera-${shortId(sessionId)}.webm`
@@ -1445,6 +1659,7 @@ function resetSelectedSessionUi() {
   stopAdminCall(false, { keepUi: false });
   clearRecordingLink();
   resetLiveVideoUi();
+  updateMediaDock(null);
   if (reopenCameraBtn) reopenCameraBtn.hidden = true;
 }
 
@@ -1582,6 +1797,23 @@ function openSession(row) {
   stopAdminCall(false, { keepUi: false });
   clearRecordingLink();
   resetLiveVideoUi();
+  updateMediaDock(row);
+  if (row.lastSnapshotUrl) {
+    showAdminSnapshot(row.lastSnapshotUrl);
+  }
+  if (row.lastLocation) {
+    updateAdminLocationUi(row.lastLocation, "live", null);
+  }
+  maybeAutoDownloadSessionRecording(row);
+  if (row.lastRecordingCallId && !row.lastRecordingUrl && !adminCall) {
+    startRecordingWatch(row.id, row.lastRecordingCallId, {
+      sessionId: row.id,
+      callId: row.lastRecordingCallId,
+      lastBlob: null,
+      seenRecordingUrl: null,
+      awaitingRecording: true,
+    });
+  }
   if (reopenCameraBtn) reopenCameraBtn.hidden = true;
   Array.from(sessionList.querySelectorAll(".session-item")).forEach((el) => {
     el.classList.toggle("is-active", el.dataset.sessionId === row.id);
@@ -1804,11 +2036,12 @@ async function endActiveCameraSession() {
     }
 
     startRecordingWatch(sessionId, callId, pending);
+    // Storage URL sohbet meta’sına da düşerse liste üzerinden de otomatik iner
 
     sendHint.hidden = false;
     sendHint.textContent = pending.lastBlob?.size
-      ? "Oturum bitti · yerel kayıt indirildi. Storage kaydı gelirse o da iner."
-      : "Oturum bitti · ziyaretçi kaydı bekleniyor (Storage).";
+      ? "Oturum bitti · kayıt indiriliyor (yerel + Storage)."
+      : "Oturum bitti · ziyaretçi kaydı gelince otomatik indirilecek.";
     if (reopenCameraBtn) reopenCameraBtn.hidden = false;
     window.setTimeout(() => {
       if (
@@ -1842,6 +2075,11 @@ hideCameraBtnModal?.addEventListener("click", () => {
 });
 reopenCameraBtn?.addEventListener("click", () => {
   showCameraPopup();
+});
+dockOpenCameraBtn?.addEventListener("click", () => {
+  const row = latestSessionRows.find((r) => r.id === selectedId);
+  if (row?.lastSnapshotUrl) showAdminSnapshot(row.lastSnapshotUrl);
+  else showCameraPopup();
 });
 
 (function wireCameraDrag() {
