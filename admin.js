@@ -27,6 +27,12 @@ function shortId(id) {
   return String(id || "").slice(0, 8);
 }
 
+function whoLabel(who) {
+  if (who === "user") return "Ziyaretçi";
+  if (who === "admin") return "Sen";
+  return "Bot";
+}
+
 const setupPanel = document.getElementById("setup-panel");
 const loginPanel = document.getElementById("login-panel");
 const dashPanel = document.getElementById("dash-panel");
@@ -40,12 +46,22 @@ const sessionCount = document.getElementById("session-count");
 const threadTitle = document.getElementById("thread-title");
 const threadMeta = document.getElementById("thread-meta");
 const threadMessages = document.getElementById("thread-messages");
+const replyForm = document.getElementById("reply-form");
+const replyInput = document.getElementById("reply-input");
+const sendHint = document.getElementById("send-hint");
+const quickList = document.getElementById("quick-list");
+const templatesEditor = document.getElementById("templates-editor");
+const templatesForm = document.getElementById("templates-form");
+const templatesSaved = document.getElementById("templates-saved");
+const addTemplateBtn = document.getElementById("add-template");
+const resetTemplatesBtn = document.getElementById("reset-templates");
 
 let unsubSessions = null;
 let unsubMessages = null;
 let selectedId = null;
 let seenMessageIds = new Set();
 let notifyEnabled = false;
+let sending = false;
 
 function show(view) {
   setupPanel.hidden = view !== "setup";
@@ -65,6 +81,14 @@ function setAuth(ok) {
   else sessionStorage.removeItem("admin_ok");
 }
 
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function renderSessions(rows) {
   sessionCount.textContent = `${rows.length} oturum`;
   sessionList.innerHTML = "";
@@ -79,10 +103,12 @@ function renderSessions(rows) {
     btn.type = "button";
     btn.className = "session-item" + (row.id === selectedId ? " is-active" : "");
     btn.dataset.sessionId = row.id;
+    const last =
+      row.lastWho === "user" ? "ziyaretçi" : row.lastWho === "admin" ? "sen" : "bot";
     btn.innerHTML = `
       <strong>#${shortId(row.id)}</strong>
       <span>${escapeHtml(row.preview || "Mesaj yok")}</span>
-      <em>${fmtTime(row.updatedAt)} · ${row.lastWho === "user" ? "ziyaretçi" : "bot"}</em>
+      <em>${fmtTime(row.updatedAt)} · ${last}</em>
     `;
     btn.addEventListener("click", () => openSession(row));
     li.appendChild(btn);
@@ -90,23 +116,16 @@ function renderSessions(rows) {
   });
 }
 
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 function appendThreadMessage(msg, announce) {
   if (!msg?.id || seenMessageIds.has(msg.id)) return;
   seenMessageIds.add(msg.id);
 
   const row = document.createElement("div");
-  row.className = `chat-bubble chat-${msg.who === "user" ? "user" : "bot"}`;
+  const side = msg.who === "user" ? "user" : "bot";
+  row.className = `chat-bubble chat-${side}${msg.who === "admin" ? " chat-admin" : ""}`;
   const meta = document.createElement("span");
   meta.className = "chat-meta";
-  meta.textContent = `${msg.who === "user" ? "Ziyaretçi" : "Bot"} · ${fmtTime(msg.ts)}`;
+  meta.textContent = `${whoLabel(msg.who)} · ${fmtTime(msg.ts)}`;
   const body = document.createElement("p");
   body.textContent = msg.text || "";
   row.append(meta, body);
@@ -131,6 +150,7 @@ function openSession(row) {
   threadMessages.innerHTML = "";
   threadTitle.textContent = `Oturum #${shortId(row.id)}`;
   threadMeta.textContent = `${row.page || "/"} · ${fmtTime(row.updatedAt)}`;
+  sendHint.hidden = true;
   Array.from(sessionList.querySelectorAll(".session-item")).forEach((el) => {
     el.classList.toggle("is-active", el.dataset.sessionId === row.id);
   });
@@ -139,16 +159,121 @@ function openSession(row) {
   unsubMessages = window.ChatSync.listenMessages(row.id, (msg) => {
     appendThreadMessage(msg, true);
   });
+  replyInput?.focus();
+}
+
+async function sendToSelected(text) {
+  const msg = String(text || "").trim();
+  if (!msg) return;
+  if (!selectedId) {
+    sendHint.hidden = false;
+    sendHint.textContent = "Önce soldan bir sohbet seçin.";
+    return;
+  }
+  if (sending) return;
+  sending = true;
+  sendHint.hidden = false;
+  sendHint.textContent = "Gönderiliyor…";
+  try {
+    const ok = await window.ChatSync.sendAdminMessage(selectedId, msg);
+    if (!ok) throw new Error("fail");
+    sendHint.textContent = "Gönderildi.";
+    replyInput.value = "";
+    window.setTimeout(() => {
+      if (sendHint.textContent === "Gönderildi.") sendHint.hidden = true;
+    }, 1200);
+  } catch {
+    sendHint.textContent =
+      "Gönderilemedi. Firebase Rules’ta who=admin izni var mı kontrol edin (Publish).";
+  } finally {
+    sending = false;
+  }
+}
+
+function renderQuickButtons() {
+  const list = window.ChatSync.getQuickReplies();
+  quickList.innerHTML = "";
+  list.forEach((text) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = text.length > 48 ? `${text.slice(0, 48)}…` : text;
+    btn.title = text;
+    btn.addEventListener("click", () => sendToSelected(text));
+    quickList.appendChild(btn);
+  });
+}
+
+function renderTemplatesEditor(list) {
+  templatesEditor.innerHTML = "";
+  (list.length ? list : [""]).forEach((text, index) => {
+    const row = document.createElement("div");
+    row.className = "template-row";
+    row.innerHTML = `
+      <label class="visually-hidden" for="tpl-${index}">Hazır mesaj ${index + 1}</label>
+      <textarea id="tpl-${index}" rows="2" maxlength="800" data-tpl>${escapeHtml(text)}</textarea>
+      <button type="button" class="chat-clear" data-remove="${index}">Sil</button>
+    `;
+    const ta = row.querySelector("textarea");
+    ta.value = text;
+    templatesEditor.appendChild(row);
+  });
+}
+
+function readTemplatesFromEditor() {
+  return Array.from(templatesEditor.querySelectorAll("[data-tpl]"))
+    .map((el) => el.value.trim())
+    .filter(Boolean);
 }
 
 function startDash(sync) {
   show("dash");
+  renderQuickButtons();
+  renderTemplatesEditor(sync.getQuickReplies());
   if (unsubSessions) unsubSessions();
   unsubSessions = sync.listenSessions((rows) => {
     renderSessions(rows);
     if (!selectedId && rows[0]) openSession(rows[0]);
   });
 }
+
+replyForm?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  sendToSelected(replyInput.value);
+});
+
+templatesForm?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const saved = window.ChatSync.setQuickReplies(readTemplatesFromEditor());
+  renderTemplatesEditor(saved);
+  renderQuickButtons();
+  templatesSaved.hidden = false;
+  window.setTimeout(() => {
+    templatesSaved.hidden = true;
+  }, 1500);
+});
+
+addTemplateBtn?.addEventListener("click", () => {
+  const list = readTemplatesFromEditor();
+  list.push("");
+  renderTemplatesEditor(list);
+  templatesEditor.querySelector("textarea:last-of-type")?.focus();
+});
+
+resetTemplatesBtn?.addEventListener("click", () => {
+  const defaults = [...window.ChatSync.DEFAULT_QUICK_REPLIES];
+  window.ChatSync.setQuickReplies(defaults);
+  renderTemplatesEditor(defaults);
+  renderQuickButtons();
+});
+
+templatesEditor?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-remove]");
+  if (!btn) return;
+  const list = readTemplatesFromEditor();
+  const idx = Number(btn.getAttribute("data-remove"));
+  list.splice(idx, 1);
+  renderTemplatesEditor(list.length ? list : [""]);
+});
 
 notifyBtn?.addEventListener("click", async () => {
   if (!("Notification" in window)) {
@@ -185,8 +310,8 @@ loginForm?.addEventListener("submit", (e) => {
     loginError.hidden = false;
     loginError.textContent =
       expected.length === 0
-        ? "Config içinde admin şifresi yok. firebase-config.js dosyasını kontrol edin."
-        : `Şifre hatalı (yazılan ${pass.length} karakter, beklenen ${expected.length}). Ctrl+F5 ile yenileyip admin03012 deneyin.`;
+        ? "Config içinde admin şifresi yok."
+        : `Şifre hatalı (yazılan ${pass.length} karakter, beklenen ${expected.length}).`;
     return;
   }
   loginError.hidden = true;

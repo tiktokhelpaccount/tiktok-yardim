@@ -272,18 +272,25 @@
     }
   }
 
-  function appendMessage(box, who, text) {
+  function appendMessage(box, who, text, options = {}) {
+    const syncOut = options.sync !== false;
+    const label =
+      who === "user" ? "Siz" : who === "admin" ? "Destek" : "Asistan";
     const row = document.createElement("div");
-    row.className = `chat-bubble chat-${who}`;
+    row.className = `chat-bubble chat-${who === "user" ? "user" : "bot"}${
+      who === "admin" ? " chat-admin" : ""
+    }`;
     const meta = document.createElement("span");
     meta.className = "chat-meta";
-    meta.textContent = who === "bot" ? `Asistan · ${nowLabel()}` : `Siz · ${nowLabel()}`;
+    meta.textContent = `${label} · ${nowLabel()}`;
     const body = document.createElement("p");
     body.textContent = text;
     row.append(meta, body);
     box.appendChild(row);
     box.scrollTop = box.scrollHeight;
-    syncMessage(who, text);
+    if (syncOut && (who === "user" || who === "bot")) {
+      syncMessage(who, text);
+    }
   }
 
   function showTyping(box) {
@@ -478,6 +485,18 @@
       "Merhaba. Ben Yardım Asistanı. Ban, izlenme düşüşü veya görünürlük sorunlarında rehberlere yönlendirebilirim.\n\nHesap durumu kontrolü için ‘Hesabım kısıtlandı’ yazın veya aşağıdaki kısayolları kullanın. Şifre / e-posta istemem."
     );
     busy = false;
+
+    if (window.ChatSync?.listenIncomingSupport) {
+      window.ChatSync.listenIncomingSupport((msg) => {
+        appendMessage(box, "admin", msg.text || "", { sync: false });
+      });
+    } else if (window.ChatSyncReady) {
+      window.ChatSyncReady.then((sync) => {
+        sync?.listenIncomingSupport?.((msg) => {
+          appendMessage(box, "admin", msg.text || "", { sync: false });
+        });
+      });
+    }
   }
 
   document.querySelectorAll("[data-chat-root]").forEach(wireChat);

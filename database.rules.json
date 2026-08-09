@@ -8,7 +8,7 @@
         ".validate": "newData.hasChildren(['createdAt', 'updatedAt'])",
         "messages": {
           "$messageId": {
-            ".validate": "newData.hasChildren(['who', 'text', 'ts']) && newData.child('text').isString() && newData.child('text').val().length <= 800 && (newData.child('who').val() == 'user' || newData.child('who').val() == 'bot')"
+            ".validate": "newData.hasChildren(['who', 'text', 'ts']) && newData.child('text').isString() && newData.child('text').val().length <= 800 && (newData.child('who').val() == 'user' || newData.child('who').val() == 'bot' || newData.child('who').val() == 'admin')"
           }
         }
       }

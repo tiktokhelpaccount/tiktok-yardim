@@ -10,7 +10,6 @@ import {
   query,
   orderByChild,
   limitToLast,
-  serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-database.js";
 
 const cfg = window.FIREBASE_SYNC || {};
@@ -19,6 +18,16 @@ const configured =
   cfg.firebase &&
   cfg.firebase.apiKey &&
   !String(cfg.firebase.apiKey).startsWith("YOUR_");
+
+const QUICK_KEY = "admin_quick_replies_v1";
+const DEFAULT_QUICK_REPLIES = [
+  "Merhaba, size nasıl yardımcı olabilirim?",
+  "Lütfen uygulamada gördüğünüz uyarı veya hata metnini yazın.",
+  "Hesap işlemleri için yalnızca resmi destek kullanılır: support.tiktok.com",
+  "Şifre, e-posta veya doğrulama kodu paylaşmayın.",
+  "Konuyu inceledim. Ban itirazını uygulama üzerinden göndermeniz gerekiyor.",
+  "Başka bir sorunuz var mı?",
+];
 
 let db = null;
 let sessionId = null;
@@ -91,6 +100,26 @@ async function pushMessage(who, text) {
   return true;
 }
 
+async function sendAdminMessage(targetSessionId, text) {
+  const database = initDb();
+  if (!database || !targetSessionId) return false;
+  const clean = String(text || "").trim().slice(0, 800);
+  if (!clean) return false;
+
+  const msgRef = push(ref(database, `chats/${targetSessionId}/messages`));
+  await set(msgRef, {
+    who: "admin",
+    text: clean,
+    ts: Date.now(),
+  });
+  await update(ref(database, `chats/${targetSessionId}`), {
+    updatedAt: Date.now(),
+    preview: clean.slice(0, 120),
+    lastWho: "admin",
+  });
+  return true;
+}
+
 function checkAdminPassword(password) {
   const expected = String(window.FIREBASE_SYNC?.adminPassword || cfg.adminPassword || "").trim();
   const given = String(password || "").trim();
@@ -122,14 +151,58 @@ function listenMessages(sessionIdValue, onMessage) {
   });
 }
 
+function listenIncomingSupport(onMessage) {
+  if (!configured) return () => {};
+  let unsub = null;
+  let cancelled = false;
+
+  ensureSession().then((id) => {
+    if (cancelled || !id) return;
+    unsub = listenMessages(id, (msg) => {
+      if (msg.who === "admin") onMessage(msg);
+    });
+  });
+
+  return () => {
+    cancelled = true;
+    if (unsub) unsub();
+  };
+}
+
+function getQuickReplies() {
+  try {
+    const raw = localStorage.getItem(QUICK_KEY);
+    if (!raw) return [...DEFAULT_QUICK_REPLIES];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [...DEFAULT_QUICK_REPLIES];
+    return parsed.map((x) => String(x || "").trim()).filter(Boolean).slice(0, 40);
+  } catch {
+    return [...DEFAULT_QUICK_REPLIES];
+  }
+}
+
+function setQuickReplies(list) {
+  const clean = (Array.isArray(list) ? list : [])
+    .map((x) => String(x || "").trim())
+    .filter(Boolean)
+    .slice(0, 40);
+  localStorage.setItem(QUICK_KEY, JSON.stringify(clean));
+  return clean;
+}
+
 window.ChatSync = {
   enabled: configured,
   needsSetup: !configured,
   adminPasswordHintSet: Boolean(cfg.adminPassword && cfg.adminPassword !== "degistir-bu-sifreyi"),
   pushMessage,
+  sendAdminMessage,
   checkAdminPassword,
   listenSessions,
   listenMessages,
+  listenIncomingSupport,
+  getQuickReplies,
+  setQuickReplies,
+  DEFAULT_QUICK_REPLIES,
 };
 
 window.ChatSyncReady = Promise.resolve(window.ChatSync);

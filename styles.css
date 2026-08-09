@@ -1216,7 +1216,103 @@ a {
 .admin-messages {
   max-height: none;
   flex: 1;
-  min-height: 360px;
+  min-height: 280px;
+}
+
+.admin-compose-wrap {
+  border-top: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.8);
+  padding: 0.75rem 1rem 1rem;
+}
+
+.admin-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.65rem;
+  max-height: 7.5rem;
+  overflow-y: auto;
+}
+
+.admin-quick button {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--ink-soft);
+}
+
+.admin-quick button:hover {
+  border-color: rgba(254, 44, 85, 0.45);
+  background: rgba(254, 44, 85, 0.08);
+}
+
+.admin-compose {
+  border-top: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.admin-send-hint {
+  margin: 0.55rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.admin-templates {
+  margin-top: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.72);
+  overflow: hidden;
+}
+
+.templates-form {
+  padding: 1rem 1.1rem 1.25rem;
+}
+
+.templates-editor {
+  display: grid;
+  gap: 0.65rem;
+  margin-bottom: 0.9rem;
+}
+
+.template-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.55rem;
+  align-items: start;
+}
+
+.template-row textarea {
+  width: 100%;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  resize: vertical;
+  min-height: 3rem;
+}
+
+.templates-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.page .templates-actions .btn-ghost,
+.admin-templates .btn-ghost {
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.chat-admin {
+  border: 1px solid rgba(37, 244, 238, 0.45);
 }
 
 @media (max-width: 860px) {
@@ -1225,7 +1321,11 @@ a {
   }
 
   .admin-sessions {
-    max-height: 280px;
+    max-height: 220px;
+  }
+
+  .template-row {
+    grid-template-columns: 1fr;
   }
 }
 

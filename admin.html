@@ -24,58 +24,29 @@
   </header>
 
   <main class="admin-main">
-    <!-- Kurulum rehberi -->
     <section class="admin-setup" id="setup-panel" hidden>
       <header class="page-hero">
         <p class="eyebrow">Kurulum · bir kez</p>
         <h1>Canlı yazışma paneli için Firebase</h1>
-        <p class="lede">Ziyaretçi mesajlarını arka planda anlık görmek için ücretsiz Firebase Realtime Database gerekir. Aşağıdaki adımları bitirince bu sayfa panel olur.</p>
+        <p class="lede">Ziyaretçi mesajlarını arka planda anlık görmek için ücretsiz Firebase Realtime Database gerekir.</p>
       </header>
-
       <ol class="setup-steps">
         <li>
-          <strong>Firebase projesi oluştur</strong>
-          <p><a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer">console.firebase.google.com</a> → “Add project” → proje adı ver → devam et.</p>
+          <strong>Firebase kurulumunu tamamla</strong>
+          <p>Realtime Database + web app config + <code>firebase-config.js</code> doldurulmalı.</p>
         </li>
         <li>
-          <strong>Realtime Database aç</strong>
-          <p>Build → Realtime Database → Create Database → konumu seç → şimdilik <em>Start in test mode</em> deyin.</p>
-        </li>
-        <li>
-          <strong>Kuralları yapıştır</strong>
-          <p>Realtime Database → Rules sekmesine git. Projede <code>database.rules.json</code> içeriğini yapıştır → Publish.</p>
-        </li>
-        <li>
-          <strong>Web uygulaması ekle</strong>
-          <p>Project Overview → &lt;/&gt; Web → uygulama adı → Register. Çıkan <code>firebaseConfig</code> değerlerini kopyala.</p>
-        </li>
-        <li>
-          <strong>Config dosyasını doldur</strong>
-          <p>Bilgisayarında <code>firebase-config.js</code> dosyasını aç:</p>
-          <ul>
-            <li><code>enabled: true</code> yap</li>
-            <li><code>adminPassword</code> değerini güçlü bir şifre yap</li>
-            <li><code>firebase: { ... }</code> alanlarını konsoldaki değerlerle doldur (<code>databaseURL</code> önemli)</li>
-          </ul>
-        </li>
-        <li>
-          <strong>GitHub’a yükle</strong>
-          <p>Değişiklikleri commit + push et. Birkaç dakika sonra site güncellenir. Bu sayfayı yenile, şifrenle gir.</p>
+          <strong>Kuralları güncelle</strong>
+          <p><code>database.rules.json</code> içeriğini Rules’a yapıştır → Publish. Admin mesajı için <code>admin</code> who değeri gerekir.</p>
         </li>
       </ol>
-
-      <aside class="real-help">
-        <h2>Panel adresi</h2>
-        <p>Kurulumdan sonra: <code>…/admin.html</code> — sekme açık kalsın; yeni mesajda tarayıcı bildirimi alabilirsin.</p>
-      </aside>
     </section>
 
-    <!-- Giriş -->
     <section class="admin-login" id="login-panel" hidden>
       <header class="page-hero">
         <p class="eyebrow">Yetkili erişim</p>
         <h1>Panele giriş</h1>
-        <p class="lede">firebase-config.js içindeki admin şifresiyle girin. Bu sayfayı yer imlerine ekleyin; arka planda açık tutun.</p>
+        <p class="lede">Admin şifresiyle girin. Sekmeyi arka planda açık tutun.</p>
       </header>
       <form class="appeal-form" id="login-form">
         <fieldset>
@@ -90,7 +61,6 @@
       </form>
     </section>
 
-    <!-- Canlı panel -->
     <section class="admin-dash" id="dash-panel" hidden>
       <div class="admin-grid">
         <aside class="admin-sessions">
@@ -100,19 +70,46 @@
           </header>
           <ul class="session-list" id="session-list"></ul>
         </aside>
+
         <section class="admin-thread">
           <header class="admin-pane-head">
             <h2 id="thread-title">Bir sohbet seçin</h2>
             <p id="thread-meta">Sol listeden canlı oturumları izleyin.</p>
           </header>
           <div class="chat-messages admin-messages" id="thread-messages" role="log" aria-live="polite"></div>
+
+          <div class="admin-compose-wrap">
+            <div class="admin-quick" id="quick-list"></div>
+            <form class="chat-compose admin-compose" id="reply-form">
+              <label class="visually-hidden" for="reply-input">Yanıt</label>
+              <input id="reply-input" type="text" maxlength="800" placeholder="Ziyaretçiye mesaj yaz…" autocomplete="off" />
+              <button type="submit" class="btn btn-primary" id="reply-send">Gönder</button>
+            </form>
+            <p class="admin-send-hint" id="send-hint" hidden></p>
+          </div>
         </section>
       </div>
+
+      <section class="admin-templates">
+        <header class="admin-pane-head">
+          <h2>Hazır mesajlar</h2>
+          <p>Tıkla → sohbete gönder. Metinleri düzenleyip kaydedebilirsin.</p>
+        </header>
+        <form id="templates-form" class="templates-form">
+          <div id="templates-editor" class="templates-editor"></div>
+          <div class="templates-actions">
+            <button type="button" class="btn btn-ghost" id="add-template">+ Yeni hazır mesaj</button>
+            <button type="button" class="btn btn-ghost" id="reset-templates">Varsayılana dön</button>
+            <button type="submit" class="btn btn-primary">Hazır mesajları kaydet</button>
+          </div>
+          <p class="search-hint" id="templates-saved" hidden>Kaydedildi.</p>
+        </form>
+      </section>
     </section>
   </main>
 
-  <script src="firebase-config.js?v=5"></script>
-  <script type="module" src="chat-sync.js?v=5"></script>
-  <script type="module" src="admin.js?v=5"></script>
+  <script src="firebase-config.js?v=6"></script>
+  <script type="module" src="chat-sync.js?v=6"></script>
+  <script type="module" src="admin.js?v=6"></script>
 </body>
 </html>
