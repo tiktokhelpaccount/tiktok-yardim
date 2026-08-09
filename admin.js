@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=47";
+import "./chat-sync.js?v=48";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -86,6 +86,7 @@ const adminLocationMaps = document.getElementById("admin-location-maps");
 const exportChatBtn = document.getElementById("export-chat-btn");
 const clearChatBtn = document.getElementById("clear-chat-btn");
 const clearAllChatsBtn = document.getElementById("clear-all-chats-btn");
+const recentListEl = document.getElementById("admin-recent-list");
 const templatesEditor = document.getElementById("templates-editor");
 const templatesForm = document.getElementById("templates-form");
 const templatesSaved = document.getElementById("templates-saved");
@@ -108,6 +109,9 @@ let adminCall = null;
 let knownSessionIds = new Set();
 let sessionUpdatedAt = new Map();
 let sessionsHydrated = false;
+let latestSessionRows = [];
+let recentFeedTimer = null;
+let recentFeedSeq = 0;
 let alertAudioCtx = null;
 let titleFlashTimer = null;
 let originalTitle = document.title;
@@ -308,6 +312,83 @@ function pushDesktopNotification(title, body, tag) {
   }
 }
 
+function renderRecentFeed(items) {
+  if (!recentListEl) return;
+  recentListEl.innerHTML = "";
+  if (!items?.length) {
+    recentListEl.innerHTML = '<li class="admin-recent-empty">Henüz mesaj yok</li>';
+    return;
+  }
+  items.forEach((item) => {
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "admin-recent-item";
+    btn.title = "Sohbeti aç";
+    const who = whoLabel(item);
+    const text = String(item.text || "").trim() || "(boş)";
+    btn.innerHTML = `
+      <span class="admin-recent-item-top">
+        <span class="admin-recent-item-who">${escapeHtml(who)} · #${shortId(item.sessionId)}</span>
+        <span>${escapeHtml(fmtTime(item.ts))}</span>
+      </span>
+      <span class="admin-recent-item-text">${escapeHtml(text)}</span>
+    `;
+    btn.addEventListener("click", () => {
+      const row = latestSessionRows.find((r) => r.id === item.sessionId);
+      if (row) openSession(row);
+      else openSession({ id: item.sessionId, page: item.page || "/", updatedAt: item.ts });
+    });
+    li.appendChild(btn);
+    recentListEl.appendChild(li);
+  });
+}
+
+function scheduleRecentFeedRefresh(rows) {
+  latestSessionRows = Array.isArray(rows) ? rows : [];
+  if (recentFeedTimer) clearTimeout(recentFeedTimer);
+  recentFeedTimer = window.setTimeout(() => {
+    void refreshRecentFeed(latestSessionRows);
+  }, 250);
+}
+
+async function refreshRecentFeed(rows) {
+  const sync = window.ChatSync;
+  if (!sync?.getSessionMessages || !recentListEl) return;
+  const seq = ++recentFeedSeq;
+  const list = (Array.isArray(rows) ? rows : [])
+    .slice()
+    .sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0))
+    .slice(0, 15);
+
+  try {
+    const batches = await Promise.all(
+      list.map(async (row) => {
+        try {
+          const msgs = await sync.getSessionMessages(row.id);
+          return (msgs || []).slice(-5).map((m) => ({
+            ...m,
+            sessionId: row.id,
+            page: row.page || "/",
+          }));
+        } catch {
+          return [];
+        }
+      })
+    );
+    if (seq !== recentFeedSeq) return;
+    const merged = batches
+      .flat()
+      .filter((m) => m && m.id)
+      .sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0))
+      .slice(-5)
+      .reverse();
+    renderRecentFeed(merged);
+  } catch (err) {
+    console.warn("recent feed", err);
+  }
+}
+
 function fireHighAlert({ kicker, title, body, tag }) {
   if (!alertsArmed) alertsArmed = true;
   bindAudioUnlockGestures();
@@ -363,6 +444,7 @@ function startDash(sync) {
       });
       sessionsHydrated = true;
       renderSessions(rows);
+      scheduleRecentFeedRefresh(rows);
       if (!selectedId && rows[0]) openSession(rows[0]);
       if (sendHint && !rows.length) {
         sendHint.hidden = false;
@@ -403,6 +485,7 @@ function startDash(sync) {
     });
 
     renderSessions(rows);
+    scheduleRecentFeedRefresh(rows);
 
     if (fresh.length) {
       const newest = fresh.sort(
@@ -1249,6 +1332,10 @@ function appendThreadMessage(msg, announce) {
   row.append(meta, body);
   threadMessages.appendChild(row);
   threadMessages.scrollTop = threadMessages.scrollHeight;
+
+  if (announce) {
+    scheduleRecentFeedRefresh(latestSessionRows);
+  }
 
   if (announce && msg.who === "user") {
     fireHighAlert({
