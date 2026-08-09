@@ -22,6 +22,8 @@ const configured =
 const QUICK_KEY = "admin_quick_replies_v1";
 const DEFAULT_QUICK_REPLIES = [
   "Merhaba, size nasıl yardımcı olabilirim?",
+  "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…",
+  "İşleminiz devam ediyor, lütfen bekleyin.",
   "Lütfen uygulamada gördüğünüz uyarı veya hata metnini yazın.",
   "Hesap işlemleri için yalnızca resmi destek kullanılır: support.tiktok.com",
   "Şifre, e-posta veya doğrulama kodu paylaşmayın.",
