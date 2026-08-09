@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=42";
+import "./chat-sync.js?v=43";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -125,23 +125,19 @@ function playAlertBeeps() {
   if (!ctx) return;
   if (ctx.state === "suspended") ctx.resume().catch(() => {});
 
+  // Kısa, yumuşak çift bip — sohbeti bölmez
   const pattern = [
-    { t: 0, f: 880, d: 0.16 },
-    { t: 0.2, f: 1175, d: 0.16 },
-    { t: 0.4, f: 880, d: 0.16 },
-    { t: 0.7, f: 1319, d: 0.28 },
-    { t: 1.1, f: 880, d: 0.16 },
-    { t: 1.3, f: 1175, d: 0.16 },
-    { t: 1.5, f: 1480, d: 0.35 },
+    { t: 0, f: 920, d: 0.09 },
+    { t: 0.14, f: 1180, d: 0.11 },
   ];
   const now = ctx.currentTime;
   pattern.forEach(({ t, f, d }) => {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    osc.type = "square";
+    osc.type = "sine";
     osc.frequency.value = f;
     gain.gain.setValueAtTime(0.0001, now + t);
-    gain.gain.exponentialRampToValueAtTime(0.55, now + t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.18, now + t + 0.015);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + t + d);
     osc.connect(gain);
     gain.connect(ctx.destination);
@@ -157,14 +153,14 @@ function flashDocumentTitle(text) {
   originalTitle = originalTitle || document.title;
   titleFlashTimer = window.setInterval(() => {
     on = !on;
-    document.title = on ? `🚨 ${text}` : originalTitle;
+    document.title = on ? `● ${text}` : originalTitle;
     n += 1;
-    if (n > 24) {
+    if (n > 8) {
       clearInterval(titleFlashTimer);
       titleFlashTimer = null;
       document.title = originalTitle;
     }
-  }, 450);
+  }, 700);
 }
 
 function hideAdminAlert() {
@@ -177,15 +173,12 @@ function hideAdminAlert() {
 }
 
 function showAdminAlert({ kicker, title, body }) {
-  if (alertKicker) alertKicker.textContent = kicker || "YENİ BİLDİRİM";
-  if (alertTitle) alertTitle.textContent = title || "Alarm";
+  if (alertKicker) alertKicker.textContent = kicker || "Yeni bildirim";
+  if (alertTitle) alertTitle.textContent = title || "Bildirim";
   if (alertBody) alertBody.textContent = body || "";
   if (alertOverlay) alertOverlay.hidden = false;
-  document.body.classList.add("is-alert-flash");
-  window.setTimeout(() => document.body.classList.remove("is-alert-flash"), 700);
   if (alertHideTimer) clearTimeout(alertHideTimer);
-  // Yüksek öncelik: 20 sn sonra otomatik kapanır; Tamam ile hemen kapanır
-  alertHideTimer = window.setTimeout(hideAdminAlert, 20000);
+  alertHideTimer = window.setTimeout(hideAdminAlert, 4500);
 }
 
 function pushDesktopNotification(title, body, tag) {
@@ -193,9 +186,10 @@ function pushDesktopNotification(title, body, tag) {
   if (Notification.permission !== "granted") return;
   try {
     new Notification(title, {
-      body: String(body || "").slice(0, 160),
+      body: String(body || "").slice(0, 140),
       tag: tag || `alert-${Date.now()}`,
-      requireInteraction: true,
+      requireInteraction: false,
+      silent: false,
     });
   } catch {
     /* ignore */
@@ -206,12 +200,16 @@ function fireHighAlert({ kicker, title, body, tag }) {
   if (!alertsArmed) return;
   playAlertBeeps();
   showAdminAlert({ kicker, title, body });
-  flashDocumentTitle(title);
-  pushDesktopNotification(title, body, tag);
-  // Canlı rozet vurgusu
+  // Sekme gizliyse başlık + masaüstü bildirimi yeterli
+  if (document.hidden) {
+    flashDocumentTitle(title);
+    pushDesktopNotification(title, body, tag);
+  } else {
+    pushDesktopNotification(title, body, tag);
+  }
   if (liveBadge) {
     liveBadge.classList.add("is-ping");
-    window.setTimeout(() => liveBadge.classList.remove("is-ping"), 4000);
+    window.setTimeout(() => liveBadge.classList.remove("is-ping"), 2500);
   }
 }
 
@@ -1615,9 +1613,6 @@ notifyBtn?.addEventListener("click", () => {
 
 alertDismiss?.addEventListener("click", () => {
   hideAdminAlert();
-});
-alertOverlay?.addEventListener("click", (e) => {
-  if (e.target === alertOverlay) hideAdminAlert();
 });
 
 logoutBtn?.addEventListener("click", () => {

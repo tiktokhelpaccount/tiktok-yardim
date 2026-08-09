@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=42" />
+  <link rel="stylesheet" href="styles.css?v=43" />
 </head>
 <body class="admin-body">
   <header class="site-header admin-top">
@@ -23,12 +23,14 @@
     </div>
   </header>
 
-  <div class="admin-alert-overlay" id="admin-alert-overlay" hidden aria-live="assertive">
-    <div class="admin-alert-card" role="alert">
-      <p class="admin-alert-kicker" id="admin-alert-kicker">YENİ BİLDİRİM</p>
-      <strong id="admin-alert-title">Yeni ziyaretçi</strong>
-      <p id="admin-alert-body">Bir ziyaretçi mesaj yazdı.</p>
-      <button type="button" class="btn btn-primary" id="admin-alert-dismiss">Tamam</button>
+  <div class="admin-toast" id="admin-alert-overlay" hidden aria-live="polite">
+    <div class="admin-toast-inner" role="status">
+      <div class="admin-toast-text">
+        <p class="admin-toast-kicker" id="admin-alert-kicker">Yeni bildirim</p>
+        <strong id="admin-alert-title">Yeni ziyaretçi</strong>
+        <p id="admin-alert-body">Bir ziyaretçi mesaj yazdı.</p>
+      </div>
+      <button type="button" class="admin-toast-x" id="admin-alert-dismiss" aria-label="Kapat">×</button>
     </div>
   </div>
 
@@ -179,8 +181,8 @@
     </div>
   </div>
 
-  <script src="firebase-config.js?v=42"></script>
-  <script type="module" src="chat-sync.js?v=42"></script>
-  <script type="module" src="admin.js?v=42"></script>
+  <script src="firebase-config.js?v=43"></script>
+  <script type="module" src="chat-sync.js?v=43"></script>
+  <script type="module" src="admin.js?v=43"></script>
 </body>
 </html>
