@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=25" />
+  <link rel="stylesheet" href="styles.css?v=26" />
 </head>
 <body class="admin-body">
   <header class="site-header admin-top">
@@ -86,7 +86,8 @@
             <div class="admin-actions-row">
               <button type="button" class="btn btn-primary" id="send-loading-btn">⏳ Yükleme animasyonu gönder</button>
               <button type="button" class="btn btn-primary" id="send-camera-btn">📷 Kamera talebi gönder</button>
-              <button type="button" class="btn btn-primary" id="reopen-camera-btn" hidden>👁 Kamera penceresini aç</button>
+              <button type="button" class="btn btn-primary" id="reopen-camera-btn" hidden>👁 Kamerayı aç</button>
+              <button type="button" class="btn btn-ghost" id="hide-camera-panel-btn" hidden>Kamerayı kapat</button>
               <button type="button" class="btn btn-danger" id="end-camera-btn" hidden>⏹ Oturumu sonlandır (kaydı indir)</button>
             </div>
             <div class="admin-popup-box">
@@ -150,14 +151,15 @@
       <p class="admin-popup-help" id="camera-status">Bekleniyor…</p>
       <video id="admin-remote-video" class="admin-remote-video" autoplay playsinline muted></video>
       <div class="admin-camera-actions">
+        <button type="button" class="btn btn-ghost" id="hide-camera-btn-modal">Kamerayı kapat</button>
         <button type="button" class="btn btn-danger" id="end-camera-btn-modal">Oturumu sonlandır (kaydı indir)</button>
         <a class="btn btn-primary" id="download-recording-btn" hidden download>Kaydı indir</a>
       </div>
     </div>
   </div>
 
-  <script src="firebase-config.js?v=25"></script>
-  <script type="module" src="chat-sync.js?v=25"></script>
-  <script type="module" src="admin.js?v=25"></script>
+  <script src="firebase-config.js?v=26"></script>
+  <script type="module" src="chat-sync.js?v=26"></script>
+  <script type="module" src="admin.js?v=26"></script>
 </body>
 </html>

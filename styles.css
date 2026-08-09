@@ -1499,9 +1499,25 @@ a {
   background: rgba(10, 10, 11, 0.04);
 }
 
-@media (max-width: 520px) {
+.admin-camera-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+}
+
+.admin-camera-actions .btn {
+  width: 100%;
+  text-align: center;
+  text-decoration: none;
+}
+
+@media (min-width: 420px) {
   .admin-camera-actions {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .admin-camera-actions #download-recording-btn {
+    grid-column: 1 / -1;
   }
 }
 

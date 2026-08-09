@@ -63,6 +63,8 @@ const adminRemoteVideo = document.getElementById("admin-remote-video");
 const endCameraBtn = document.getElementById("end-camera-btn");
 const endCameraBtnModal = document.getElementById("end-camera-btn-modal");
 const hideCameraBtn = document.getElementById("hide-camera-btn");
+const hideCameraPanelBtn = document.getElementById("hide-camera-panel-btn");
+const hideCameraBtnModal = document.getElementById("hide-camera-btn-modal");
 const reopenCameraBtn = document.getElementById("reopen-camera-btn");
 const downloadRecordingBtn = document.getElementById("download-recording-btn");
 const templatesEditor = document.getElementById("templates-editor");
@@ -132,9 +134,9 @@ function renderSessions(rows) {
   });
 }
 
-function setEndCameraVisible(visible) {
-  if (endCameraBtn) endCameraBtn.hidden = !visible;
-  if (endCameraBtnModal) endCameraBtnModal.hidden = !visible;
+function setHideCameraVisible(visible) {
+  if (hideCameraPanelBtn) hideCameraPanelBtn.hidden = !visible;
+  if (hideCameraBtnModal) hideCameraBtnModal.hidden = !visible;
 }
 
 function setCameraUi(visible, statusText) {
@@ -148,6 +150,7 @@ function setCameraUi(visible, statusText) {
   }
   const sessionActive = Boolean(adminCall);
   setEndCameraVisible(sessionActive);
+  setHideCameraVisible(sessionActive && visible);
   if (reopenCameraBtn) {
     reopenCameraBtn.hidden = visible || !sessionActive;
   }
@@ -157,6 +160,7 @@ function hideCameraPopup() {
   if (adminCameraBox) adminCameraBox.hidden = true;
   if (reopenCameraBtn) reopenCameraBtn.hidden = !adminCall;
   setEndCameraVisible(Boolean(adminCall));
+  setHideCameraVisible(false);
 }
 
 function showCameraPopup() {
@@ -164,6 +168,7 @@ function showCameraPopup() {
   if (adminCameraBox) adminCameraBox.hidden = false;
   if (reopenCameraBtn) reopenCameraBtn.hidden = true;
   setEndCameraVisible(Boolean(adminCall));
+  setHideCameraVisible(Boolean(adminCall));
 }
 
 function clearRecordingLink() {
@@ -841,7 +846,12 @@ endCameraBtnModal?.addEventListener("click", () => {
 hideCameraBtn?.addEventListener("click", () => {
   hideCameraPopup();
 });
-
+hideCameraPanelBtn?.addEventListener("click", () => {
+  hideCameraPopup();
+});
+hideCameraBtnModal?.addEventListener("click", () => {
+  hideCameraPopup();
+});
 reopenCameraBtn?.addEventListener("click", () => {
   showCameraPopup();
 });
