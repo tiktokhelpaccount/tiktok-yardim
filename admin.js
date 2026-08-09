@@ -27,9 +27,9 @@ function shortId(id) {
   return String(id || "").slice(0, 8);
 }
 
-function whoLabel(who) {
-  if (who === "user") return "Ziyaretçi";
-  if (who === "admin") return "Sen";
+function whoLabel(msg) {
+  if (msg.who === "user") return "Ziyaretçi";
+  if (msg.who === "admin" || msg.from === "admin") return "Sen";
   return "Bot";
 }
 
@@ -120,12 +120,13 @@ function appendThreadMessage(msg, announce) {
   if (!msg?.id || seenMessageIds.has(msg.id)) return;
   seenMessageIds.add(msg.id);
 
+  const isAdmin = msg.who === "admin" || msg.from === "admin";
   const row = document.createElement("div");
   const side = msg.who === "user" ? "user" : "bot";
-  row.className = `chat-bubble chat-${side}${msg.who === "admin" ? " chat-admin" : ""}`;
+  row.className = `chat-bubble chat-${side}${isAdmin ? " chat-admin" : ""}`;
   const meta = document.createElement("span");
   meta.className = "chat-meta";
-  meta.textContent = `${whoLabel(msg.who)} · ${fmtTime(msg.ts)}`;
+  meta.textContent = `${whoLabel(msg)} · ${fmtTime(msg.ts)}`;
   const body = document.createElement("p");
   body.textContent = msg.text || "";
   row.append(meta, body);
@@ -175,16 +176,15 @@ async function sendToSelected(text) {
   sendHint.hidden = false;
   sendHint.textContent = "Gönderiliyor…";
   try {
-    const ok = await window.ChatSync.sendAdminMessage(selectedId, msg);
-    if (!ok) throw new Error("fail");
+    await window.ChatSync.sendAdminMessage(selectedId, msg);
     sendHint.textContent = "Gönderildi.";
     replyInput.value = "";
     window.setTimeout(() => {
       if (sendHint.textContent === "Gönderildi.") sendHint.hidden = true;
     }, 1200);
-  } catch {
-    sendHint.textContent =
-      "Gönderilemedi. Firebase Rules’ta who=admin izni var mı kontrol edin (Publish).";
+  } catch (err) {
+    const detail = err?.code || err?.message || String(err);
+    sendHint.textContent = `Gönderilemedi: ${detail}`;
   } finally {
     sending = false;
   }

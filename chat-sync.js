@@ -102,13 +102,16 @@ async function pushMessage(who, text) {
 
 async function sendAdminMessage(targetSessionId, text) {
   const database = initDb();
-  if (!database || !targetSessionId) return false;
+  if (!database) throw new Error("Firebase bağlı değil");
+  if (!targetSessionId) throw new Error("Sohbet seçili değil");
   const clean = String(text || "").trim().slice(0, 800);
-  if (!clean) return false;
+  if (!clean) throw new Error("Boş mesaj");
 
+  // who:"bot" + from:"admin" → eski Rules (yalnızca user/bot) ile de uyumlu
   const msgRef = push(ref(database, `chats/${targetSessionId}/messages`));
   await set(msgRef, {
-    who: "admin",
+    who: "bot",
+    from: "admin",
     text: clean,
     ts: Date.now(),
   });
@@ -159,7 +162,7 @@ function listenIncomingSupport(onMessage) {
   ensureSession().then((id) => {
     if (cancelled || !id) return;
     unsub = listenMessages(id, (msg) => {
-      if (msg.who === "admin") onMessage(msg);
+      if (msg.who === "admin" || msg.from === "admin") onMessage(msg);
     });
   });
 
