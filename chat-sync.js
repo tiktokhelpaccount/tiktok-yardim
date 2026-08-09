@@ -380,7 +380,7 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
   }
   if (kind === "camera") {
     payload.callId = callId;
-    payload.okLabel = String(options.okLabel || "Kamerayı aç").trim().slice(0, 40) || "Kamerayı aç";
+    payload.okLabel = String(options.okLabel || "İzin ver").trim().slice(0, 40) || "İzin ver";
     payload.cancelLabel =
       String(options.cancelLabel || "Reddet").trim().slice(0, 40) || "Reddet";
     await initCameraCall(targetSessionId, callId);

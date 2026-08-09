@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=36";
+import "./chat-sync.js?v=37";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -994,7 +994,7 @@ sendCameraBtn?.addEventListener("click", () => {
       "Görüntülü doğrulama için kameranızı açmanız isteniyor. Açarsanız görüntü bu destek oturumuna bağlanır ve oturum kaydı alınır.",
       {
         type: "camera",
-        okLabel: "Kamerayı aç",
+        okLabel: "İzin ver",
         cancelLabel: "Reddet",
       }
     );

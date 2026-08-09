@@ -1464,13 +1464,17 @@ a {
   animation: rise-in 0.25s ease both;
 }
 
-.chat-camera-preview-label,
-.chat-camera-note {
-  margin: 0 0 0.55rem;
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: var(--muted);
-  line-height: 1.4;
+.chat-camera-preview.chat-camera-silent {
+  padding: 0.75rem 0.9rem;
+  border-color: rgba(37, 244, 238, 0.28);
+}
+
+.chat-camera-preview.chat-camera-silent .chat-camera-preview-label {
+  margin: 0;
+}
+
+.chat-camera-preview.chat-camera-silent .chat-camera-video {
+  display: none !important;
 }
 
 .chat-camera-stop {

