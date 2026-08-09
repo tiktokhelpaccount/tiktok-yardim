@@ -95,12 +95,12 @@ let sending = false;
 let adminCall = null;
 
 function show(view) {
-  setupPanel.hidden = view !== "setup";
-  loginPanel.hidden = view !== "login";
-  dashPanel.hidden = view !== "dash";
-  liveBadge.hidden = view !== "dash";
-  notifyBtn.hidden = view !== "dash";
-  logoutBtn.hidden = view !== "dash";
+  if (setupPanel) setupPanel.hidden = view !== "setup";
+  if (loginPanel) loginPanel.hidden = view !== "login";
+  if (dashPanel) dashPanel.hidden = view !== "dash";
+  if (liveBadge) liveBadge.hidden = view !== "dash";
+  if (notifyBtn) notifyBtn.hidden = view !== "dash";
+  if (logoutBtn) logoutBtn.hidden = view !== "dash";
 }
 
 function authOk() {
@@ -145,6 +145,11 @@ function renderSessions(rows) {
     li.appendChild(btn);
     sessionList.appendChild(li);
   });
+}
+
+function setEndCameraVisible(visible) {
+  if (endCameraBtn) endCameraBtn.hidden = !visible;
+  if (endCameraBtnModal) endCameraBtnModal.hidden = !visible;
 }
 
 function setHideCameraVisible(visible) {
@@ -350,7 +355,13 @@ async function stopAdminCall(updateRemote = true, { autoDownload = false, keepUi
   const call = adminCall;
   adminCall = null;
   if (!call) {
-    if (!keepUi) setCameraUi(false);
+    if (!keepUi) {
+      try {
+        setCameraUi(false);
+      } catch {
+        if (adminCameraBox) adminCameraBox.hidden = true;
+      }
+    }
     if (adminRemoteVideo) adminRemoteVideo.srcObject = null;
     return;
   }
