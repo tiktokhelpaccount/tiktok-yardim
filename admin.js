@@ -1,4 +1,4 @@
-﻿import "./chat-sync.js?v=69";
+﻿import "./chat-sync.js?v=70";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -909,10 +909,19 @@ function updateAdminLocationUi(loc, status, error) {
     }
     return;
   }
-  if (adminLocationMaps) adminLocationMaps.hidden = true;
+  if (adminLocationMaps) {
+    adminLocationMaps.hidden = true;
+    adminLocationMaps.removeAttribute("href");
+  }
   const st = String(status || "");
   if (st === "denied") {
-    adminLocationText.textContent = "Konum izni reddedildi";
+    adminLocationText.textContent =
+      "Konum engelli (Safari). Ziyaretçi: Ayarlar→Safari→Konum→Sor, yenile, kırmızı butona dokun";
+  } else if (st === "awaiting-tap" || st === "prompting") {
+    adminLocationText.textContent =
+      st === "prompting"
+        ? "Konum penceresi istendi — ziyaretçi İzin Ver’e basmalı"
+        : "Konum bekleniyor — ziyaretçi kırmızı konum butonuna dokunmalı";
   } else if (st === "unsupported") {
     adminLocationText.textContent = "Tarayıcı konum desteklemiyor";
   } else if (st === "unavailable" || st === "timeout" || st === "error") {

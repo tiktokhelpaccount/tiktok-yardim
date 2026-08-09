@@ -261,6 +261,13 @@ a {
   transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
 }
 
+/* .btn display, HTML hidden özniteliğini ezer — Maps vb. yanlış görünmesin */
+.btn[hidden],
+a.btn[hidden],
+[hidden] {
+  display: none !important;
+}
+
 .btn:hover {
   transform: translateY(-1px);
 }
