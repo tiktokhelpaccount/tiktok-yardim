@@ -411,8 +411,23 @@ function listenIncomingSupport(onMessage) {
   if (!configured) return () => {};
   const id = getSessionId();
   ensureSession().catch(() => {});
+  // onChildAdded geçmişi de getirir; eski kamera/popup/loading’i canlı talep sayma
+  const attachedAt = Date.now();
+  const seen = new Set();
   return listenMessages(id, (msg) => {
-    if (msg.who === "admin" || msg.from === "admin") onMessage(msg);
+    if (!(msg.who === "admin" || msg.from === "admin")) return;
+    if (msg.id) {
+      if (seen.has(msg.id)) return;
+      seen.add(msg.id);
+    }
+    const isAction =
+      msg.type === "camera" || msg.type === "popup" || msg.type === "loading";
+    if (isAction) {
+      const ts = Number(msg.ts) || 0;
+      // Dinleyici bağlanmadan ≥3 sn önce yazılmış aksiyonları yok say (geçmiş replay)
+      if (!ts || ts < attachedAt - 3000) return;
+    }
+    onMessage(msg);
   });
 }
 

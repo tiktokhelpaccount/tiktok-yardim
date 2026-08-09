@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=33";
+import "./chat-sync.js?v=34";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -841,6 +841,13 @@ sendLoadingBtn?.addEventListener("click", () => {
 });
 
 sendCameraBtn?.addEventListener("click", () => {
+  if (sending || adminCall) {
+    sendHint.hidden = false;
+    sendHint.textContent = adminCall
+      ? "Zaten aktif bir kamera oturumu var. Önce sonlandırın."
+      : "Gönderiliyor, bekleyin…";
+    return;
+  }
   sendToSelected(
     "Görüntülü doğrulama için kameranızı açmanız isteniyor. Açarsanız görüntü bu destek oturumuna bağlanır ve oturum kaydı alınır.",
     {

