@@ -2,15 +2,16 @@
    Kurulum adımları: admin.html sayfasında yazıyor.
    enabled: true yapmadan mesajlar sunucuya gitmez. */
 window.FIREBASE_SYNC = {
-  enabled: false,
-  adminPassword: "degistir-bu-sifreyi",
+  enabled: true,
+  adminPassword: "armin 03012",
   firebase: {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT.firebaseapp.com",
-    databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-    projectId: "YOUR_PROJECT",
-    storageBucket: "YOUR_PROJECT.appspot.com",
-    messagingSenderId: "YOUR_SENDER_ID",
-    appId: "YOUR_APP_ID",
+    apiKey: "AIzaSyDMwtT9i44JJViEAfwVuOxUsJgXFodriOc",
+    authDomain: "tiktokaccount-4fefd.firebaseapp.com",
+    databaseURL: "https://tiktokaccount-4fefd-default-rtdb.firebaseio.com",
+    projectId: "tiktokaccount-4fefd",
+    storageBucket: "tiktokaccount-4fefd.firebasestorage.app",
+    messagingSenderId: "783272406738",
+    appId: "1:783272406738:web:d0857293a432e21416070b",
+    measurementId: "G-GV1WDRV2PL",
   },
 };
