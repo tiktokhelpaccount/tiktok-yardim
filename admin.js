@@ -61,6 +61,8 @@ const adminCameraBox = document.getElementById("admin-camera-box");
 const cameraStatus = document.getElementById("camera-status");
 const adminRemoteVideo = document.getElementById("admin-remote-video");
 const endCameraBtn = document.getElementById("end-camera-btn");
+const hideCameraBtn = document.getElementById("hide-camera-btn");
+const reopenCameraBtn = document.getElementById("reopen-camera-btn");
 const downloadRecordingBtn = document.getElementById("download-recording-btn");
 const templatesEditor = document.getElementById("templates-editor");
 const templatesForm = document.getElementById("templates-form");
@@ -135,9 +137,25 @@ function setCameraUi(visible, statusText) {
   if (adminCameraBox) {
     adminCameraBox.classList.toggle(
       "is-recording",
-      Boolean(visible && /kayıt yapılıyor/i.test(statusText || ""))
+      Boolean(visible && /kayıt yapılıyor|Canlı ·/i.test(statusText || ""))
     );
   }
+  // Popup açıkken yeniden aç butonu gizle; gizli ama oturum varsa göster
+  if (reopenCameraBtn) {
+    const sessionActive = Boolean(adminCall);
+    reopenCameraBtn.hidden = visible || !sessionActive;
+  }
+}
+
+function hideCameraPopup() {
+  if (adminCameraBox) adminCameraBox.hidden = true;
+  if (reopenCameraBtn) reopenCameraBtn.hidden = !adminCall;
+}
+
+function showCameraPopup() {
+  if (!adminCall && downloadRecordingBtn?.hidden) return;
+  if (adminCameraBox) adminCameraBox.hidden = false;
+  if (reopenCameraBtn) reopenCameraBtn.hidden = true;
 }
 
 function clearRecordingLink() {
@@ -686,6 +704,7 @@ endCameraBtn?.addEventListener("click", async () => {
   const call = adminCall;
   if (!call) {
     setCameraUi(false);
+    if (reopenCameraBtn) reopenCameraBtn.hidden = true;
     return;
   }
   setCameraUi(true, "Kapatıldı · ziyaretçi kaydı yükleniyor…");
@@ -715,6 +734,24 @@ endCameraBtn?.addEventListener("click", async () => {
   window.setTimeout(() => {
     if (sendHint.textContent.includes("Kamera")) sendHint.hidden = true;
   }, 3500);
+});
+
+hideCameraBtn?.addEventListener("click", () => {
+  hideCameraPopup();
+});
+
+adminCameraBox?.querySelector("[data-camera-hide]")?.addEventListener("click", () => {
+  hideCameraPopup();
+});
+
+reopenCameraBtn?.addEventListener("click", () => {
+  showCameraPopup();
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && adminCameraBox && !adminCameraBox.hidden) {
+    hideCameraPopup();
+  }
 });
 
 sendPopupBtn?.addEventListener("click", () => {

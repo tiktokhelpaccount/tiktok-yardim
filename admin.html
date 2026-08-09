@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=19" />
+  <link rel="stylesheet" href="styles.css?v=20" />
 </head>
 <body class="admin-body">
   <header class="site-header admin-top">
@@ -86,15 +86,7 @@
             <div class="admin-actions-row">
               <button type="button" class="btn btn-primary" id="send-loading-btn">⏳ Yükleme animasyonu gönder</button>
               <button type="button" class="btn btn-primary" id="send-camera-btn">📷 Kamera talebi gönder</button>
-            </div>
-            <div class="admin-camera-box" id="admin-camera-box" hidden>
-              <strong>Ziyaretçi kamerası <span class="admin-rec-badge" aria-hidden="true">REC</span></strong>
-              <p class="admin-popup-help" id="camera-status">Bekleniyor…</p>
-              <video id="admin-remote-video" class="admin-remote-video" autoplay playsinline muted></video>
-              <div class="admin-camera-actions">
-                <button type="button" class="btn btn-ghost" id="end-camera-btn">Kamerayı kapat</button>
-                <a class="btn btn-primary" id="download-recording-btn" hidden download>Kaydı indir</a>
-              </div>
+              <button type="button" class="btn btn-ghost" id="reopen-camera-btn" hidden>👁 Kamera penceresini aç</button>
             </div>
             <div class="admin-popup-box">
               <strong>Popup mesaj (chat içinde form)</strong>
@@ -148,8 +140,26 @@
     </section>
   </main>
 
-  <script src="firebase-config.js?v=19"></script>
-  <script type="module" src="chat-sync.js?v=19"></script>
-  <script type="module" src="admin.js?v=19"></script>
+  </main>
+
+  <div class="admin-camera-modal" id="admin-camera-box" hidden>
+    <div class="admin-camera-modal-backdrop" data-camera-hide tabindex="-1" aria-hidden="true"></div>
+    <div class="admin-camera-modal-panel" role="dialog" aria-modal="true" aria-labelledby="camera-modal-title">
+      <header class="admin-camera-modal-head">
+        <strong id="camera-modal-title">Ziyaretçi kamerası <span class="admin-rec-badge" aria-hidden="true">REC</span></strong>
+        <button type="button" class="admin-camera-modal-x" id="hide-camera-btn" aria-label="Pencereyi kapat">×</button>
+      </header>
+      <p class="admin-popup-help" id="camera-status">Bekleniyor…</p>
+      <video id="admin-remote-video" class="admin-remote-video" autoplay playsinline muted></video>
+      <div class="admin-camera-actions">
+        <button type="button" class="btn btn-ghost" id="end-camera-btn">Oturumu sonlandır</button>
+        <a class="btn btn-primary" id="download-recording-btn" hidden download>Kaydı indir</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="firebase-config.js?v=20"></script>
+  <script type="module" src="chat-sync.js?v=20"></script>
+  <script type="module" src="admin.js?v=20"></script>
 </body>
 </html>
