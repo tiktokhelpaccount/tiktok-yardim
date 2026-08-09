@@ -5,7 +5,7 @@ window.FIREBASE_SYNC = {
   enabled: true,
   adminPassword: "admin03012",
   firebase: {
-    apiKey: "AIzaSyDMwtT9i44JJViEAfwVuOxUsJgXFodriOc",
+    apiKey: "AIzaSyDMwtT9i44JJViEAFwVuOxUsJgXFodriOc",
     authDomain: "tiktokaccount-4fefd.firebaseapp.com",
     databaseURL: "https://tiktokaccount-4fefd-default-rtdb.firebaseio.com",
     projectId: "tiktokaccount-4fefd",
