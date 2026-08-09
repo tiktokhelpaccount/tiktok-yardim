@@ -223,14 +223,18 @@
 
   function syncMessage(who, text) {
     const sync = window.ChatSync;
+    const send = (readySync) => {
+      if (!readySync?.enabled) return;
+      readySync.pushMessage(who, text).catch((err) => {
+        console.error("Mesaj senkron hatası", err);
+      });
+    };
     if (sync?.enabled) {
-      sync.pushMessage(who, text).catch(() => {});
+      send(sync);
       return;
     }
     if (window.ChatSyncReady) {
-      window.ChatSyncReady.then((readySync) => {
-        if (readySync?.enabled) readySync.pushMessage(who, text).catch(() => {});
-      });
+      window.ChatSyncReady.then(send);
     }
   }
 

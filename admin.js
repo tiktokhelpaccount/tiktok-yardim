@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=45";
+import "./chat-sync.js?v=46";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -106,6 +106,7 @@ let alertsArmed = false;
 let sending = false;
 let adminCall = null;
 let knownSessionIds = new Set();
+let sessionUpdatedAt = new Map();
 let sessionsHydrated = false;
 let alertAudioCtx = null;
 let titleFlashTimer = null;
@@ -227,12 +228,128 @@ function pushDesktopNotification(title, body, tag) {
 }
 
 function fireHighAlert({ kicker, title, body, tag }) {
-  if (!alertsArmed) return;
+  // Alarmlar henüz kurulmadıysa sessizce kurmayı dene; mesaj akışını engelleme
+  if (!alertsArmed) {
+    alertsArmed = true;
+    ensureAlertAudio();
+  }
   showAdminAlert({ kicker, title, body });
   startAlertSoundLoop();
   flashDocumentTitle(title);
   pushDesktopNotification(title, body, tag);
   if (liveBadge) liveBadge.classList.add("is-ping");
+}
+
+function bindSessionMessages(sessionId) {
+  if (unsubMessages) {
+    unsubMessages();
+    unsubMessages = null;
+  }
+  if (!sessionId || !window.ChatSync?.listenMessages) return;
+
+  // onChildAdded geçmişi senkron getirir: attach sırasında announce kapalı
+  let announceLive = false;
+  unsubMessages = window.ChatSync.listenMessages(sessionId, (msg) => {
+    appendThreadMessage(msg, announceLive);
+  });
+  announceLive = true;
+}
+
+function startDash(sync) {
+  show("dash");
+  renderQuickButtons();
+  renderTemplatesEditor(sync.getQuickReplies());
+  knownSessionIds = new Set();
+  sessionUpdatedAt = new Map();
+  sessionsHydrated = false;
+
+  if (!alertsArmed) {
+    armAlerts().catch(() => {
+      alertsArmed = true;
+      if (notifyBtn) notifyBtn.textContent = "🔔 Alarmları aç (tıkla)";
+    });
+  }
+
+  if (unsubSessions) unsubSessions();
+  unsubSessions = sync.listenSessions((rows) => {
+    if (!Array.isArray(rows)) rows = [];
+
+    if (!sessionsHydrated) {
+      rows.forEach((r) => {
+        knownSessionIds.add(r.id);
+        sessionUpdatedAt.set(r.id, Number(r.updatedAt) || 0);
+      });
+      sessionsHydrated = true;
+      renderSessions(rows);
+      if (!selectedId && rows[0]) openSession(rows[0]);
+      if (sendHint && !rows.length) {
+        sendHint.hidden = false;
+        sendHint.textContent = "Henüz oturum yok. Ziyaretçi sohbet başlatınca burada görünür.";
+      }
+      return;
+    }
+
+    const fresh = [];
+    const bumped = [];
+    rows.forEach((r) => {
+      const updated = Number(r.updatedAt) || 0;
+      if (!knownSessionIds.has(r.id)) {
+        knownSessionIds.add(r.id);
+        sessionUpdatedAt.set(r.id, updated);
+        fresh.push(r);
+        return;
+      }
+      const prev = sessionUpdatedAt.get(r.id) || 0;
+      if (updated > prev) {
+        sessionUpdatedAt.set(r.id, updated);
+        if (r.lastWho === "user") bumped.push(r);
+      }
+    });
+
+    const live = new Set(rows.map((r) => r.id));
+    [...knownSessionIds].forEach((id) => {
+      if (!live.has(id)) {
+        knownSessionIds.delete(id);
+        sessionUpdatedAt.delete(id);
+      }
+    });
+
+    renderSessions(rows);
+
+    if (fresh.length) {
+      const newest = fresh.sort(
+        (a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0)
+      )[0];
+      fireHighAlert({
+        kicker: "YENİ ZİYARETÇİ",
+        title: "Siteye yeni kullanıcı girdi",
+        body: `#${shortId(newest.id)} · ${newest.page || "/"} · ${String(
+          newest.preview || "Sohbet başladı"
+        ).slice(0, 100)}`,
+        tag: `session-${newest.id}`,
+      });
+      // Yeni sohbeti otomatik aç — mesajlar kaçmasın
+      openSession(newest);
+      return;
+    }
+
+    if (bumped.length) {
+      const newest = bumped.sort(
+        (a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0)
+      )[0];
+      if (newest.id !== selectedId) {
+        fireHighAlert({
+          kicker: "YENİ MESAJ",
+          title: "Başka sohbette mesaj var",
+          body: `#${shortId(newest.id)} · ${String(newest.preview || "").slice(0, 120)}`,
+          tag: `bump-${newest.id}-${newest.updatedAt}`,
+        });
+        openSession(newest);
+      }
+    }
+
+    if (!selectedId && rows[0]) openSession(rows[0]);
+  });
 }
 
 async function armAlerts() {
@@ -1158,13 +1275,7 @@ async function clearSelectedChat() {
     await stopAdminCall(false, { keepUi: false });
     await window.ChatSync.clearSessionMessages(selectedId);
     clearThreadUi();
-    // Dinleyiciyi yenile — temiz sonrası yeni mesajlar gelsin
-    if (unsubMessages) unsubMessages();
-    const listenStartedAt = Date.now();
-    unsubMessages = window.ChatSync.listenMessages(selectedId, (msg) => {
-      const isLive = !msg.ts || Number(msg.ts) >= listenStartedAt - 2500;
-      appendThreadMessage(msg, isLive);
-    });
+    bindSessionMessages(selectedId);
     sendHint.textContent = "Sohbet temizlendi.";
     window.setTimeout(() => {
       if (sendHint.textContent.includes("temizlendi")) sendHint.hidden = true;
@@ -1199,6 +1310,7 @@ async function clearAllChats() {
 }
 
 function openSession(row) {
+  if (!row?.id) return;
   selectedId = row.id;
   setThreadToolsEnabled(true);
   seenMessageIds = new Set();
@@ -1215,13 +1327,7 @@ function openSession(row) {
     el.classList.toggle("is-active", el.dataset.sessionId === row.id);
   });
 
-  if (unsubMessages) unsubMessages();
-  const listenStartedAt = Date.now();
-  unsubMessages = window.ChatSync.listenMessages(row.id, (msg) => {
-    // Geçmiş mesajlar alarm üretmesin; yalnızca canlı gelenler
-    const isLive = !msg.ts || Number(msg.ts) >= listenStartedAt - 2500;
-    appendThreadMessage(msg, isLive);
-  });
+  bindSessionMessages(row.id);
   replyInput?.focus();
 }
 
@@ -1316,51 +1422,6 @@ function readTemplatesFromEditor() {
   return Array.from(templatesEditor.querySelectorAll("[data-tpl]"))
     .map((el) => el.value.trim())
     .filter(Boolean);
-}
-
-function startDash(sync) {
-  show("dash");
-  renderQuickButtons();
-  renderTemplatesEditor(sync.getQuickReplies());
-  knownSessionIds = new Set();
-  sessionsHydrated = false;
-  // Giriş jesti ile alarmı hazırla (ses kilidi açılır)
-  if (!alertsArmed) {
-    armAlerts().catch(() => {
-      alertsArmed = true;
-      if (notifyBtn) notifyBtn.textContent = "🔔 Alarmları aç (tıkla)";
-    });
-  }
-  if (unsubSessions) unsubSessions();
-  unsubSessions = sync.listenSessions((rows) => {
-    const ids = rows.map((r) => r.id);
-    if (!sessionsHydrated) {
-      ids.forEach((id) => knownSessionIds.add(id));
-      sessionsHydrated = true;
-      renderSessions(rows);
-      if (!selectedId && rows[0]) openSession(rows[0]);
-      return;
-    }
-
-    const fresh = rows.filter((r) => !knownSessionIds.has(r.id));
-    fresh.forEach((r) => {
-      knownSessionIds.add(r.id);
-      fireHighAlert({
-        kicker: "YENİ ZİYARETÇİ",
-        title: "Siteye yeni kullanıcı girdi",
-        body: `#${shortId(r.id)} · ${r.page || "/"} · ${String(r.preview || "Sohbet başladı").slice(0, 100)}`,
-        tag: `session-${r.id}`,
-      });
-    });
-    // Silinenleri setten çıkar
-    const live = new Set(ids);
-    knownSessionIds.forEach((id) => {
-      if (!live.has(id)) knownSessionIds.delete(id);
-    });
-
-    renderSessions(rows);
-    if (!selectedId && rows[0]) openSession(rows[0]);
-  });
 }
 
 replyForm?.addEventListener("submit", (e) => {

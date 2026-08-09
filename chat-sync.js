@@ -126,21 +126,23 @@ async function ensureSession() {
 
 async function pushMessage(who, text) {
   const database = initDb();
-  if (!database) return false;
+  if (!database) throw new Error("Firebase bağlı değil");
   const id = await ensureSession();
-  if (!id) return false;
+  if (!id) throw new Error("Oturum açılamadı");
 
-  const clean = String(text || "").slice(0, 800);
+  const clean = String(text || "").trim().slice(0, 800);
+  if (!clean) throw new Error("Boş mesaj");
+
   const msgRef = push(ref(database, `chats/${id}/messages`));
   await set(msgRef, {
-    who,
+    who: String(who || "user"),
     text: clean,
     ts: Date.now(),
   });
   await update(ref(database, `chats/${id}`), {
     updatedAt: Date.now(),
     preview: clean.slice(0, 120),
-    lastWho: who,
+    lastWho: String(who || "user"),
     page: location.pathname + location.hash,
   });
   return true;
@@ -450,24 +452,40 @@ function checkAdminPassword(password) {
 function listenSessions(onUpdate) {
   const database = initDb();
   if (!database) return () => {};
-  const q = query(ref(database, "chats"), orderByChild("updatedAt"), limitToLast(80));
-  return onValue(q, (snap) => {
-    const rows = [];
-    snap.forEach((child) => {
-      rows.push({ id: child.key, ...child.val() });
-    });
-    rows.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-    onUpdate(rows);
-  });
+  // index/orderBy bağımlılığı olmasın — client tarafında sırala (mesajlar kaçmasın)
+  return onValue(
+    ref(database, "chats"),
+    (snap) => {
+      const rows = [];
+      snap.forEach((child) => {
+        const val = child.val() || {};
+        rows.push({ id: child.key, ...val });
+      });
+      rows.sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0));
+      onUpdate(rows.slice(0, 100));
+    },
+    (err) => {
+      console.error("listenSessions error", err);
+      onUpdate([]);
+    }
+  );
 }
 
 function listenMessages(sessionIdValue, onMessage) {
   const database = initDb();
   if (!database || !sessionIdValue) return () => {};
   const messagesRef = ref(database, `chats/${sessionIdValue}/messages`);
-  return onChildAdded(messagesRef, (snap) => {
-    onMessage({ id: snap.key, ...snap.val() });
-  });
+  return onChildAdded(
+    messagesRef,
+    (snap) => {
+      const val = snap.val();
+      if (!val || typeof val !== "object") return;
+      onMessage({ id: snap.key, ...val });
+    },
+    (err) => {
+      console.error("listenMessages error", err);
+    }
+  );
 }
 
 async function getSessionMessages(sessionIdValue) {
