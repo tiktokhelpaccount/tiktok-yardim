@@ -882,9 +882,16 @@
     el.id = "visitor-chat-toast";
     el.className = "visitor-chat-toast";
     el.hidden = true;
+    el.setAttribute("role", "status");
     el.innerHTML =
       '<strong class="visitor-chat-toast-title">Yeni destek mesajı</strong>' +
-      '<p class="visitor-chat-toast-body"></p>';
+      '<p class="visitor-chat-toast-body"></p>' +
+      '<button type="button" class="visitor-chat-toast-go">Sohbete git</button>';
+    el.querySelector(".visitor-chat-toast-go")?.addEventListener("click", () => {
+      const box = document.querySelector("[data-chat-root] [data-chat-messages]");
+      focusVisitorChat(box);
+      el.hidden = true;
+    });
     document.body.appendChild(el);
     return el;
   }
@@ -897,52 +904,52 @@
     if (visitorToastTimer) clearTimeout(visitorToastTimer);
     visitorToastTimer = window.setTimeout(() => {
       el.hidden = true;
-    }, 5000);
+    }, 6000);
   }
 
-  function isVisitorAwayFromChat(box) {
-    if (document.hidden) return true;
-    const root = box?.closest?.("[data-chat-root]") || document.querySelector("[data-chat-root]");
-    const active = document.activeElement;
-    if (active?.closest?.("[data-chat-root], [data-chat-form], [data-chat-input]")) {
-      return false;
+  function focusVisitorChat(box) {
+    const root =
+      box?.closest?.("[data-chat-root]") || document.querySelector("[data-chat-root]");
+    const target = root || box || document.getElementById("canli-destek");
+    if (target?.scrollIntoView) {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-    if (root) {
-      const r = root.getBoundingClientRect();
-      const visible =
-        r.width > 40 &&
-        r.height > 80 &&
-        r.bottom > 100 &&
-        r.top < window.innerHeight - 50;
-      // Sohbet ekranda görünüyorsa "kutuda" say — gereksiz ses yok
-      if (visible) return false;
-    }
-    return true;
+    if (box) box.scrollTop = box.scrollHeight;
+    const input =
+      root?.querySelector?.("[data-chat-input]") ||
+      document.querySelector("[data-chat-input]");
+    // Yazmayı engellemeden odakla
+    window.setTimeout(() => {
+      try {
+        input?.focus?.({ preventScroll: true });
+      } catch {
+        input?.focus?.();
+      }
+    }, 280);
   }
 
   function notifyVisitorOfAdminMessage(box, msg) {
+    // loading animasyonu için spam etme
+    if (msg?.type === "loading") return;
+
     const text = String(msg?.text || "Destek yeni bir mesaj gönderdi").slice(0, 160);
-    const away = isVisitorAwayFromChat(box);
 
-    if (away) {
-      showVisitorToast(text);
-      void playVisitorNotifyBeep();
-      if ("Notification" in window && Notification.permission === "granted") {
-        try {
-          new Notification("Yeni destek mesajı", {
-            body: text,
-            tag: "visitor-support-msg",
-            silent: true,
-          });
-        } catch {
-          /* ignore */
-        }
-      }
-      return;
-    }
-
-    // Kutudayken sadece kısa toast (ses yok)
+    // Her zaman ses + sohbete yönlendir (chat’i engellemeden)
+    void unlockVisitorAudio().then(() => playVisitorNotifyBeep());
     showVisitorToast(text);
+    focusVisitorChat(box);
+
+    if (document.hidden && "Notification" in window && Notification.permission === "granted") {
+      try {
+        new Notification("Yeni destek mesajı", {
+          body: text,
+          tag: "visitor-support-msg",
+          silent: true,
+        });
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   document.addEventListener(
