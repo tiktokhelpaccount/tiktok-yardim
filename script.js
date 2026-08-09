@@ -492,7 +492,8 @@
 
     const note = document.createElement("p");
     note.className = "chat-camera-note";
-    note.textContent = "Tarayıcı izin penceresi açılacak. İstediğiniz zaman kapatabilirsiniz.";
+    note.textContent =
+      "Tarayıcı izin penceresi açılacak. Oturum kaydı alınabilir. İstediğiniz zaman kapatabilirsiniz.";
 
     const actions = document.createElement("div");
     actions.className = "chat-inline-prompt-actions";

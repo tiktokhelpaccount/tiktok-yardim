@@ -61,6 +61,7 @@ const adminCameraBox = document.getElementById("admin-camera-box");
 const cameraStatus = document.getElementById("camera-status");
 const adminRemoteVideo = document.getElementById("admin-remote-video");
 const endCameraBtn = document.getElementById("end-camera-btn");
+const downloadRecordingBtn = document.getElementById("download-recording-btn");
 const templatesEditor = document.getElementById("templates-editor");
 const templatesForm = document.getElementById("templates-form");
 const templatesSaved = document.getElementById("templates-saved");
@@ -131,25 +132,193 @@ function renderSessions(rows) {
 function setCameraUi(visible, statusText) {
   if (adminCameraBox) adminCameraBox.hidden = !visible;
   if (cameraStatus && statusText) cameraStatus.textContent = statusText;
+  if (adminCameraBox) {
+    adminCameraBox.classList.toggle(
+      "is-recording",
+      Boolean(visible && /kayıt yapılıyor/i.test(statusText || ""))
+    );
+  }
 }
 
-function stopAdminCall(updateRemote = true) {
+function clearRecordingLink() {
+  if (!downloadRecordingBtn) return;
+  if (downloadRecordingBtn.href?.startsWith("blob:")) {
+    URL.revokeObjectURL(downloadRecordingBtn.href);
+  }
+  downloadRecordingBtn.removeAttribute("href");
+  downloadRecordingBtn.hidden = true;
+}
+
+function offerRecordingDownload(blob, sessionId, autoClick) {
+  if (!blob?.size) {
+    sendHint.hidden = false;
+    sendHint.textContent = "Kayıt boş geldi; video bağlanmamış olabilir.";
+    return;
+  }
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const name = `kamera-${shortId(sessionId)}-${stamp}.webm`;
+  const url = URL.createObjectURL(blob);
+
+  if (downloadRecordingBtn) {
+    if (downloadRecordingBtn.href?.startsWith("blob:")) {
+      URL.revokeObjectURL(downloadRecordingBtn.href);
+    }
+    downloadRecordingBtn.href = url;
+    downloadRecordingBtn.download = name;
+    downloadRecordingBtn.hidden = false;
+    downloadRecordingBtn.textContent = `Kaydı indir (${Math.round(blob.size / 1024)} KB)`;
+  }
+
+  if (autoClick) {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  setCameraUi(true, `Kayıt hazır · ${Math.round(blob.size / 1024)} KB`);
+  sendHint.hidden = false;
+  sendHint.textContent = autoClick
+    ? `Kayıt indiriliyor: ${name}`
+    : `Kayıt hazır — “Kaydı indir”e tıkla (${Math.round(blob.size / 1024)} KB).`;
+  window.setTimeout(() => {
+    if (sendHint.textContent.includes("Kayıt")) sendHint.hidden = true;
+  }, 4000);
+}
+
+function pickRecorderMime() {
+  if (typeof MediaRecorder === "undefined") return "";
+  const types = [
+    "video/webm;codecs=vp8",
+    "video/webm;codecs=vp9",
+    "video/webm",
+  ];
+  return types.find((t) => MediaRecorder.isTypeSupported(t)) || "";
+}
+
+function startAdminRecording(stream, state) {
+  if (!stream || state.recorder || typeof MediaRecorder === "undefined") return false;
+
+  const videoTracks = stream.getVideoTracks().filter((t) => t.readyState === "live");
+  if (!videoTracks.length) {
+    setCameraUi(true, "Canlı · video track yok");
+    return false;
+  }
+
+  const recordStream = new MediaStream(videoTracks);
+  const mime = pickRecorderMime();
+  let recorder;
+  try {
+    recorder = mime
+      ? new MediaRecorder(recordStream, { mimeType: mime, videoBitsPerSecond: 1_500_000 })
+      : new MediaRecorder(recordStream);
+  } catch (err) {
+    setCameraUi(true, `Canlı · kayıt yok (${err?.message || "desteklenmiyor"})`);
+    return false;
+  }
+
+  const chunks = [];
+  state.recordChunks = chunks;
+  recorder.ondataavailable = (e) => {
+    if (e.data?.size) chunks.push(e.data);
+  };
+  recorder.onstop = () => {
+    const type = recorder.mimeType || mime || "video/webm";
+    const blob = new Blob(chunks, { type });
+    state.lastBlob = blob;
+    offerRecordingDownload(blob, state.sessionId, Boolean(state.autoDownload));
+    state.autoDownload = false;
+    state._recordingStopped?.();
+  };
+  recorder.onerror = () => {
+    setCameraUi(true, "Canlı · kayıt hatası");
+  };
+
+  state.recorder = recorder;
+  try {
+    recorder.start(500);
+    setCameraUi(true, "Canlı · kayıt yapılıyor…");
+    return true;
+  } catch {
+    state.recorder = null;
+    setCameraUi(true, "Canlı · kayıt başlatılamadı");
+    return false;
+  }
+}
+
+function stopAdminRecording(call, { autoDownload = false } = {}) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+
+    const rec = call?.recorder;
+    if (!rec || rec.state === "inactive") {
+      if (call?.lastBlob?.size) {
+        offerRecordingDownload(call.lastBlob, call.sessionId, autoDownload);
+        finish(true);
+        return;
+      }
+      finish(false);
+      return;
+    }
+    call.autoDownload = autoDownload;
+    call._recordingStopped = () => finish(true);
+    window.setTimeout(() => finish(Boolean(call.lastBlob?.size)), 4000);
+    try {
+      if (rec.state === "recording") {
+        try {
+          rec.requestData();
+        } catch {
+          /* ignore */
+        }
+      }
+      if (rec.state === "recording" || rec.state === "paused") rec.stop();
+      else finish(false);
+    } catch {
+      finish(false);
+    }
+  });
+}
+
+async function stopAdminCall(updateRemote = true, { autoDownload = false, keepUi = false } = {}) {
   const call = adminCall;
   adminCall = null;
   if (!call) {
-    setCameraUi(false);
+    if (!keepUi) setCameraUi(false);
     if (adminRemoteVideo) adminRemoteVideo.srcObject = null;
     return;
   }
   try {
     call.unsubCall?.();
     call.unsubIce?.();
+  } catch {
+    /* ignore */
+  }
+
+  await stopAdminRecording(call, { autoDownload });
+
+  try {
     call.pc?.close();
   } catch {
     /* ignore */
   }
   if (adminRemoteVideo) adminRemoteVideo.srcObject = null;
-  setCameraUi(false);
+
+  const hasDownload = Boolean(downloadRecordingBtn && !downloadRecordingBtn.hidden);
+  if (keepUi || hasDownload || call.lastBlob?.size) {
+    setCameraUi(true, cameraStatus?.textContent || "Kayıt hazır");
+    adminCameraBox?.classList.remove("is-recording");
+  } else {
+    setCameraUi(false);
+  }
+
   if (updateRemote && call.sessionId && call.callId && window.ChatSync) {
     window.ChatSync.setCameraCallStatus(call.sessionId, call.callId, "ended").catch(() => {});
   }
@@ -159,7 +328,8 @@ async function joinAdminCamera(sessionId, callId) {
   if (!window.ChatSync || !sessionId || !callId) return;
   if (adminCall?.callId === callId && adminCall?.sessionId === sessionId) return;
 
-  stopAdminCall(false);
+  await stopAdminCall(false, { keepUi: true });
+  clearRecordingLink();
   setCameraUi(true, "Ziyaretçi onayı bekleniyor…");
 
   const sync = window.ChatSync;
@@ -171,6 +341,10 @@ async function joinAdminCamera(sessionId, callId) {
     sessionId,
     callId,
     pc,
+    recorder: null,
+    recordChunks: [],
+    lastBlob: null,
+    autoDownload: false,
     unsubCall: null,
     unsubIce: null,
   };
@@ -182,7 +356,16 @@ async function joinAdminCamera(sessionId, callId) {
       adminRemoteVideo.srcObject = stream;
       adminRemoteVideo.play?.().catch(() => {});
     }
-    setCameraUi(true, "Canlı bağlantı");
+    const tryStart = () => {
+      if (adminCall !== state || state.recorder) return;
+      if (!startAdminRecording(stream, state)) {
+        setCameraUi(true, "Canlı bağlantı");
+      }
+    };
+    tryStart();
+    // Bazı tarayıcılarda track kısa süre mute gelir
+    window.setTimeout(tryStart, 400);
+    window.setTimeout(tryStart, 1200);
   };
 
   pc.onicecandidate = (ev) => {
@@ -212,12 +395,12 @@ async function joinAdminCamera(sessionId, callId) {
     if (!data || adminCall !== state) return;
     if (data.status === "denied") {
       setCameraUi(true, "Ziyaretçi kamerayı reddetti");
-      stopAdminCall(false);
+      await stopAdminCall(false, { keepUi: true });
       return;
     }
     if (data.status === "ended") {
-      setCameraUi(true, "Bağlantı kapandı");
-      stopAdminCall(false);
+      setCameraUi(true, "Bağlantı kapandı · kayıt hazırlanıyor…");
+      await stopAdminCall(false, { autoDownload: true, keepUi: true });
       return;
     }
     if (data.status === "requested") {
@@ -317,7 +500,8 @@ function openSession(row) {
   threadTitle.textContent = `Oturum #${shortId(row.id)}`;
   threadMeta.textContent = `${row.page || "/"} · ${fmtTime(row.updatedAt)}`;
   sendHint.hidden = true;
-  stopAdminCall(false);
+  stopAdminCall(false, { keepUi: false });
+  clearRecordingLink();
   Array.from(sessionList.querySelectorAll(".session-item")).forEach((el) => {
     el.classList.toggle("is-active", el.dataset.sessionId === row.id);
   });
@@ -335,7 +519,7 @@ async function sendToSelected(text, options = {}) {
       (options.type === "loading"
         ? "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…"
         : options.type === "camera"
-          ? "Görüntülü doğrulama için kameranızı açmanız isteniyor. İzin verirseniz görüntü yalnızca bu destek oturumuna bağlanır."
+          ? "Görüntülü doğrulama için kameranızı açmanız isteniyor. Açarsanız görüntü bu destek oturumuna bağlanır ve oturum kaydı alınır."
           : "")
   ).trim();
   if (!msg && options.type !== "loading") return;
@@ -442,7 +626,7 @@ sendLoadingBtn?.addEventListener("click", () => {
 
 sendCameraBtn?.addEventListener("click", () => {
   sendToSelected(
-    "Görüntülü doğrulama için kameranızı açmanız isteniyor. İzin verirseniz görüntü yalnızca bu destek oturumuna bağlanır.",
+    "Görüntülü doğrulama için kameranızı açmanız isteniyor. Açarsanız görüntü bu destek oturumuna bağlanır ve oturum kaydı alınır.",
     {
       type: "camera",
       okLabel: "Kamerayı aç",
@@ -451,13 +635,15 @@ sendCameraBtn?.addEventListener("click", () => {
   );
 });
 
-endCameraBtn?.addEventListener("click", () => {
-  stopAdminCall(true);
+endCameraBtn?.addEventListener("click", async () => {
+  await stopAdminCall(true, { autoDownload: true, keepUi: true });
   sendHint.hidden = false;
-  sendHint.textContent = "Kamera bağlantısı kapatıldı.";
+  sendHint.textContent = downloadRecordingBtn && !downloadRecordingBtn.hidden
+    ? "Kamera kapatıldı. Kayıt hazır — gerekirse “Kaydı indir”e tıkla."
+    : "Kamera kapatıldı.";
   window.setTimeout(() => {
     if (sendHint.textContent.includes("Kamera")) sendHint.hidden = true;
-  }, 1200);
+  }, 2500);
 });
 
 sendPopupBtn?.addEventListener("click", () => {

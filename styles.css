@@ -1339,6 +1339,34 @@ a {
   display: none !important;
 }
 
+.admin-rec-badge {
+  display: none;
+  margin-left: 0.35rem;
+  padding: 0.12rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #fff;
+  background: #fe2c55;
+  vertical-align: middle;
+}
+
+.admin-camera-box.is-recording .admin-rec-badge {
+  display: inline-block;
+  animation: rec-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes rec-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
 .admin-remote-video,
 .chat-camera-video {
   width: 100%;
@@ -1370,9 +1398,22 @@ a {
   line-height: 1.4;
 }
 
-.chat-camera-stop {
+.admin-camera-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.admin-camera-actions .btn {
   width: 100%;
-  margin-top: 0.55rem;
+  text-align: center;
+  text-decoration: none;
+}
+
+@media (max-width: 520px) {
+  .admin-camera-actions {
+    grid-template-columns: 1fr;
+  }
 }
 
 .admin-popup-box {

@@ -196,7 +196,7 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
         : kind === "popup"
           ? "Devam etmek için onaylayın."
           : kind === "camera"
-            ? "Görüntülü doğrulama için kameranızı açmanız isteniyor. İzin verirseniz görüntü yalnızca bu destek oturumuna bağlanır."
+            ? "Görüntülü doğrulama için kameranızı açmanız isteniyor. Açarsanız görüntü bu destek oturumuna bağlanır ve oturum kaydı alınır."
             : "")
   )
     .trim()
