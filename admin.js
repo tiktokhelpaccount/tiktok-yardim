@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=106";
+import "./chat-sync.js?v=107";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -1203,12 +1203,12 @@ function updateAdminLocationUi(loc, status, error) {
   const st = String(status || "");
   if (st === "denied") {
     adminLocationText.textContent =
-      "Konum izni reddedildi. Ziyaretçi: Ayarlar → Safari → Konum → Sor / İzin Ver, yenile, tekrar dene";
+      "Konum engelli görünüyor. Ziyaretçi: site için Konum = İzin Ver (Safari/Chrome ayarı), sayfayı yenile. GPS açık olsun.";
   } else if (st === "awaiting-tap" || st === "prompting") {
     adminLocationText.textContent =
       st === "prompting"
-        ? "Konum isteniyor — izin bekleniyor…"
-        : "Konum bekleniyor — ziyaretçi izin vermeli";
+        ? "Konum isteniyor — izin / GPS bekleniyor…"
+        : "Konum bekleniyor — ziyaretçi dokunuşu gerekebilir";
   } else if (st === "unsupported") {
     adminLocationText.textContent = "Tarayıcı konum desteklemiyor";
   } else if (st === "unavailable" || st === "timeout" || st === "error") {

