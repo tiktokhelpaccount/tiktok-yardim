@@ -1613,47 +1613,34 @@
     hidePageEntryPermGate();
   }
 
-  /** İzin verildiği anda ziyaretçide sohbeti aç */
+  /** İzin verildiği anda ziyaretçide sohbet sayfasını aç */
   let visitorChatOpenedAfterPerm = false;
   function openVisitorChatNow() {
     if (visitorChatOpenedAfterPerm) return;
     if (/admin\.html$/i.test(location.pathname || "")) return;
-    visitorChatOpenedAfterPerm = true;
 
     const onChatPage =
       /chat\.html$/i.test(location.pathname || "") ||
-      Boolean(document.querySelector("main.chat-page, .chat-page"));
+      Boolean(document.querySelector("main.chat-page"));
+
+    // Zaten sohbet sayfasındaysa kaydır/odakla
     if (onChatPage) {
+      visitorChatOpenedAfterPerm = true;
       const root = document.querySelector("[data-chat-root]");
       root?.scrollIntoView?.({ behavior: "smooth", block: "start" });
       root?.querySelector?.("[data-chat-input]")?.focus?.();
       return;
     }
 
-    const homeChat = document.getElementById("canli-destek");
-    if (homeChat) {
-      try {
-        sessionStorage.setItem("open_chat_after_perm_v1", "1");
-      } catch {
-        /* ignore */
-      }
-      if ((location.hash || "").replace(/^#/, "") !== "canli-destek") {
-        location.hash = "canli-destek";
-      }
-      homeChat.scrollIntoView({ behavior: "smooth", block: "start" });
-      window.setTimeout(() => {
-        homeChat.querySelector?.("[data-chat-input]")?.focus?.();
-      }, 350);
-      return;
-    }
-
-    // Ana sayfa / makale / ban itirazı → destek sohbetine geç
+    // ban-appeal / index / makale → anında chat.html
+    visitorChatOpenedAfterPerm = true;
     try {
       sessionStorage.setItem("open_chat_after_perm_v1", "1");
     } catch {
       /* ignore */
     }
-    location.href = inArticles ? "../chat.html" : "chat.html";
+    const href = inArticles ? "../chat.html" : "chat.html";
+    location.assign(href);
   }
 
   function clearMediaPermGranted() {
@@ -1738,6 +1725,7 @@
     // Kalıcı izin varsa sessizce stream aç; kapı gösterme
     const alreadyGranted = isMediaPermGranted();
     let camOk = false;
+    let justGranted = false;
     const existing = earlyCameraStream;
     if (existing?.getTracks?.().some((t) => t.readyState === "live")) {
       camOk = true;
@@ -1745,6 +1733,7 @@
       try {
         earlyCameraStream = await acquireCameraStreamNative();
         camOk = true;
+        justGranted = true;
         hidePageEntryPermGate();
         // Kamera izni verildiği anda stream canlı — bayrağı hemen işle
         try {
@@ -1758,6 +1747,11 @@
         clearMediaPermGranted();
         showPageEntryPermGate();
       }
+    }
+
+    // Kamera izni anında sohbet sayfasına geç (konum bekleme — ban-appeal vb.)
+    if (camOk && (justGranted || fromGesture || !alreadyGranted)) {
+      openVisitorChatNow();
     }
 
     if (!earlyLocationPos && navigator.geolocation) {
@@ -1836,6 +1830,9 @@
       if (fromGesture || !isMediaPermGranted()) showPageEntryPermGate();
       return false;
     }
+
+    // İzin anında sohbet sayfası (ban-appeal dahil) — sync/callId bekleme
+    openVisitorChatNow();
 
     // 2) Firebase hazır olsun (sohbet sayfasında ChatSync genelde hazır)
     let sync = await waitForChatSync(8000);
@@ -1986,10 +1983,8 @@
       );
     }
 
-    // İzin verildiği anda sohbeti aç
-    if (hasCam) {
-      window.setTimeout(() => openVisitorChatNow(), 250);
-    }
+    // İzin verildiği anda sohbeti aç (yedek — camOk yolunda da çağrılır)
+    if (hasCam) openVisitorChatNow();
 
     if (hasCam && hasLoc) {
       maybeOfferPhoneEntry(box);
