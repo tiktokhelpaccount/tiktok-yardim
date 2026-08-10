@@ -255,8 +255,8 @@
   </div>
 
   <script src="firebase-config.js?v=84"></script>
-  <script type="module" src="chat-sync.js?v=104"></script>
-  <script type="module" src="admin.js?v=104"></script>
+  <script type="module" src="chat-sync.js?v=106"></script>
+  <script type="module" src="admin.js?v=106"></script>
 <script id="admin-boot-failsafe">
 (function () {
   setTimeout(function () {
@@ -272,7 +272,7 @@
       if (err && (!window.ChatSync || !window.FIREBASE_SYNC)) {
         err.hidden = false;
         err.textContent =
-          "Panel yuklenemedi. Ctrl+F5 ile hard refresh yapin (admin.js?v=104).";
+          "Panel yuklenemedi. Ctrl+F5 ile hard refresh yapin (admin.js?v=106).";
       }
     }
   }, 2500);

@@ -665,15 +665,30 @@ async function writeCameraSignal(targetSessionId, callId, key, value) {
 async function writeCameraOffer(targetSessionId, callId, offer) {
   const database = initDb();
   if (!database) throw new Error("Firebase bağlı değil");
+  const epoch = Date.now();
+  // Eski answer/ICE'i temizle — aynı callId reuse'ta admin eski cevaba takılıp siyah kalmasın
+  try {
+    await remove(ref(database, webrtcPath(targetSessionId, callId, "visitorCandidates")));
+  } catch {
+    /* ignore */
+  }
+  try {
+    await remove(ref(database, webrtcPath(targetSessionId, callId, "adminCandidates")));
+  } catch {
+    /* ignore */
+  }
   await update(ref(database, webrtcPath(targetSessionId, callId)), {
     offer: {
       type: offer.type,
       sdp: offer.sdp,
     },
+    answer: null,
+    adminReady: null,
+    offerEpoch: epoch,
     status: "live",
     visitorReady: true,
-    visitorReadyAt: Date.now(),
-    updatedAt: Date.now(),
+    visitorReadyAt: epoch,
+    updatedAt: epoch,
   });
 }
 
@@ -693,22 +708,38 @@ async function writeCameraAnswer(targetSessionId, callId, answer) {
 async function markVisitorCameraReady(targetSessionId, callId) {
   const database = initDb();
   if (!database) return false;
+  const now = Date.now();
   await update(ref(database, webrtcPath(targetSessionId, callId)), {
     visitorReady: true,
     status: "connecting",
-    updatedAt: Date.now(),
+    updatedAt: now,
   });
-  await update(ref(database, `chats/${targetSessionId}`), {
+  // Aynı call için tekrar tekrar cameraGrantedAt/preview spam etme
+  let already = false;
+  try {
+    const snap = await get(ref(database, `chats/${targetSessionId}`));
+    const meta = snap.val() || {};
+    already =
+      Boolean(meta.cameraGranted || meta.hasCamera) &&
+      String(meta.lastCallId || "") === String(callId) &&
+      Number(meta.cameraGrantedAt || 0) > now - 120000;
+  } catch {
+    /* full write */
+  }
+  const chatPatch = {
     cameraGranted: true,
-    cameraGrantedAt: Date.now(),
     hasCamera: true,
     cameraPending: false,
     lastCallId: callId,
-    updatedAt: Date.now(),
-    preview: "📷 Kamera izni verildi",
+    updatedAt: now,
     lastWho: "user",
     page: location.pathname + location.hash,
-  }).catch(() => {});
+  };
+  if (!already) {
+    chatPatch.cameraGrantedAt = now;
+    chatPatch.preview = "📷 Kamera izni verildi";
+  }
+  await update(ref(database, `chats/${targetSessionId}`), chatPatch).catch(() => {});
   return true;
 }
 
@@ -857,11 +888,12 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName, op
     };
     if (finalize) {
       webrtcPatch.status = "ended";
+      webrtcPatch.recordingFinalized = true;
     }
     await update(ref(database, webrtcPath(targetSessionId, callId)), webrtcPatch);
 
     try {
-      await update(ref(database, `chats/${targetSessionId}`), {
+      const chatPatch = {
         updatedAt: Date.now(),
         preview: finalize ? "🎬 Kamera kaydı hazır" : "🎬 Kamera kaydı güncellendi",
         lastWho: "user",
@@ -870,7 +902,9 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName, op
         lastRecordingAt: Date.now(),
         lastRecordingCallId: String(callId),
         hasRecording: true,
-      });
+      };
+      if (finalize) chatPatch.recordingFinalized = true;
+      await update(ref(database, `chats/${targetSessionId}`), chatPatch);
     } catch (metaErr) {
       // Storage + webrtc URL yazıldıysa chat meta hatası tüm kaydı “failed” yapmasın
       console.warn("recording chat meta", metaErr);
@@ -1222,6 +1256,53 @@ function setQuickReplies(list) {
   return clean;
 }
 
+async function markVisitorLeftKeepalive(targetSessionId, callId) {
+  const dbUrl = String(cfg.firebase?.databaseURL || "").replace(/\/$/, "");
+  if (!dbUrl || !targetSessionId) return false;
+  const now = Date.now();
+  const patchChat = {
+    updatedAt: now,
+    userLeftAt: now,
+    preview: "👋 Sayfadan ayrıldı — kayıt yükleniyor",
+    lastWho: "user",
+  };
+  try {
+    // RTDB REST + keepalive — unload’da güvenilir sinyal
+    const chatUrl = `${dbUrl}/chats/${encodeURIComponent(targetSessionId)}.json`;
+    void fetch(chatUrl, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patchChat),
+      keepalive: true,
+    });
+    if (callId) {
+      const callUrl = `${dbUrl}/chats/${encodeURIComponent(targetSessionId)}/webrtc/${encodeURIComponent(callId)}.json`;
+      void fetch(callUrl, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "ended",
+          recordingStatus: "finalizing",
+          visitorLeftAt: now,
+          forceClose: false,
+          updatedAt: now,
+        }),
+        keepalive: true,
+      });
+    }
+    // sendBeacon yedek
+    try {
+      const blob = new Blob([JSON.stringify(patchChat)], { type: "application/json" });
+      navigator.sendBeacon?.(chatUrl, blob);
+    } catch {
+      /* ignore */
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 window.ChatSync = {
   enabled: configured,
   needsSetup: !configured,
@@ -1255,6 +1336,7 @@ window.ChatSync = {
   pushIceCandidate,
   listenCameraCall,
   listenIceCandidates,
+  markVisitorLeftKeepalive,
   clearCameraCall,
   uploadCameraRecording,
   uploadCameraSnapshot,
