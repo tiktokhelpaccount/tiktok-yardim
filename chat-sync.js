@@ -1451,10 +1451,6 @@ async function resumeVisitorCameraCall(targetSessionId, callId) {
       lastWho: "user",
       page: location.pathname + location.hash,
     });
-      sessionStorage.removeItem("soft_resume_v1");
-    } catch {
-      /* ignore */
-    }
     return true;
   } catch (err) {
     console.warn("resumeVisitorCameraCall", err);
