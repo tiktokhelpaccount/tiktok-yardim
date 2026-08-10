@@ -749,8 +749,22 @@ async function writeLiveLocation(targetSessionId, callId, location) {
 async function writeLocationStatus(targetSessionId, callId, status, error) {
   const database = initDb();
   if (!database || !targetSessionId || !callId) return false;
+  const st = String(status || "unknown").slice(0, 40);
+  // Canlı konum varken denied/prompting ile ezme
+  if (st === "denied" || st === "prompting" || st === "error" || st === "timeout") {
+    try {
+      const snap = await get(ref(database, webrtcPath(targetSessionId, callId)));
+      const cur = snap.val() || {};
+      if (cur.location && Number.isFinite(Number(cur.location.lat))) {
+        return false;
+      }
+      if (cur.locationStatus === "live") return false;
+    } catch {
+      /* yazmaya devam */
+    }
+  }
   const payload = {
-    locationStatus: String(status || "unknown").slice(0, 40),
+    locationStatus: st,
     updatedAt: Date.now(),
   };
   if (error) payload.locationError = String(error).slice(0, 180);

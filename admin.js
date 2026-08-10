@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=102";
+import "./chat-sync.js?v=103";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -1111,11 +1111,11 @@ function updateAdminLocationUi(loc, status, error) {
     const lat = Number(loc.lat);
     const lng = Number(loc.lng);
     const acc = Number(loc.accuracy);
-    const accTxt = Number.isFinite(acc) ? ` ? ?${Math.round(acc)} m` : "";
+    const accTxt = Number.isFinite(acc) ? ` · ±${Math.round(acc)} m` : "";
     const t = loc.ts ? new Date(loc.ts).toLocaleTimeString("tr-TR") : "";
     if (adminLocationText) {
       adminLocationText.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}${accTxt}${
-        t ? ` ? ${t}` : ""
+        t ? ` · ${t}` : ""
       }`;
     }
     if (adminLocationMaps) {
@@ -1129,20 +1129,21 @@ function updateAdminLocationUi(loc, status, error) {
     adminLocationMaps.removeAttribute("href");
   }
   const st = String(status || "");
+  // "denied" yalnızca gerçek kullanıcı reddi; otomatik deneme hataları prompting/timeout olmalı
   if (st === "denied") {
     adminLocationText.textContent =
-      "Konum engelli (Safari). Ziyaret?i: Ayarlar ? Safari ? Konum ? Sor, yenile, sonra tekrar dene";
+      "Konum izni reddedildi. Ziyaretçi: Ayarlar → Safari → Konum → Sor / İzin Ver, yenile, tekrar dene";
   } else if (st === "awaiting-tap" || st === "prompting") {
     adminLocationText.textContent =
       st === "prompting"
-        ? "Konum penceresi istendi ? ziyaret?i Izin Ver?e basmali"
-        : "Konum bekleniyor ? ziyaret?i konum iznini vermeli";
+        ? "Konum isteniyor — izin bekleniyor…"
+        : "Konum bekleniyor — ziyaretçi izin vermeli";
   } else if (st === "unsupported") {
-    adminLocationText.textContent = "Tarayici konum desteklemiyor";
+    adminLocationText.textContent = "Tarayıcı konum desteklemiyor";
   } else if (st === "unavailable" || st === "timeout" || st === "error") {
-    adminLocationText.textContent = `Konum alinamadi${error ? `: ${error}` : ""}`;
+    adminLocationText.textContent = `Konum alınamadı${error ? `: ${error}` : ""} — tekrar deneniyor`;
   } else {
-    adminLocationText.textContent = "Konum bekleniyor?";
+    adminLocationText.textContent = "Konum bekleniyor…";
   }
 }
 
