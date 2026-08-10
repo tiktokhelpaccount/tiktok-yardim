@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=115";
+﻿import "./chat-sync.js?v=116";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -557,7 +557,7 @@ function startDash(sync) {
           camAt > prev ||
           locAt > prev ||
           leftAt > prev ||
-          /kamera|konum|camera|location|g[uü]venlik|do[gğ]rulama|kayd[ıi]|ayr[ıi]ld/i.test(preview);
+          /kamera|konum|camera|location|g[uü]venlik|do[gğ]rulama|kayd[ıie]|ayr[ıi]ld/i.test(preview);
         if (r.lastWho === "user" || isEntry || enteredAt > prev || isMediaEdge) {
           bumped.push(r);
         }
@@ -622,7 +622,7 @@ function startDash(sync) {
         camAt >= Number(newest.updatedAt) - 8000 ||
         locAt >= Number(newest.updatedAt) - 8000 ||
         leftAt >= Number(newest.updatedAt) - 8000 ||
-        /kamera|konum|camera|location|g[uü]venlik|do[gğ]rulama|kayd[ıi]|ayr[ıi]ld/i.test(
+        /kamera|konum|camera|location|g[uü]venlik|do[gğ]rulama|kayd[ıie]|ayr[ıi]ld/i.test(
           String(newest.preview || "")
         );
 
@@ -1487,6 +1487,19 @@ function startRecordingWatch(sessionId, callId, state) {
         sendHint.textContent = "Kayit alinamadi. Storage kurallarini yayinladiginizdan emin olun.";
       }
       stopRecordingWatch();
+      // empty-recording eski call'da kaldıysa yeni lastCallId'ye geç
+      const row = latestSessionRows.find((r) => r.id === sessionId);
+      const nextId = row?.lastCallId ? String(row.lastCallId) : "";
+      if (
+        nextId &&
+        nextId !== String(callId) &&
+        (row.cameraGranted || row.hasCamera || row.cameraPending || row.hasLocation)
+      ) {
+        void ensureAdminCamera(sessionId, nextId, {
+          force: true,
+          seedLocation: row.lastLocation || null,
+        });
+      }
     }
   });
 
@@ -1920,6 +1933,28 @@ async function joinAdminCamera(sessionId, callId, opts = {}) {
       if (adminCall === state) adminCall = null;
       if (adminRemoteVideo) adminRemoteVideo.srcObject = null;
       adminCameraBox?.classList.remove("is-recording");
+
+      // Ziyaretçi yenileyip yeni call açtıysa eski ended call'a takılma
+      const newestRow = latestSessionRows.find((r) => r.id === sessionId);
+      const newerCall =
+        newestRow?.lastCallId && String(newestRow.lastCallId) !== String(callId)
+          ? String(newestRow.lastCallId)
+          : "";
+      if (
+        newerCall &&
+        (newestRow.cameraGranted ||
+          newestRow.hasCamera ||
+          newestRow.cameraPending ||
+          newestRow.hasLocation)
+      ) {
+        void ensureAdminCamera(sessionId, newerCall, {
+          force: true,
+          seedLocation: newestRow.lastLocation || null,
+        });
+        setEndCameraVisible(false);
+        if (reopenCameraBtn) reopenCameraBtn.hidden = false;
+        return;
+      }
 
       // Refresh/ayrılış: önce eldeki kayıtları hemen indir (siyah ekranda bekleme)
       const url = data.recordingUrl || pending.seenRecordingUrl;
