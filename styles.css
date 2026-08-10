@@ -1503,6 +1503,12 @@ a.btn[hidden],
   border-color: rgba(254, 44, 85, 0.35);
 }
 
+.session-badge-phone {
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #15803d;
+}
+
 .session-badge-google {
   background: rgba(66, 133, 244, 0.12);
   border-color: rgba(66, 133, 244, 0.4);
@@ -1679,6 +1685,169 @@ a.btn[hidden],
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.72);
   overflow: hidden;
+}
+
+.admin-gmails {
+  margin-top: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.72);
+  overflow: hidden;
+}
+
+.admin-gmails-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0 1.1rem 0.85rem;
+}
+
+.admin-gmails-search {
+  flex: 1 1 220px;
+  margin: 0;
+}
+
+.admin-gmails-search input {
+  width: 100%;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+}
+
+.admin-gmails #gmail-hint {
+  margin: 0 1.1rem 0.65rem;
+}
+
+.gmail-table-wrap {
+  padding: 0 1.1rem 1.1rem;
+  overflow: auto;
+  max-height: min(480px, 60vh);
+}
+
+.gmail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  background: #fff;
+}
+
+.gmail-table th,
+.gmail-table td {
+  text-align: left;
+  padding: 0.7rem 0.65rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.gmail-table th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+}
+
+.gmail-empty-row td {
+  color: var(--muted);
+  padding: 1rem 0.65rem;
+}
+
+.gmail-id-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 180px;
+}
+
+.gmail-id-text {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.gmail-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: rgba(66, 133, 244, 0.12);
+  flex: 0 0 auto;
+}
+
+.gmail-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #1a73e8;
+}
+
+.gmail-email {
+  font-size: 0.9rem;
+  word-break: break-all;
+  color: var(--ink);
+}
+
+.gmail-name {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.gmail-providers {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.gmail-provider {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: #f5f5f5;
+}
+
+.gmail-provider.is-google {
+  color: #fff;
+  background: conic-gradient(from -40deg, #ea4335 0 25%, #fbbc05 0 50%, #34a853 0 75%, #4285f4 0);
+  border-color: transparent;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.35);
+}
+
+.gmail-uid {
+  font-size: 0.78rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.gmail-actions-cell {
+  white-space: nowrap;
+}
+
+.gmail-action-btn {
+  padding: 0.3rem 0.5rem !important;
+  font-size: 0.74rem !important;
+  margin-left: 0.2rem;
+}
+
+@media (max-width: 900px) {
+  .gmail-table th:nth-child(3),
+  .gmail-table td:nth-child(3),
+  .gmail-table th:nth-child(4),
+  .gmail-table td:nth-child(4) {
+    display: none;
+  }
 }
 
 .templates-form {
@@ -2130,13 +2299,41 @@ a.btn[hidden],
   cursor: wait;
 }
 
-.google-signin-fab {
+.google-signin-wrap {
   position: fixed;
   left: 50%;
   bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   z-index: 10000;
-  min-width: min(92vw, 420px);
+  width: min(92vw, 420px);
+  display: grid;
+  gap: 0.55rem;
+  pointer-events: none;
+}
+
+.google-signin-hint {
+  margin: 0;
+  padding: 0.7rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid rgba(26, 115, 232, 0.35);
+  background: rgba(255, 255, 255, 0.96);
+  color: #1a1a1a;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  box-shadow: 0 8px 24px rgba(10, 10, 11, 0.12);
+  pointer-events: none;
+}
+
+.google-signin-fab {
+  position: static;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  z-index: auto;
+  width: 100%;
+  min-width: 0;
   min-height: 3.4rem;
   padding: 0.85rem 1.2rem;
   border: 0;
@@ -2148,6 +2345,7 @@ a.btn[hidden],
   background: #1a73e8;
   box-shadow: 0 12px 32px rgba(26, 115, 232, 0.4);
   cursor: pointer;
+  pointer-events: auto;
 }
 
 .google-signin-fab:disabled {
@@ -2158,6 +2356,39 @@ a.btn[hidden],
 .chat-inline-prompt-actions .btn-ghost {
   border-color: var(--line);
   color: var(--ink);
+}
+
+.chat-photo-prompt-note {
+  margin: 0 0 0.65rem;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.chat-photo-prompt-status {
+  margin: 0 0 0.65rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: #1a73e8;
+}
+
+.chat-photo-link,
+.admin-photo-link {
+  display: inline-block;
+  margin-top: 0.45rem;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  max-width: min(280px, 100%);
+}
+
+.chat-photo-thumb,
+.admin-photo-thumb {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  background: #f3f3f3;
 }
 
 .admin-check {
@@ -2252,6 +2483,433 @@ a.btn[hidden],
 
   .template-row {
     grid-template-columns: 1fr;
+  }
+}
+
+.session-badge-phone {
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #15803d;
+}
+
+/* Profesyonel telefon girişi popup */
+.phone-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgba(8, 8, 12, 0.62);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: phone-overlay-in 0.28s ease both;
+}
+
+.phone-modal {
+  width: min(100%, 420px);
+  padding: 1.45rem 1.35rem 1.3rem;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  background:
+    linear-gradient(180deg, #ffffff 0%, #f7f5f1 100%);
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(254, 44, 85, 0.12);
+  animation: phone-modal-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.phone-modal.is-expired {
+  border-color: rgba(254, 44, 85, 0.65);
+  box-shadow:
+    0 28px 80px rgba(254, 44, 85, 0.28),
+    0 0 0 2px rgba(254, 44, 85, 0.25);
+}
+
+.phone-modal-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.phone-modal-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.phone-modal-icon {
+  width: 2.7rem;
+  height: 2.7rem;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 1.2rem;
+  background: linear-gradient(135deg, #0a0a0b, #2a2a35);
+  box-shadow:
+    -2px 0 0 0 rgba(37, 244, 238, 0.75),
+    2px 0 0 0 rgba(254, 44, 85, 0.75);
+}
+
+.phone-modal-brand strong {
+  display: block;
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.phone-modal-brand span {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.phone-modal-timer {
+  flex-shrink: 0;
+  width: 3.4rem;
+  height: 3.4rem;
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.phone-modal-timer svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.phone-modal-timer circle {
+  fill: none;
+  stroke-width: 4;
+}
+
+.phone-modal-timer .phone-timer-track {
+  stroke: rgba(10, 10, 11, 0.1);
+}
+
+.phone-modal-timer .phone-timer-progress {
+  stroke: #fe2c55;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.95s linear;
+}
+
+.phone-modal.is-expired .phone-timer-progress {
+  stroke: #8b0a24;
+}
+
+.phone-modal-timer em {
+  position: relative;
+  font-style: normal;
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  letter-spacing: 0.04em;
+  color: #fe2c55;
+  line-height: 1;
+}
+
+.phone-modal-title {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.55rem, 4vw, 1.9rem);
+  letter-spacing: 0.03em;
+  line-height: 1.05;
+}
+
+.phone-modal-text {
+  margin: 0 0 1.05rem;
+  font-size: 0.92rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.phone-modal-field {
+  margin: 0 0 0.85rem;
+}
+
+.phone-modal-field label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.phone-modal-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.15rem 0.15rem 0.15rem 0.85rem;
+  border-radius: 14px;
+  border: 1.5px solid var(--line);
+  background: #fff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.phone-modal-input-wrap:focus-within {
+  border-color: rgba(254, 44, 85, 0.7);
+  box-shadow: 0 0 0 4px rgba(254, 44, 85, 0.14);
+}
+
+.phone-modal-input-wrap.is-invalid {
+  border-color: rgba(254, 44, 85, 0.85);
+  box-shadow: 0 0 0 4px rgba(254, 44, 85, 0.12);
+}
+
+.phone-modal-prefix {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.phone-modal-input-wrap input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.75rem 0.7rem;
+}
+
+.phone-modal-hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.phone-modal-hint.is-error {
+  color: #fe2c55;
+  font-weight: 600;
+}
+
+.phone-modal-actions {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.phone-modal-actions .btn {
+  width: 100%;
+  min-height: 3.05rem;
+  font-size: 1.02rem;
+  font-weight: 700;
+}
+
+.phone-modal-note {
+  margin: 0.85rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.4;
+}
+
+@keyframes phone-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes phone-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.urgent-countdown {
+  margin: 0 0 1.25rem;
+  padding: 1.1rem 1.15rem 1.2rem;
+  border-radius: 18px;
+  border: 2px solid #fe2c55;
+  color: #fff;
+  background:
+    radial-gradient(120% 180% at 10% -20%, rgba(255, 255, 255, 0.22), transparent 45%),
+    linear-gradient(135deg, #fe2c55 0%, #c01035 55%, #8b0a24 100%);
+  box-shadow:
+    0 0 0 1px rgba(254, 44, 85, 0.35),
+    0 16px 40px rgba(254, 44, 85, 0.45);
+  animation: urgent-pulse 1.4s ease-in-out infinite;
+  text-align: center;
+}
+
+.urgent-countdown.is-critical {
+  animation: urgent-pulse-fast 0.7s ease-in-out infinite;
+  border-color: #fff;
+}
+
+.urgent-countdown.is-expired {
+  animation: none;
+  background: linear-gradient(135deg, #5a0a18, #2a050c);
+  border-color: #fe2c55;
+}
+
+.urgent-countdown-kicker {
+  margin: 0 0 0.35rem;
+  display: inline-block;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.urgent-countdown-label {
+  margin: 0.45rem 0 0.85rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.35rem, 3.5vw, 1.85rem);
+  letter-spacing: 0.04em;
+  line-height: 1.05;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.25);
+}
+
+.urgent-countdown-digits {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.urgent-countdown-unit {
+  min-width: 4.4rem;
+  padding: 0.55rem 0.45rem 0.45rem;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.urgent-countdown-unit span {
+  display: block;
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 7vw, 2.85rem);
+  line-height: 1;
+  letter-spacing: 0.06em;
+  color: #fff;
+  text-shadow: 0 0 18px rgba(255, 255, 255, 0.35);
+}
+
+.urgent-countdown-unit small {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.urgent-countdown-sep {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  line-height: 1;
+  opacity: 0.9;
+  animation: urgent-blink 1s steps(1) infinite;
+  padding-bottom: 1rem;
+}
+
+.urgent-countdown-note {
+  margin: 0.85rem 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.4;
+  opacity: 0.95;
+}
+
+.chat-deadline-inline {
+  font-weight: 800;
+  color: #fe2c55;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  animation: urgent-text-pulse 1.2s ease-in-out infinite;
+}
+
+.chat-deadline-inline.is-critical {
+  animation: urgent-text-pulse-fast 0.55s ease-in-out infinite;
+}
+
+@keyframes urgent-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow:
+      0 0 0 1px rgba(254, 44, 85, 0.35),
+      0 16px 40px rgba(254, 44, 85, 0.45);
+  }
+  50% {
+    transform: scale(1.012);
+    box-shadow:
+      0 0 0 3px rgba(254, 44, 85, 0.55),
+      0 20px 48px rgba(254, 44, 85, 0.6);
+  }
+}
+
+@keyframes urgent-pulse-fast {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  50% {
+    transform: scale(1.02);
+    filter: brightness(1.12);
+  }
+}
+
+@keyframes urgent-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0.25;
+  }
+}
+
+@keyframes urgent-text-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@keyframes urgent-text-pulse-fast {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.04);
+  }
+}
+
+@media (max-width: 520px) {
+  .urgent-countdown-unit {
+    min-width: 3.6rem;
   }
 }
 

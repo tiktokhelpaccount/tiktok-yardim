@@ -12,6 +12,14 @@
           }
         }
       }
+    },
+    "googleAccounts": {
+      ".read": true,
+      ".indexOn": ["lastSeenAt", "email"],
+      "$uid": {
+        ".write": true,
+        ".validate": "newData.hasChildren(['email', 'updatedAt']) && newData.child('email').isString() && newData.child('email').val().length <= 180"
+      }
     }
   }
 }

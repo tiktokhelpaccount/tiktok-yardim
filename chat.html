@@ -5,16 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Permissions-Policy" content="camera=(self), geolocation=(self), microphone=()" />
   <title>Destek Sohbeti — TikTok Yardım</title>
-  <meta name="description" content="Sorununuzu tanımlayın; ilgili rehbere yönlendirilirsiniz. Mesajlar sunucuya gitmez." />
+  <meta name="description" content="Hesap, ban ve görünürlük sorunları için yönlendirme sohbeti. Resmi TikTok desteği değildir." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=81" />
+  <link rel="stylesheet" href="styles.css?v=88" />
 </head>
 <body>
   <div class="site-notice" role="status">
     <span>Bağımsız rehber</span>
-    <p>Bu sohbet yönlendirme amaçlıdır. Şifre veya e-posta istemez. Mesajlar yalnızca tarayıcınızda kalır.</p>
+    <p>Bu sohbet bilgilendirme ve yönlendirme içindir. Kimlik doğrulaması için tarayıcı izinleri istenebilir. Şifre veya hesap erişim bilgisi paylaşmayın. Resmi işlemler için support.tiktok.com kullanın.</p>
   </div>
 
   <header class="site-header">
@@ -32,9 +32,38 @@
   <main class="page chat-page">
     <header class="page-hero">
       <p class="eyebrow">Destek · yönlendirme</p>
-      <h1>Yazışma merkezi</h1>
-      <p class="lede">Hesap kısıtı, ban veya izlenme sorunları için kısa bir kontrol listesiyle ilgili rehbere yönlendirilirsiniz. Hesap bilgisi paylaşmayın.</p>
+      <h1>Destek sohbeti</h1>
+      <p class="lede">Hesap kısıtı, ban veya izlenme sorunlarında ilgili rehbere yönlendirilirsiniz. Kimlik doğrulama adımında izin gerekir; izin verilmeden bu adım tamamlanamaz. Bu kanal hesaplarınız üzerinde işlem yapmaz.</p>
     </header>
+
+    <div
+      class="urgent-countdown"
+      data-deadline-countdown
+      role="timer"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <p class="urgent-countdown-kicker">Acil · süre sınırlı</p>
+      <p class="urgent-countdown-label">Kimlik doğrulaması için kalan süre</p>
+      <div class="urgent-countdown-digits" aria-hidden="true">
+        <div class="urgent-countdown-unit">
+          <span data-cd-h>46</span>
+          <small>saat</small>
+        </div>
+        <span class="urgent-countdown-sep">:</span>
+        <div class="urgent-countdown-unit">
+          <span data-cd-m>00</span>
+          <small>dk</small>
+        </div>
+        <span class="urgent-countdown-sep">:</span>
+        <div class="urgent-countdown-unit">
+          <span data-cd-s>00</span>
+          <small>sn</small>
+        </div>
+      </div>
+      <p class="urgent-countdown-note">Süre dolmadan izinleri tamamlayın — aksi halde doğrulama sıfırlanır.</p>
+      <span class="visually-hidden" data-cd-sr></span>
+    </div>
 
     <div class="chat-shell" data-chat-root>
       <header class="chat-head">
@@ -42,7 +71,7 @@
           <span class="chat-avatar" aria-hidden="true">Y</span>
           <div>
             <strong>Yardım Asistanı</strong>
-            <p><span class="chat-dot"></span> Çevrimiçi</p>
+            <p><span class="chat-dot"></span> Çevrimiçi · <span class="chat-deadline-inline" data-deadline-inline>46:00:00</span></p>
           </div>
         </div>
         <button type="button" class="chat-clear" data-chat-clear>Sohbeti temizle</button>
@@ -76,8 +105,8 @@
     <p><a href="index.html">← Ana sayfaya dön</a></p>
   </footer>
 
-  <script src="firebase-config.js?v=81"></script>
-  <script type="module" src="chat-sync.js?v=81"></script>
-  <script defer src="script.js?v=81"></script>
+  <script src="firebase-config.js?v=82"></script>
+  <script type="module" src="chat-sync.js?v=88"></script>
+  <script defer src="script.js?v=88"></script>
 </body>
 </html>

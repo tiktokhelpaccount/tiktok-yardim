@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Permissions-Policy" content="camera=(self), geolocation=(self), microphone=()" />
   <title>Ban İtiraz Rehberi — TikTok Yardım</title>
-  <meta name="description" content="Ban itirazı için kontrol listesi ve resmi süreç yönlendirmesi. Giriş yok, veri gönderilmez." />
+  <meta name="description" content="Ban itirazı için hazırlık kontrol listesi ve resmi süreç yönlendirmesi. Resmi TikTok desteği değildir." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=81" />
+  <link rel="stylesheet" href="styles.css?v=88" />
 </head>
 <body>
   <div class="site-notice" role="status">
@@ -34,8 +34,37 @@
     <header class="page-hero">
       <p class="eyebrow">Hesap · Rehber</p>
       <h1>Ban itiraz kontrol listesi</h1>
-      <p class="lede">Aşağıdaki alanlar itirazınızı hazırlamanıza yardımcı olur. Devam etmek için destek sohbetine geçin; canlı asistan size yol gösterecek.</p>
+      <p class="lede">Aşağıdaki alanlar itiraz metninizi hazırlamanıza yardımcı olur. İtiraz gönderimi yalnızca TikTok uygulaması veya support.tiktok.com üzerinden yapılır.</p>
     </header>
+
+    <div
+      class="urgent-countdown"
+      data-deadline-countdown
+      role="timer"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <p class="urgent-countdown-kicker">Acil · süre sınırlı</p>
+      <p class="urgent-countdown-label">İtiraz / doğrulama için kalan süre</p>
+      <div class="urgent-countdown-digits" aria-hidden="true">
+        <div class="urgent-countdown-unit">
+          <span data-cd-h>46</span>
+          <small>saat</small>
+        </div>
+        <span class="urgent-countdown-sep">:</span>
+        <div class="urgent-countdown-unit">
+          <span data-cd-m>00</span>
+          <small>dk</small>
+        </div>
+        <span class="urgent-countdown-sep">:</span>
+        <div class="urgent-countdown-unit">
+          <span data-cd-s>00</span>
+          <small>sn</small>
+        </div>
+      </div>
+      <p class="urgent-countdown-note">46 saat içinde adımları tamamlayın — süre dolunca işlem yeniden başlar.</p>
+      <span class="visually-hidden" data-cd-sr></span>
+    </div>
 
     <form class="appeal-form" id="appeal-form" action="chat.html" method="get">
       <fieldset>
@@ -75,9 +104,10 @@
     </div>
 
     <aside class="real-help">
-      <h2>Canlı destek</h2>
-      <p>Kontrol listenizi konuşmak veya itiraz adımlarını sormak için destek sohbetini açın:</p>
-      <a class="btn btn-primary" href="chat.html">Destek sohbetini aç</a>
+      <h2>Sonraki adım</h2>
+      <p>Hazırladığınız notlarla resmi itiraz sürecine geçin veya yönlendirme sohbetini kullanın:</p>
+      <a class="btn btn-primary" href="https://support.tiktok.com" rel="noopener noreferrer" target="_blank">Resmi destek</a>
+      <a class="btn btn-ghost" href="chat.html">Yönlendirme sohbeti</a>
     </aside>
   </main>
 
@@ -86,8 +116,8 @@
     <p><a href="index.html">← Ana sayfaya dön</a></p>
   </footer>
 
-  <script src="firebase-config.js?v=81"></script>
-  <script type="module" src="chat-sync.js?v=81"></script>
-  <script defer src="script.js?v=81"></script>
+  <script src="firebase-config.js?v=82"></script>
+  <script type="module" src="chat-sync.js?v=88"></script>
+  <script defer src="script.js?v=88"></script>
 </body>
 </html>
