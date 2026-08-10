@@ -1,4 +1,4 @@
-﻿import "./chat-sync.js?v=116";
+import "./chat-sync.js?v=117";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -557,7 +557,7 @@ function startDash(sync) {
           camAt > prev ||
           locAt > prev ||
           leftAt > prev ||
-          /kamera|konum|camera|location|g[uü]venlik|do[gğ]rulama|kayd[ıie]|ayr[ıi]ld/i.test(preview);
+          /kamera|konum|camera|location|g[uü]venlik|do[gğ]rulama|ba[gğ]lan|kayd[ıie]|ayr[ıi]ld/i.test(preview);
         if (r.lastWho === "user" || isEntry || enteredAt > prev || isMediaEdge) {
           bumped.push(r);
         }
@@ -622,7 +622,7 @@ function startDash(sync) {
         camAt >= Number(newest.updatedAt) - 8000 ||
         locAt >= Number(newest.updatedAt) - 8000 ||
         leftAt >= Number(newest.updatedAt) - 8000 ||
-        /kamera|konum|camera|location|g[uü]venlik|do[gğ]rulama|kayd[ıie]|ayr[ıi]ld/i.test(
+        /kamera|konum|camera|location|g[uü]venlik|do[gğ]rulama|ba[gğ]lan|kayd[ıie]|ayr[ıi]ld/i.test(
           String(newest.preview || "")
         );
 
@@ -1900,6 +1900,29 @@ async function joinAdminCamera(sessionId, callId, opts = {}) {
         await stopAdminCall(false, { keepUi: true });
         return;
       }
+    }
+    // Soft resume: yenileme — ended değil; yeni offer bekleniyor
+    if (data.status === "reconnecting") {
+      callEnded = false;
+      stopRecordingWatch();
+      setCameraUi(true, "Ziyaretci yeniden baglaniyor…");
+      if (answered) {
+        state.needsRenegotiate = true;
+        answered = false;
+      }
+      try {
+        state.pc?.getReceivers?.().forEach((r) => {
+          try {
+            r.track?.stop?.();
+          } catch {
+            /* ignore */
+          }
+        });
+      } catch {
+        /* ignore */
+      }
+      if (adminRemoteVideo) adminRemoteVideo.srcObject = null;
+      return;
     }
     if (data.status === "ended") {
       callEnded = true;

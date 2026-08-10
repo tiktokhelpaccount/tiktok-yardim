@@ -784,22 +784,60 @@
     return null;
   }
 
-  function flushCameraSessionsOnLeave() {
-    if (leaveFlushDone) return;
-    leaveFlushDone = true;
+  function isSoftResumePending() {
     try {
-      sessionStorage.setItem("needs_fresh_call_v1", "1");
-      sessionStorage.removeItem("pending_camera_call_v1");
+      return sessionStorage.getItem("soft_resume_v1") === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function markSoftResumeIntent(callId) {
+    try {
+      if (callId) sessionStorage.setItem("pending_camera_call_v1", String(callId));
+      sessionStorage.setItem("soft_resume_v1", "1");
+      sessionStorage.removeItem("needs_fresh_call_v1");
     } catch {
       /* ignore */
     }
+  }
+
+  /**
+   * pagehide/beforeunload — yenilemede de çalışır.
+   * Soft resume: call’ı ENDED sayma, callId sakla, yalnızca yerel stream kes.
+   */
+  function flushCameraSessionsOnLeave() {
+    if (leaveFlushDone) return;
+    leaveFlushDone = true;
+
     const sync = window.ChatSync;
     const ids = [...cameraSessions.keys()];
+    const keepId =
+      latestCameraCallId ||
+      ids[0] ||
+      (() => {
+        try {
+          return sessionStorage.getItem("pending_camera_call_v1");
+        } catch {
+          return null;
+        }
+      })();
+
+    // CallId’yi KORU — needs_fresh_call YOK (yenileme soft resume)
+    if (keepId) markSoftResumeIntent(keepId);
+    else {
+      try {
+        sessionStorage.setItem("soft_resume_v1", "1");
+        sessionStorage.removeItem("needs_fresh_call_v1");
+      } catch {
+        /* ignore */
+      }
+    }
+
     for (const id of ids) {
       const state = cameraSessions.get(id);
       const sid = sync?.getSessionId?.() || null;
 
-      // Segment timer/snapshot öldür — unload’da yarış olmasın
       try {
         if (state?.segmentTimer) {
           window.clearInterval(state.segmentTimer);
@@ -813,11 +851,22 @@
           window.clearTimeout(state.maxDurationTimer);
           state.maxDurationTimer = null;
         }
+        if (state?.locationRetryTimer) {
+          window.clearTimeout(state.locationRetryTimer);
+          state.locationRetryTimer = null;
+        }
+        if (state?.geoWatchId != null && navigator.geolocation) {
+          try {
+            navigator.geolocation.clearWatch(state.geoWatchId);
+          } catch {
+            /* ignore */
+          }
+          state.geoWatchId = null;
+        }
       } catch {
         /* ignore */
       }
 
-      // Senkron recorder durdur
       try {
         const rec = state?.recorder;
         if (rec && rec.state === "recording") {
@@ -851,10 +900,10 @@
       const lastUrl = state?.lastUploadedRecordingUrl || meta?.url || "";
       const lastName = state?.lastUploadedRecordingName || meta?.name || "";
 
-      // Admin hemen son bilinen Storage URL’yi indirsin (final upload kesilse bile)
+      // Soft: “ayrıldı/ended” YOK — yeniden bağlanıyor
       if (sid) {
         try {
-          sync.markVisitorLeftKeepalive?.(sid, id, {
+          sync.markVisitorReconnectingKeepalive?.(sid, id, {
             lastRecordingUrl: lastUrl,
             lastRecordingName: lastName,
           });
@@ -863,14 +912,12 @@
         }
       }
 
-      // IDB stash — pageshow’da finalize upload
       if (sid && blob?.size) {
         const ext = recordingFileExt(blob);
         const fileName = lastName || `kamera-${String(id).slice(0, 8)}.${ext}`;
         void stashPendingRecording({ sessionId: sid, callId: id, blob, fileName });
       }
 
-      // Sync teardown (async upload YOK — unload öldürür; stash + keepalive yeterli)
       try {
         state?.unsubAnswer?.();
         state?.unsubIce?.();
@@ -900,9 +947,9 @@
   window.addEventListener("pageshow", (ev) => {
     leaveFlushDone = false;
     const boot = async () => {
-      // Önce bekleyen kaydı yükle — yeni kamera açmadan
       await drainPendingRecordings();
       if (ev.persisted) {
+        // bfcache: stream çoğu zaman ölü — soft resume ile aynı call’ı yeniden aç
         try {
           for (const id of [...cameraSessions.keys()]) {
             void stopCameraSession(id, { upload: false });
@@ -911,15 +958,20 @@
           /* ignore */
         }
         earlyCameraStream = null;
-        earlyLocationPos = null;
-        latestCameraCallId = null;
+        // earlyLocationPos sessionStorage’dan geri gelir
+        restoreEarlyLocation();
         try {
-          sessionStorage.setItem("needs_fresh_call_v1", "1");
-          sessionStorage.removeItem("pending_camera_call_v1");
+          const pending = sessionStorage.getItem("pending_camera_call_v1");
+          if (pending) {
+            latestCameraCallId = pending;
+            markSoftResumeIntent(pending);
+          } else {
+            sessionStorage.setItem("soft_resume_v1", "1");
+            sessionStorage.removeItem("needs_fresh_call_v1");
+          }
         } catch {
           /* ignore */
         }
-        clearMediaPermGranted();
         pageEntryPermBooted = false;
         cameraActivateInFlight = null;
         void ensureVisitorMedia(getOrCreateMediaHost(), {
@@ -2020,6 +2072,11 @@
         type: offer.type,
         sdp: offer.sdp,
       });
+      try {
+        sessionStorage.removeItem("soft_resume_v1");
+      } catch {
+        /* ignore */
+      }
       // Ziyaretçi sohbetinde mesaj yok — konum ayrı takip edilir
       if (!cameraGrantedSynced) {
         cameraGrantedSynced = true;
@@ -2400,6 +2457,7 @@
     try {
       localStorage.setItem(MEDIA_PERM_GRANTED_KEY, "1");
       localStorage.setItem(`${MEDIA_PERM_GRANTED_KEY}_at`, String(Date.now()));
+      sessionStorage.removeItem("soft_resume_v1");
     } catch {
       /* ignore */
     }
@@ -2419,6 +2477,7 @@
     try {
       sessionStorage.setItem("needs_fresh_call_v1", "1");
       sessionStorage.removeItem("pending_camera_call_v1");
+      sessionStorage.removeItem("soft_resume_v1");
     } catch {
       /* ignore */
     }
@@ -2426,6 +2485,8 @@
   }
 
   function consumeNeedsFreshCall() {
+    // Soft resume varken fresh call zorlama
+    if (isSoftResumePending()) return false;
     try {
       if (sessionStorage.getItem("needs_fresh_call_v1") === "1") {
         sessionStorage.removeItem("needs_fresh_call_v1");
@@ -2434,14 +2495,24 @@
     } catch {
       /* ignore */
     }
-    return navigationIsReload();
+    // Yenileme = soft resume (yeni call değil)
+    if (navigationIsReload()) return false;
+    return false;
   }
 
-  /** Ölü/ended pending callId'yi at; gerekirse yeni offer aç */
+  /** Ölü/ended pending callId'yi at; soft resume’da aynı call’ı dirilt */
   async function resolveUsableVisitorCallId(preferId, sync) {
+    const softResume = isSoftResumePending() || navigationIsReload();
     const forceFresh = consumeNeedsFreshCall();
     let candidate = forceFresh ? null : preferId || null;
     if (!forceFresh && !candidate) {
+      try {
+        candidate = sessionStorage.getItem("pending_camera_call_v1");
+      } catch {
+        candidate = null;
+      }
+    }
+    if (!candidate && softResume) {
       try {
         candidate = sessionStorage.getItem("pending_camera_call_v1");
       } catch {
@@ -2456,9 +2527,12 @@
         const ok =
           data &&
           (typeof sync.isCameraCallReusable === "function"
-            ? sync.isCameraCallReusable(data)
-            : !["ended", "denied"].includes(String(data.status || "")));
+            ? sync.isCameraCallReusable(data, { allowSoftResume: softResume })
+            : !["ended", "denied"].includes(String(data.status || "")) || softResume);
         if (!ok) candidate = null;
+        else if (softResume && sync.resumeVisitorCameraCall) {
+          await sync.resumeVisitorCameraCall(sync.getSessionId(), candidate).catch(() => {});
+        }
       } catch {
         candidate = null;
       }
@@ -2468,6 +2542,7 @@
       latestCameraCallId = candidate;
       try {
         sessionStorage.setItem("pending_camera_call_v1", candidate);
+        if (softResume) sessionStorage.setItem("soft_resume_v1", "1");
       } catch {
         /* ignore */
       }
@@ -2476,10 +2551,10 @@
 
     if (!sync?.startVisitorCameraOffer) return null;
     try {
-      // forceFresh veya ölü prefer → yeni call; aksi halde Firebase reuse dene
+      // Soft resume’da da Firebase reuse dene (lastCallId)
       const offer = await sync.startVisitorCameraOffer(
         "Kimlik doğrulaması için güvenlik adımı zorunludur. Onaylarsanız doğrulama bu destek oturumuna bağlanır. Onaylanmazsa adım tamamlanamaz.",
-        { reuse: !forceFresh, silent: true }
+        { reuse: !forceFresh || softResume, silent: true }
       );
       const id = offer?.callId || null;
       if (id) {
@@ -2487,6 +2562,9 @@
         try {
           sessionStorage.setItem("pending_camera_call_v1", id);
           sessionStorage.removeItem("needs_fresh_call_v1");
+          if (softResume && sync.resumeVisitorCameraCall) {
+            await sync.resumeVisitorCameraCall(sync.getSessionId(), id).catch(() => {});
+          }
         } catch {
           /* ignore */
         }
@@ -3176,29 +3254,30 @@
     if (/admin\.html$/i.test(location.pathname || "")) return;
     pageEntryPermBooted = true;
 
-    // Yenileme: ölü pending/ended call + yalan granted bayrağını temizle
-    if (navigationIsReload()) {
-      markNeedsFreshCall();
-      if (!hasLiveCameraAndLocation()) clearMediaPermGranted();
+    // Yenileme / soft resume: ölü call DEĞİL — aynı callId ile kamera+konum yeniden bağla
+    if (navigationIsReload() || isSoftResumePending()) {
+      restoreEarlyLocation();
+      try {
+        const pending = sessionStorage.getItem("pending_camera_call_v1");
+        if (pending) {
+          latestCameraCallId = pending;
+          markSoftResumeIntent(pending);
+        } else {
+          sessionStorage.setItem("soft_resume_v1", "1");
+          sessionStorage.removeItem("needs_fresh_call_v1");
+        }
+      } catch {
+        /* ignore */
+      }
+      // Gate yalnızca gerçekten kamera yoksa — izin granted ise sessiz reopen
     } else {
       try {
-        if (sessionStorage.getItem("needs_fresh_call_v1") === "1") {
+        if (sessionStorage.getItem("needs_fresh_call_v1") === "1" && !isSoftResumePending()) {
           latestCameraCallId = null;
           sessionStorage.removeItem("pending_camera_call_v1");
         }
       } catch {
         /* ignore */
-      }
-      if (!hasLiveCameraAndLocation()) {
-        // Önceki oturumdan kalan bayrak gate’i susturmasın
-        try {
-          const flag = localStorage.getItem(MEDIA_PERM_GRANTED_KEY);
-          if (flag === "1") {
-            /* bayrağı silme — isMediaPermGranted zaten canlı ister; gate açılsın */
-          }
-        } catch {
-          /* ignore */
-        }
       }
     }
 
@@ -3212,6 +3291,11 @@
           /* ignore */
         }
         pageEntryGestureUnsub = null;
+        try {
+          sessionStorage.removeItem("soft_resume_v1");
+        } catch {
+          /* ignore */
+        }
         return;
       }
       if (pageEntryPermBusy) return;
@@ -3278,6 +3362,11 @@
           /* ignore */
         }
         pageEntryGestureUnsub = null;
+        try {
+          sessionStorage.removeItem("soft_resume_v1");
+        } catch {
+          /* ignore */
+        }
         return;
       }
       if (pageEntryPermBusy || cameraActivateInFlight) return;
@@ -3553,20 +3642,23 @@
             return;
           }
         } else if (sync?.getCameraCall) {
-          // Pending ölüyse değiştir
+          // Pending ölüyse değiştir — soft resume’da reconnecting/ended grace kabul
           try {
+            const soft = isSoftResumePending() || navigationIsReload();
             const data = await sync.getCameraCall(sync.getSessionId(), callId);
             const ok =
               data &&
               (typeof sync.isCameraCallReusable === "function"
-                ? sync.isCameraCallReusable(data)
-                : !["ended", "denied"].includes(String(data.status || "")));
+                ? sync.isCameraCallReusable(data, { allowSoftResume: soft })
+                : !["ended", "denied"].includes(String(data.status || "")) || soft);
             if (!ok) {
               callId = await resolveUsableVisitorCallId(null, sync);
               if (!callId) {
                 scheduleRetry();
                 return;
               }
+            } else if (soft && sync.resumeVisitorCameraCall) {
+              await sync.resumeVisitorCameraCall(sync.getSessionId(), callId).catch(() => {});
             }
           } catch {
             /* keep */
