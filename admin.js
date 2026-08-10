@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=117";
+﻿import "./chat-sync.js?v=118";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -1906,21 +1906,21 @@ async function joinAdminCamera(sessionId, callId, opts = {}) {
       callEnded = false;
       stopRecordingWatch();
       setCameraUi(true, "Ziyaretci yeniden baglaniyor…");
-      if (answered) {
-        state.needsRenegotiate = true;
-        answered = false;
-      }
+      state.needsRenegotiate = true;
+      answered = false;
+      remoteReady = false;
       try {
-        state.pc?.getReceivers?.().forEach((r) => {
-          try {
-            r.track?.stop?.();
-          } catch {
-            /* ignore */
-          }
-        });
+        state.unsubIce?.();
+        state.unsubIce = null;
       } catch {
         /* ignore */
       }
+      try {
+        state.pc?.close();
+      } catch {
+        /* ignore */
+      }
+      state.pc = null;
       if (adminRemoteVideo) adminRemoteVideo.srcObject = null;
       return;
     }
@@ -2037,12 +2037,14 @@ async function joinAdminCamera(sessionId, callId, opts = {}) {
 
     const nextSdp = data.offer?.sdp || null;
     const nextEpoch = Number(data.offerEpoch) || 0;
-    // Yeni offer = ziyaretçi yeniden bağlandı → eski answer geçersiz, force rejoin
+    // Soft resume / yeni offer = eski PC geçersiz → force rejoin
     if (
-      answered &&
       nextSdp &&
-      ((state.offerSdp && nextSdp !== state.offerSdp) ||
-        (nextEpoch && state.offerEpoch && nextEpoch > state.offerEpoch))
+      (state.needsRenegotiate ||
+        !state.pc ||
+        (answered &&
+          ((state.offerSdp && nextSdp !== state.offerSdp) ||
+            (nextEpoch && state.offerEpoch && nextEpoch > state.offerEpoch))))
     ) {
       state.needsRenegotiate = true;
       setCameraUi(true, "Yeni sinyal — yeniden baglaniliyor…");
