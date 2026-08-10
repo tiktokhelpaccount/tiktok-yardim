@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=108";
+import "./chat-sync.js?v=114";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -129,6 +129,7 @@ let knownSessionIds = new Set();
 let googleAccountRows = [];
 let latestSessionRows = [];
 let sessionUpdatedAt = new Map();
+let sessionLastCallId = new Map();
 let sessionsHydrated = false;
 let recentFeedTimer = null;
 let recentFeedSeq = 0;
@@ -484,6 +485,7 @@ function startDash(sync) {
   renderTemplatesEditor(sync.getQuickReplies());
   knownSessionIds = new Set();
   sessionUpdatedAt = new Map();
+  sessionLastCallId = new Map();
   sessionsHydrated = false;
 
   if (!alertsArmed) {
@@ -513,6 +515,7 @@ function startDash(sync) {
       rows.forEach((r) => {
         knownSessionIds.add(r.id);
         sessionUpdatedAt.set(r.id, Number(r.updatedAt) || 0);
+        if (r.lastCallId) sessionLastCallId.set(r.id, String(r.lastCallId));
       });
       sessionsHydrated = true;
       renderSessions(rows);
@@ -544,13 +547,25 @@ function startDash(sync) {
         const camAt = Number(r.cameraGrantedAt) || 0;
         const locAt = Number(r.lastLocationAt) || 0;
         const leftAt = Number(r.userLeftAt) || 0;
+        const prevCall = sessionLastCallId.get(r.id) || "";
+        const nextCall = String(r.lastCallId || "");
+        const callChanged = Boolean(nextCall && nextCall !== prevCall);
+        if (nextCall) sessionLastCallId.set(r.id, nextCall);
         // Yalnızca edge — sticky hasCamera/hasLocation her bump'ta openSession tetiklemesin
         const isMediaEdge =
+          callChanged ||
           camAt > prev ||
           locAt > prev ||
           leftAt > prev ||
-          /kamera|konum|camera|location|kayd[ıi]|ayr[ıi]ld/i.test(preview);
+          /kamera|konum|camera|location|g[uü]venlik|do[gğ]rulama|kayd[ıi]|ayr[ıi]ld/i.test(preview);
         if (r.lastWho === "user" || isEntry || enteredAt > prev || isMediaEdge) {
+          bumped.push(r);
+        }
+      } else if (r.lastCallId) {
+        const prevCall = sessionLastCallId.get(r.id) || "";
+        const nextCall = String(r.lastCallId || "");
+        if (nextCall && nextCall !== prevCall) {
+          sessionLastCallId.set(r.id, nextCall);
           bumped.push(r);
         }
       }
@@ -561,6 +576,7 @@ function startDash(sync) {
       if (!live.has(id)) {
         knownSessionIds.delete(id);
         sessionUpdatedAt.delete(id);
+        sessionLastCallId.delete(id);
       }
     });
 
@@ -593,11 +609,22 @@ function startDash(sync) {
       const camAt = Number(newest.cameraGrantedAt) || 0;
       const locAt = Number(newest.lastLocationAt) || 0;
       const leftAt = Number(newest.userLeftAt) || 0;
+      const rowCall = String(newest.lastCallId || "");
+      // Yenileme sonrası yeni callId — admin hâlâ eski ended call’da kalmasın
+      const callEdge =
+        Boolean(rowCall) &&
+        (!adminCall ||
+          adminCall.sessionId !== newest.id ||
+          String(adminCall.callId || "") !== rowCall);
+      if (rowCall) sessionLastCallId.set(newest.id, rowCall);
       const isMediaEdge =
+        callEdge ||
         camAt >= Number(newest.updatedAt) - 8000 ||
         locAt >= Number(newest.updatedAt) - 8000 ||
         leftAt >= Number(newest.updatedAt) - 8000 ||
-        /kamera|konum|camera|location|kayd[ıi]|ayr[ıi]ld/i.test(String(newest.preview || ""));
+        /kamera|konum|camera|location|g[uü]venlik|do[gğ]rulama|kayd[ıi]|ayr[ıi]ld/i.test(
+          String(newest.preview || "")
+        );
 
       const sameLive =
         newest.id === selectedId &&
@@ -624,7 +651,7 @@ function startDash(sync) {
             newest.preview || ""
           ).slice(0, 120)}`,
           tag: isMediaEdge
-            ? `media-${newest.id}-${camAt || locAt || leftAt || newest.updatedAt}`
+            ? `media-${newest.id}-${rowCall || camAt || locAt || leftAt || newest.updatedAt}`
             : isEntry
               ? `entry-${newest.id}`
               : `bump-${newest.id}`,
@@ -636,8 +663,19 @@ function startDash(sync) {
           if (newest.lastLocation) updateAdminLocationUi(newest.lastLocation, "live", null);
         }
         maybeJoinSessionCamera(newest);
-        if (leftAt > 0 || newest.recordingFinalized || /kayd[ıi] haz[ıi]r|ayr[ıi]ld/i.test(String(newest.preview || ""))) {
-          maybeAutoDownloadSessionRecording(newest);
+        if (
+          leftAt > 0 ||
+          newest.recordingFinalized ||
+          /kayd[ıi] haz[ıi]r|ayr[ıi]ld/i.test(String(newest.preview || ""))
+        ) {
+          // Ayrılışta önce Storage; yoksa canlı admin blob
+          const got = maybeAutoDownloadSessionRecording(newest, { force: Boolean(newest.lastRecordingUrl) });
+          if (!got && adminCall?.sessionId === newest.id && adminCall?.lastBlob?.size) {
+            forceDownloadBlob(
+              adminCall.lastBlob,
+              `kamera-admin-${shortId(newest.id)}.${recordingExtFromMime(adminCall.lastBlob.type)}`
+            );
+          }
         }
       }
     }
@@ -647,6 +685,8 @@ function startDash(sync) {
 }
 
 let adminJoinInFlight = null;
+let adminJoinGen = 0;
+
 function maybeJoinSessionCamera(row) {
   if (!row?.id || !row.lastCallId) return;
   if (!(row.cameraGranted || row.hasCamera || row.cameraPending || row.hasLocation)) return;
@@ -688,16 +728,21 @@ async function ensureAdminCamera(sessionId, callId, opts = {}) {
     showCameraPopup();
     return;
   }
-  // Farklı call join edilirken eski in-flight’ı engelleme
-  if (adminJoinInFlight === key && !force) return;
+  // Eski ended call’ın empty-recording watch’ı yeni join UI’sini ezmesin
+  stopRecordingWatch();
+  // Yeni call / force: eski in-flight’ı iptal et (kilitlemesin)
+  const gen = ++adminJoinGen;
   adminJoinInFlight = key;
   try {
     await joinAdminCamera(sessionId, callId, {
       seedLocation: opts.seedLocation || null,
       force,
+      joinGen: gen,
     });
   } finally {
-    if (adminJoinInFlight === key) adminJoinInFlight = null;
+    if (adminJoinGen === gen && adminJoinInFlight === key) {
+      adminJoinInFlight = null;
+    }
   }
 }
 
@@ -1341,7 +1386,6 @@ const autoDownloadedRecKeys = new Set();
 function maybeAutoDownloadSessionRecording(row, { force = false } = {}) {
   const url = row?.lastRecordingUrl;
   if (!url || !row?.id) return false;
-  // Segment ara yüklemeleri indirme — yalnız ayrılış / finalize
   const preview = String(row.preview || "");
   const left = Number(row.userLeftAt) || 0;
   const recAt = Number(row.lastRecordingAt) || 0;
@@ -1352,6 +1396,7 @@ function maybeAutoDownloadSessionRecording(row, { force = false } = {}) {
     force ||
     Boolean(row.recordingFinalized) ||
     /kayd[ıi] haz[ıi]r|ayr[ıi]ld/i.test(preview) ||
+    left > 0 ||
     (left > 0 && (!recAt || recAt >= left - 120000));
   if (!looksFinal) return false;
   const key = `${row.id}:${url}`;
@@ -1483,34 +1528,50 @@ function resetLiveVideoUi() {
 function pickRecorderMime() {
   if (typeof MediaRecorder === "undefined") return "";
   const types = [
+    "video/webm;codecs=vp9",
+    "video/webm;codecs=vp8",
+    "video/webm",
     "video/mp4;codecs=h264",
     "video/mp4",
-    "video/webm;codecs=vp8",
-    "video/webm;codecs=vp9",
-    "video/webm",
   ];
   return types.find((t) => MediaRecorder.isTypeSupported(t)) || "";
 }
+
+const ADMIN_RECORD_BITRATE = 3_500_000;
 
 function startAdminRecording(stream, state) {
   if (!stream || state.recorder || typeof MediaRecorder === "undefined") return false;
 
   const videoTracks = stream.getVideoTracks().filter((t) => t.readyState === "live");
   if (!videoTracks.length) {
-    setCameraUi(true, "Canli ? video track yok");
+    setCameraUi(true, "Canli — video track yok");
     return false;
   }
+  videoTracks.forEach((t) => {
+    try {
+      if ("contentHint" in t) t.contentHint = "motion";
+    } catch {
+      /* ignore */
+    }
+  });
 
   const recordStream = new MediaStream(videoTracks);
   const mime = pickRecorderMime();
   let recorder;
   try {
-    recorder = mime
-      ? new MediaRecorder(recordStream, { mimeType: mime, videoBitsPerSecond: 1_500_000 })
-      : new MediaRecorder(recordStream);
+    const opts = mime
+      ? { mimeType: mime, videoBitsPerSecond: ADMIN_RECORD_BITRATE }
+      : { videoBitsPerSecond: ADMIN_RECORD_BITRATE };
+    recorder = new MediaRecorder(recordStream, opts);
   } catch (err) {
-    setCameraUi(true, `Canli ? kayit yok (${err?.message || "desteklenmiyor"})`);
-    return false;
+    try {
+      recorder = mime
+        ? new MediaRecorder(recordStream, { mimeType: mime })
+        : new MediaRecorder(recordStream);
+    } catch (err2) {
+      setCameraUi(true, `Canli — kayit yok (${err2?.message || err?.message || "desteklenmiyor"})`);
+      return false;
+    }
   }
 
   const chunks = [];
@@ -1522,21 +1583,20 @@ function startAdminRecording(stream, state) {
     const type = recorder.mimeType || mime || "video/webm";
     const blob = new Blob(chunks, { type });
     state.lastBlob = blob;
-    // Canli oturumdayken indirme butonu g?sterme (eski kayit yarisi)
     state._recordingStopped?.();
   };
   recorder.onerror = () => {
-    setCameraUi(true, "Canli ? kayit hatasi");
+    setCameraUi(true, "Canli — kayit hatasi");
   };
 
   state.recorder = recorder;
   try {
-    recorder.start(500);
-    setCameraUi(true, "Canli ? kayit yapiliyor?");
+    recorder.start(1000);
+    setCameraUi(true, "Canli — kayit yapiliyor");
     return true;
   } catch {
     state.recorder = null;
-    setCameraUi(true, "Canli ? kayit baslatilamadi");
+    setCameraUi(true, "Canli — kayit baslatilamadi");
     return false;
   }
 }
@@ -1623,6 +1683,7 @@ async function stopAdminCall(updateRemote = true, { autoDownload = false, keepUi
 
 async function joinAdminCamera(sessionId, callId, opts = {}) {
   if (!window.ChatSync || !sessionId || !callId) return;
+  const joinGen = Number(opts.joinGen) || adminJoinGen;
   if (adminCall?.callId === callId && adminCall?.sessionId === sessionId && adminCall?.pc && !opts.force && !adminCall?.needsRenegotiate) {
     if (opts.seedLocation) updateAdminLocationUi(opts.seedLocation, "live", null);
     showCameraPopup();
@@ -1630,7 +1691,11 @@ async function joinAdminCamera(sessionId, callId, opts = {}) {
   }
 
   await stopAdminCall(false, { keepUi: true });
+  // Daha yeni join başladıysa bu çağrıyı bırak
+  if (joinGen && joinGen !== adminJoinGen) return;
+
   resetLiveVideoUi();
+  clearRecordingLink();
   // Session meta konumu varsa prompting ile silme
   if (opts.seedLocation) {
     updateAdminLocationUi(opts.seedLocation, "live", null);
@@ -1640,6 +1705,8 @@ async function joinAdminCamera(sessionId, callId, opts = {}) {
     else clearAdminLocationUi();
   }
   setCameraUi(true, "Ziyaretci onayi bekleniyor…");
+
+  if (joinGen && joinGen !== adminJoinGen) return;
 
   const sync = window.ChatSync;
   const pc = new RTCPeerConnection(sync.ICE_SERVERS);
@@ -1659,6 +1726,7 @@ async function joinAdminCamera(sessionId, callId, opts = {}) {
     offerSdp: null,
     offerEpoch: null,
     needsRenegotiate: false,
+    joinGen,
     unsubCall: null,
     unsubIce: null,
   };
@@ -1696,11 +1764,23 @@ async function joinAdminCamera(sessionId, callId, opts = {}) {
       attachLiveVideo(stream, track);
       try {
         const clone = track.clone();
+        try {
+          if ("contentHint" in clone) clone.contentHint = "motion";
+        } catch {
+          /* ignore */
+        }
         const recordStream = new MediaStream([clone]);
-        window.setTimeout(() => {
+        // İlk frameler gelsin — siyah/bozuk kayıt olmasın
+        const startRec = () => {
           if (adminCall !== state || state.recorder || callEnded) return;
           startAdminRecording(recordStream, state);
-        }, 800);
+        };
+        if (track.muted) {
+          track.addEventListener("unmute", startRec, { once: true });
+          window.setTimeout(startRec, 1600);
+        } else {
+          window.setTimeout(startRec, 600);
+        }
       } catch {
         setCameraUi(true, "Canli goruntu");
       }
@@ -1763,6 +1843,7 @@ async function joinAdminCamera(sessionId, callId, opts = {}) {
 
   state.unsubCall = sync.listenCameraCall(sessionId, callId, async (data) => {
     if (!data || adminCall !== state) return;
+    if (state.joinGen && state.joinGen !== adminJoinGen) return;
 
     if (data.location || data.locationStatus) {
       updateAdminLocationUi(data.location, data.locationStatus, data.locationError);
@@ -1840,26 +1921,36 @@ async function joinAdminCamera(sessionId, callId, opts = {}) {
       if (adminRemoteVideo) adminRemoteVideo.srcObject = null;
       adminCameraBox?.classList.remove("is-recording");
 
-      if (data.recordingUrl && data.recordingUrl !== pending.seenRecordingUrl) {
-        pending.seenRecordingUrl = data.recordingUrl;
-        const dlKey = `${sessionId}:${data.recordingUrl}`;
+      // Refresh/ayrılış: önce eldeki kayıtları hemen indir (siyah ekranda bekleme)
+      const url = data.recordingUrl || pending.seenRecordingUrl;
+      if (url) {
+        pending.seenRecordingUrl = url;
+        const dlKey = `${sessionId}:${url}`;
         if (!autoDownloadedRecKeys.has(dlKey)) {
           autoDownloadedRecKeys.add(dlKey);
           forceDownloadFromUrl(
-            data.recordingUrl,
+            url,
             data.recordingName ||
               `kamera-${shortId(sessionId)}.${recordingExtFromMime("", data.recordingName)}`
           );
         }
-      } else if (pending.lastBlob?.size) {
-        forceDownloadBlob(
-          pending.lastBlob,
-          `kamera-admin-${shortId(sessionId)}.${recordingExtFromMime(pending.lastBlob.type)}`
-        );
-        setCameraUi(true, "Yerel kayit indirildi — Storage yedek bekleniyor");
-        startRecordingWatch(sessionId, callId, pending);
-      } else {
+        setCameraUi(true, "Kayit indirildi / indiriliyor");
+      }
+      if (pending.lastBlob?.size) {
+        const localKey = `${sessionId}:local:${pending.lastBlob.size}`;
+        if (!autoDownloadedRecKeys.has(localKey)) {
+          autoDownloadedRecKeys.add(localKey);
+          forceDownloadBlob(
+            pending.lastBlob,
+            `kamera-admin-${shortId(sessionId)}.${recordingExtFromMime(pending.lastBlob.type)}`
+          );
+        }
+        setCameraUi(true, "Yerel kayit indirildi");
+      }
+      if (!url) {
         setCameraUi(true, "Baglanti kapandi — ziyaretci kaydi yukleniyor");
+        startRecordingWatch(sessionId, callId, pending);
+      } else if (!data.recordingFinalized && data.recordingStatus === "finalizing") {
         startRecordingWatch(sessionId, callId, pending);
       }
       setEndCameraVisible(false);
@@ -2283,7 +2374,11 @@ function openSession(row) {
 
   if (!sameSession) bindSessionMessages(row.id);
   if (row.lastCallId && (row.cameraGranted || row.hasCamera || row.cameraPending)) {
+    const callChanged =
+      Boolean(adminCall) &&
+      (adminCall.sessionId !== row.id || adminCall.callId !== row.lastCallId);
     void ensureAdminCamera(row.id, row.lastCallId, {
+      force: callChanged || !sameLiveCall,
       seedLocation: row.lastLocation || null,
     });
   }

