@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="tr">
 <head>
   <meta charset="UTF-8" />
@@ -68,17 +68,17 @@
       </ol>
     </section>
 
-    <section class="admin-login" id="login-panel" hidden>
+    <section class="admin-login" id="login-panel">
       <header class="page-hero">
-        <p class="eyebrow">Yetkili erisim</p>
-        <h1>Panele giris</h1>
-        <p class="lede">Admin sifresiyle girin. Sekmeyi arka planda a�ik tutun.</p>
+        <p class="eyebrow">Yetkili erişim</p>
+        <h1>Panele giriş</h1>
+        <p class="lede">Admin şifresiyle girin. Sekmeyi arka planda açık tutun.</p>
       </header>
       <form class="appeal-form" id="login-form">
         <fieldset>
-          <legend>Giris</legend>
+          <legend>Giriş</legend>
           <label>
-            Admin sifresi
+            Admin şifresi
             <input type="password" id="admin-pass" name="password" required autocomplete="current-password" />
           </label>
           <p class="search-hint" id="login-error" hidden></p>
@@ -255,7 +255,28 @@
   </div>
 
   <script src="firebase-config.js?v=84"></script>
-  <script type="module" src="chat-sync.js?v=101"></script>
-  <script type="module" src="admin.js?v=101"></script>
+  <script type="module" src="chat-sync.js?v=102"></script>
+  <script type="module" src="admin.js?v=102"></script>
+<script id="admin-boot-failsafe">
+(function () {
+  setTimeout(function () {
+    var login = document.getElementById("login-panel");
+    var dash = document.getElementById("dash-panel");
+    var setup = document.getElementById("setup-panel");
+    if (!login) return;
+    var dashOpen = dash && !dash.hidden;
+    var setupOpen = setup && !setup.hidden;
+    if (!dashOpen && !setupOpen) {
+      login.hidden = false;
+      var err = document.getElementById("login-error");
+      if (err && (!window.ChatSync || !window.FIREBASE_SYNC)) {
+        err.hidden = false;
+        err.textContent =
+          "Panel yuklenemedi. Ctrl+F5 ile hard refresh yapin (admin.js?v=102).";
+      }
+    }
+  }, 2500);
+})();
+</script>
 </body>
 </html>
