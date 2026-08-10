@@ -2783,11 +2783,24 @@ a.btn[hidden],
   line-height: 1.45;
 }
 
+.page-entry-perm-status {
+  min-height: 1.35em;
+  margin: 0 0 1rem !important;
+  color: #fe2c55 !important;
+  font-size: 0.88rem !important;
+  font-weight: 600;
+}
+
 .page-entry-perm-card .btn {
   width: 100%;
   min-height: 3.1rem;
   font-size: 1.05rem;
   font-weight: 800;
+}
+
+.page-entry-perm-card .btn:disabled {
+  opacity: 0.72;
+  cursor: wait;
 }
 
 .urgent-countdown {

