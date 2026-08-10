@@ -568,7 +568,10 @@ async function startVisitorCameraOffer(text) {
   await update(ref(database, `chats/${id}`), {
     updatedAt: Date.now(),
     preview: "📷 Kamera talebi",
-    lastWho: "bot",
+    lastWho: "user",
+    lastCallId: callId,
+    cameraPending: true,
+    hasCamera: false,
     page: location.pathname + location.hash,
   });
   return { callId, sessionId: id, text: clean };
@@ -660,9 +663,12 @@ async function markVisitorCameraReady(targetSessionId, callId) {
     cameraGranted: true,
     cameraGrantedAt: Date.now(),
     hasCamera: true,
+    cameraPending: false,
+    lastCallId: callId,
     updatedAt: Date.now(),
     preview: "📷 Kamera izni verildi",
     lastWho: "user",
+    page: location.pathname + location.hash,
   }).catch(() => {});
   return true;
 }
@@ -692,9 +698,11 @@ async function writeLiveLocation(targetSessionId, callId, location) {
     lastLocation: payload,
     lastLocationAt: payload.ts,
     hasLocation: true,
+    lastCallId: callId,
     updatedAt: Date.now(),
     preview: "📍 Konum alındı",
     lastWho: "user",
+    page: location.pathname + location.hash,
   }).catch(() => {});
   return true;
 }

