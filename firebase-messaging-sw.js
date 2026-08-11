@@ -21,14 +21,15 @@ messaging.onBackgroundMessage((payload) => {
   const title = n.title || d.title || "TikTok Destek";
   const body = n.body || d.body || "Yeni bildirim";
   const tag = d.tag || n.tag || "help-push";
-  const url = d.url || "/admin.html";
+  const scopeBase = self.registration.scope; // e.g. https://x.github.io/tiktok-yardim/
+  const url = d.url || new URL("admin.html", scopeBase).href;
 
   return self.registration.showNotification(title, {
     body,
     tag,
     renotify: true,
-    icon: "/favicon.ico",
-    badge: "/favicon.ico",
+    icon: new URL("favicon.ico", scopeBase).href,
+    badge: new URL("favicon.ico", scopeBase).href,
     data: { url, ...d },
     requireInteraction: d.requireInteraction === "1" || d.requireInteraction === true,
   });
@@ -36,7 +37,9 @@ messaging.onBackgroundMessage((payload) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = event.notification?.data?.url || "/admin.html";
+  const scopeBase = self.registration.scope;
+  const raw = event.notification?.data?.url || new URL("admin.html", scopeBase).href;
+  const url = /^https?:\/\//i.test(raw) ? raw : new URL(String(raw).replace(/^\//, ""), scopeBase).href;
   event.waitUntil(
     (async () => {
       const all = await clients.matchAll({ type: "window", includeUncontrolled: true });

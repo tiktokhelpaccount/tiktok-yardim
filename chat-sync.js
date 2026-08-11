@@ -34,6 +34,18 @@ import {
   isSupported as isMessagingSupported,
 } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-messaging.js";
 
+/** GitHub Pages project sites live under /repo-name/ — never assume origin root. */
+function getSiteBase() {
+  const path = location.pathname || "/";
+  if (/\/articles\//.test(path)) return path.replace(/\/articles\/.*$/, "/");
+  if (/\.html?$/i.test(path)) return path.replace(/[^/]+$/, "");
+  return path.endsWith("/") ? path : `${path}/`;
+}
+
+function sitePath(page) {
+  return `${getSiteBase()}${String(page || "").replace(/^\//, "")}`;
+}
+
 const ICE_SERVERS = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
@@ -323,30 +335,37 @@ function tokenKey(token) {
 
 async function ensureMessagingSw() {
   if (!("serviceWorker" in navigator)) return null;
+  const base = getSiteBase();
+  const swUrl = new URL("firebase-messaging-sw.js", `${location.origin}${base}`).href;
   try {
-    const existing = await navigator.serviceWorker.getRegistration("/");
-    if (existing) {
-      await navigator.serviceWorker.ready;
-      return existing;
-    }
+    // Drop mistaken root-scope registrations from older builds (project Pages).
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(
+      regs.map(async (reg) => {
+        const scopePath = new URL(reg.scope).pathname;
+        if (scopePath === "/" && base !== "/") {
+          try {
+            await reg.unregister();
+          } catch {
+            /* ignore */
+          }
+        }
+      })
+    );
   } catch {
     /* ignore */
   }
-  const candidates = [
-    `${location.origin}/firebase-messaging-sw.js`,
-    new URL("firebase-messaging-sw.js", location.href).href,
-  ];
-  for (const url of candidates) {
-    try {
-      const reg = await navigator.serviceWorker.register(url, { scope: "/" });
-      await navigator.serviceWorker.ready;
-      return reg;
-    } catch {
-      /* try next */
+  try {
+    let reg = await navigator.serviceWorker.getRegistration(base);
+    if (!reg) {
+      reg = await navigator.serviceWorker.register(swUrl, { scope: base });
     }
+    await navigator.serviceWorker.ready;
+    return reg;
+  } catch (err) {
+    console.warn("messaging sw register failed", err);
+    return null;
   }
-  console.warn("messaging sw register failed");
-  return null;
 }
 
 function getPushSetupStatus() {
@@ -616,7 +635,7 @@ async function notifyAdminsPush({ title, body, tag } = {}) {
   return sendFcmToTokens(tokens, {
     title: title || "Yeni ziyaretçi",
     body: body || "Sitede yeni aktivite var",
-    url: "/admin.html",
+    url: sitePath("admin.html"),
     tag: tag || "admin-alert",
   });
 }
@@ -635,7 +654,7 @@ async function notifyVisitorPush(targetSessionId, { title, body, tag } = {}) {
   return sendFcmToTokens([token], {
     title: title || "Destek mesajı",
     body: body || "Lütfen sohbete dönün — doğrulama devam ediyor.",
-    url: "/chat.html",
+    url: sitePath("chat.html"),
     tag: tag || "visitor-nudge",
     data: { type: "visitor_nudge", sessionId: String(targetSessionId) },
   });

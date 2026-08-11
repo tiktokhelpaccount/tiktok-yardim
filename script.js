@@ -1,4 +1,5 @@
 (function () {
+  console.info("[help-build]", "135", location.pathname);
   const searchInput = document.getElementById("help-search");
   const searchBtn = document.getElementById("search-btn");
   const searchHint = document.getElementById("search-hint");

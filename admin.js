@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=134";
+﻿import "./chat-sync.js?v=135";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -350,7 +350,9 @@ function pushDesktopNotification(title, body) {
             body,
             tag: "admin-desk",
             renotify: true,
-            data: { url: "/admin.html" },
+            data: {
+              url: `${location.origin}${location.pathname.replace(/[^/]+$/, "")}admin.html`,
+            },
           });
         } catch {
           /* fall through below */
