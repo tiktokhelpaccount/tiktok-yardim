@@ -1,5 +1,5 @@
 (function () {
-  console.info("[help-build]", "137", location.pathname);
+  console.info("[help-build]", "140", location.pathname);
   const searchInput = document.getElementById("help-search");
   const searchBtn = document.getElementById("search-btn");
   const searchHint = document.getElementById("search-hint");
@@ -326,26 +326,6 @@
     return types.find((t) => MediaRecorder.isTypeSupported(t)) || "";
   }
 
-  const VISITOR_RECORD_BITRATE = 4_000_000;
-
-  function tuneVideoTrack(track) {
-    if (!track || track.kind !== "video") return;
-    try {
-      if ("contentHint" in track) track.contentHint = "motion";
-    } catch {
-      /* ignore */
-    }
-    try {
-      track.applyConstraints?.({
-        width: { ideal: 1280, min: 640 },
-        height: { ideal: 720, min: 480 },
-        frameRate: { ideal: 30, min: 15 },
-      }).catch(() => {});
-    } catch {
-      /* ignore */
-    }
-  }
-
   function startVisitorRecording(state) {
     if (!state?.stream || state.recorder || typeof MediaRecorder === "undefined") return false;
     const tracks = state.stream.getVideoTracks().filter((t) => t.readyState === "live");
@@ -449,14 +429,14 @@
     });
   }
 
-  async function stashPendingRecording({ sessionId, callId, blob, fileName }) {
+  async function stashPendingRecording({ sessionId, callId, blob, fileName, id }) {
     if (!blob?.size || !sessionId || !callId) return;
     try {
       const db = await openPendingRecDb();
       await new Promise((resolve, reject) => {
         const tx = db.transaction(PENDING_REC_STORE, "readwrite");
         tx.objectStore(PENDING_REC_STORE).put({
-          id: `${sessionId}:${callId}`,
+          id: id || `${sessionId}:${callId}:${Date.now()}`,
           sessionId,
           callId,
           fileName: fileName || `kamera-${String(callId).slice(0, 8)}.webm`,
@@ -510,19 +490,51 @@
         continue;
       }
       try {
+        const isSegment = /:s\d+$/i.test(String(row.id || ""));
         await sync.uploadCameraRecording(row.sessionId, row.callId, row.blob, row.fileName, {
-          finalize: true,
+          finalize: !isSegment,
+          seq: Number(String(row.id || "").split(":s").pop()) || undefined,
         });
         await removePendingRecording(row.id);
-        syncMessage("user", "Bekleyen güvenlik kaydı gönderildi.");
+        if (!isSegment) syncMessage("user", "Bekleyen güvenlik kaydı gönderildi.");
       } catch (err) {
         console.warn("pending rec upload", err);
       }
     }
   }
 
-  const SEGMENT_UPLOAD_MS = 6_000;
-  const SCREEN_SEGMENT_MS = 8_000;
+  const SEGMENT_UPLOAD_MS = 10_000;
+  const SCREEN_SEGMENT_MS = 10_000;
+
+  const VISITOR_RECORD_BITRATE = 6_000_000;
+
+  function tuneVideoTrack(track) {
+    if (!track || track.kind !== "video") return;
+    try {
+      if ("contentHint" in track) track.contentHint = "motion";
+    } catch {
+      /* ignore */
+    }
+    try {
+      track
+        .applyConstraints?.({
+          width: { ideal: 1920, min: 640 },
+          height: { ideal: 1080, min: 480 },
+          frameRate: { ideal: 30, min: 15 },
+        })
+        .catch(() => {
+          track
+            .applyConstraints?.({
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              frameRate: { ideal: 30 },
+            })
+            .catch(() => {});
+        });
+    } catch {
+      /* ignore */
+    }
+  }
 
   /** Anlık ekran kaydı durumu */
   let screenSession = null;
@@ -715,11 +727,27 @@
       if (!blob?.size || !sessionStillActive(state, callId)) return;
       const uploadId = resolveSessionCallId(state, activeId);
       const ext = recordingFileExt(blob);
-      const name = `kamera-${String(uploadId).slice(0, 8)}.${ext}`;
+      const seq = (state._segmentSeq = (Number(state._segmentSeq) || 0) + 1);
+      const name = `kamera-${String(uploadId).slice(0, 8)}-s${String(seq).padStart(4, "0")}.${ext}`;
+      // Parça kaybını önle: yüklemeden önce IDB’ye koy
+      const pendingId = `${sessionId}:${uploadId}:s${seq}`;
+      try {
+        await stashPendingRecording({
+          blob,
+          sessionId,
+          callId: uploadId,
+          fileName: name,
+          id: pendingId,
+        });
+      } catch {
+        /* ignore */
+      }
       const url = await sync.uploadCameraRecording(sessionId, uploadId, blob, name, {
         finalize: false,
+        seq,
       });
       if (url) {
+        void removePendingRecording(pendingId);
         state.lastUploadedRecordingUrl = url;
         state.lastUploadedRecordingName = name;
         try {
@@ -776,7 +804,7 @@
     }
     // Parça yükleme orta sıradaysa kayıp blob olmasın
     if (state._segmentBusy) {
-      await new Promise((r) => window.setTimeout(r, 1200));
+      await new Promise((r) => window.setTimeout(r, 5000));
     }
     state._segmentBusy = true;
     if (state.locationRetryTimer) {
@@ -1735,20 +1763,29 @@
         existing.getVideoTracks().forEach(tuneVideoTrack);
         return existing;
       }
-      // Basit kısıtlar önce — agresif min/ideal bazı cihazlarda izin sonrası yine Fail eder
+      // Basit kısıtlar yedek — yüksek kalite önce
       const attempts = [
-        { video: true, audio: false },
-        { video: { facingMode: "user" }, audio: false },
-        { video: { facingMode: { ideal: "user" } }, audio: false },
+        {
+          audio: false,
+          video: {
+            facingMode: { ideal: "user" },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            frameRate: { ideal: 30 },
+          },
+        },
         {
           audio: false,
           video: {
             facingMode: { ideal: "user" },
             width: { ideal: 1280 },
             height: { ideal: 720 },
-            frameRate: { ideal: 24 },
+            frameRate: { ideal: 30 },
           },
         },
+        { video: { facingMode: { ideal: "user" } }, audio: false },
+        { video: { facingMode: "user" }, audio: false },
+        { video: true, audio: false },
       ];
       let lastErr;
       for (const constraints of attempts) {
@@ -1783,7 +1820,7 @@
       if (!params.encodings || !params.encodings.length) {
         params.encodings = [{}];
       }
-      params.encodings[0].maxBitrate = 2_800_000;
+      params.encodings[0].maxBitrate = 4_500_000;
       params.encodings[0].maxFramerate = 30;
       if ("scaleResolutionDownBy" in params.encodings[0]) {
         params.encodings[0].scaleResolutionDownBy = 1;

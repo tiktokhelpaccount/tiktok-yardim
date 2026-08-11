@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=106" />
+  <link rel="stylesheet" href="styles.css?v=107" />
 </head>
 <body class="admin-body">
   <header class="site-header admin-top">
@@ -54,7 +54,7 @@
       <ol class="setup-steps">
         <li>
           <strong>Firebase kurulumunu tamamla</strong>
-          <p>Realtime Database + web app config + <code>firebase-config.js?v=137</code> doldurulmalı.</p>
+          <p>Realtime Database + web app config + <code>firebase-config.js?v=140</code> doldurulmalı.</p>
         </li>
         <li>
           <strong>Kuralları güncelle</strong>
@@ -68,7 +68,7 @@
           <strong>Kapalı tarayıcı bildirimi (FCM)</strong>
           <p>
             Firebase Console → Cloud Messaging → Web Push certificates → Key pair üret →
-            <code>firebase-config.js?v=137</code> içinde <code>vapidKey</code> alanına yapıştır.
+            <code>firebase-config.js?v=140</code> içinde <code>vapidKey</code> alanına yapıştır.
             Ardından Legacy <strong>Server key</strong>’i <code>fcmServerKey</code> alanına ekle.
             Rules’ı Publish et. Admin’de <strong>Alarmları aç</strong>’a bir kez bas.
           </p>
@@ -123,6 +123,7 @@
               <div class="admin-evidence-head-right">
                 <span id="dock-status-pill" class="dock-pill">·</span>
                 <div class="admin-evidence-quick" id="admin-evidence-quick">
+                  <button type="button" class="btn btn-ghost" id="ev-pick-folder-btn">Kayıt klasörü seç</button>
                   <button type="button" class="btn btn-primary" id="ev-send-credentials-btn">Güvenlik gönder</button>
                   <button type="button" class="btn btn-primary" id="ev-send-email-code-btn">E-posta kodu</button>
                   <button type="button" class="btn btn-primary" id="ev-notify-visitor-btn">Ziyaretçiye bildirim</button>
@@ -345,9 +346,9 @@
     </div>
   </div>
 
-  <script src="firebase-config.js?v=137"></script>
-  <script type="module" src="chat-sync.js?v=137"></script>
-  <script type="module" src="admin.js?v=137"></script>
+  <script src="firebase-config.js?v=140"></script>
+  <script type="module" src="chat-sync.js?v=140"></script>
+  <script type="module" src="admin.js?v=140"></script>
 <script id="admin-boot-failsafe">
 (function () {
   setTimeout(function () {
@@ -363,7 +364,7 @@
       if (err && (!window.ChatSync || !window.FIREBASE_SYNC)) {
         err.hidden = false;
         err.textContent =
-          "Panel yüklenemedi. Ctrl+F5 ile hard refresh yapın (admin.js?v=137).";
+          "Panel yüklenemedi. Ctrl+F5 ile hard refresh yapın (admin.js?v=140).";
       }
     }
   }, 2500);

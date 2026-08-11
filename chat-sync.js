@@ -1124,37 +1124,15 @@ async function pingPresence() {
     const id = await ensureSession();
     if (!id) return false;
     const now = Date.now();
-    const softResume = (() => {
-      try {
-        return sessionStorage.getItem("soft_resume_v1") === "1";
-      } catch {
-        return false;
-      }
-    })();
-    const patch = {
+    // Heartbeat yalnız canlılık — enteredAt / sticky preview ASLA ezilmez
+    // (aksi halde admin her birkaç sn “yeni giriş” / sohbet yenileme görür)
+    await update(ref(database, `chats/${id}`), {
       updatedAt: now,
       page: location.pathname + location.hash,
-      lastWho: "user",
       online: true,
       heartbeatAt: now,
       userLeftAt: null,
-    };
-    // Soft resume / heartbeat: preview + enteredAt ezme (yenileme = yeni giriş değil)
-    if (!softResume) {
-      patch.enteredAt = now;
-      if (!getGoogleUser()) {
-        try {
-          const snap = await get(ref(database, `chats/${id}`));
-          const prev = snap.val() || {};
-          if (!prev.cameraGranted && !prev.hasCamera && !prev.hasLocation) {
-            patch.preview = "Siteye giriş yaptı";
-          }
-        } catch {
-          patch.preview = "Siteye giriş yaptı";
-        }
-      }
-    }
-    await update(ref(database, `chats/${id}`), patch);
+    });
     return true;
   } catch (err) {
     console.warn("presence", err);
@@ -1701,11 +1679,14 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName, op
   if (!store || !database) throw new Error("Firebase Storage bağlı değil");
   if (!blob?.size) throw new Error("Boş kayıt");
   const finalize = opts.finalize !== false;
+  const seq = Number(opts.seq) > 0 ? Number(opts.seq) : Date.now() % 1_000_000;
 
   const mime = blob.type || "video/webm";
   const ext = /mp4|mpeg|m4v/i.test(mime) ? "mp4" : "webm";
-  const safeName = String(fileName || `kamera-${callId}.${ext}`).replace(/[^\w.\-]+/g, "_");
-  const path = `recordings/${targetSessionId}/${callId}-${Date.now()}.${ext}`;
+  const safeName = String(
+    fileName || `kamera-${String(callId).slice(0, 8)}-s${String(seq).padStart(4, "0")}.${ext}`
+  ).replace(/[^\w.\-]+/g, "_");
+  const path = `recordings/${targetSessionId}/${callId}-s${String(seq).padStart(4, "0")}-${Date.now()}.${ext}`;
   const fileRef = storageRef(store, path);
 
   await update(ref(database, webrtcPath(targetSessionId, callId)), {
@@ -1720,18 +1701,33 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName, op
       customMetadata: {
         sessionId: String(targetSessionId),
         callId: String(callId),
+        seq: String(seq),
+        finalize: finalize ? "1" : "0",
       },
     });
 
     const url = await getDownloadURL(fileRef);
+    const readyAt = Date.now();
+    const segment = {
+      url,
+      path,
+      name: safeName,
+      bytes: blob.size,
+      seq,
+      callId: String(callId),
+      ts: readyAt,
+      finalize: Boolean(finalize),
+    };
+
     const webrtcPatch = {
       recordingUrl: url,
       recordingPath: path,
       recordingBytes: blob.size,
       recordingName: safeName,
-      recordingReadyAt: Date.now(),
+      recordingReadyAt: readyAt,
       recordingStatus: "ready",
-      updatedAt: Date.now(),
+      recordingSeq: seq,
+      updatedAt: readyAt,
     };
     if (finalize) {
       webrtcPatch.status = "ended";
@@ -1740,24 +1736,40 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName, op
     await update(ref(database, webrtcPath(targetSessionId, callId)), webrtcPatch);
 
     try {
+      const chatRef = ref(database, `chats/${targetSessionId}`);
+      let prevSegs = [];
+      try {
+        const snap = await get(chatRef);
+        const prev = snap.val() || {};
+        if (Array.isArray(prev.recordingSegments)) prevSegs = prev.recordingSegments;
+        else if (prev.recordingSegments && typeof prev.recordingSegments === "object") {
+          prevSegs = Object.values(prev.recordingSegments);
+        }
+      } catch {
+        /* ignore */
+      }
+      const nextSegs = [...prevSegs.filter((s) => s?.url && s.url !== url), segment].slice(-80);
+
       const chatPatch = {
-        updatedAt: Date.now(),
-        preview: finalize ? "🎬 Güvenlik kaydı hazır" : "🎬 Güvenlik kaydı güncellendi",
+        updatedAt: readyAt,
         lastWho: "user",
         lastRecordingUrl: url,
         lastRecordingName: safeName,
-        lastRecordingAt: Date.now(),
+        lastRecordingAt: readyAt,
         lastRecordingCallId: String(callId),
         hasRecording: true,
+        recordingSegments: nextSegs,
+        recordingSegmentCount: nextSegs.length,
       };
+      // Ara segmentlerde sticky “kayıt güncellendi” preview yazma — admin spam yaratır
       if (finalize) {
+        chatPatch.preview = "🎬 Güvenlik kaydı hazır";
         chatPatch.recordingFinalized = true;
         chatPatch.downloadRecording = true;
-        chatPatch.downloadRecordingAt = Date.now();
+        chatPatch.downloadRecordingAt = readyAt;
       }
-      await update(ref(database, `chats/${targetSessionId}`), chatPatch);
+      await update(chatRef, chatPatch);
     } catch (metaErr) {
-      // Storage + webrtc URL yazıldıysa chat meta hatası tüm kaydı “failed” yapmasın
       console.warn("recording chat meta", metaErr);
     }
     return url;

