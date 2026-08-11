@@ -1,4 +1,4 @@
-﻿import "./chat-sync.js?v=145";
+﻿import "./chat-sync.js?v=146";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -2505,23 +2505,44 @@ async function joinAdminCamera(sessionId, callId, opts = {}) {
 
   const attachLiveVideo = (stream, track) => {
     if (!adminRemoteVideo || !stream) return;
-    adminRemoteVideo.srcObject = stream;
+    // Her zaman yeni MediaStream — Safari track bazen streams[0] boş/muted gelir
+    const playStream =
+      stream.getVideoTracks?.().length
+        ? stream
+        : track
+          ? new MediaStream([track])
+          : stream;
+    adminRemoteVideo.srcObject = playStream;
     adminRemoteVideo.muted = true;
     adminRemoteVideo.autoplay = true;
     adminRemoteVideo.playsInline = true;
+    adminRemoteVideo.setAttribute("playsinline", "");
+    adminRemoteVideo.setAttribute("webkit-playsinline", "");
     const kick = () => {
       adminRemoteVideo.play?.().catch(() => {});
     };
     kick();
     adminRemoteVideo.onloadedmetadata = kick;
+    adminRemoteVideo.oncanplay = kick;
     if (track) {
-      track.addEventListener("unmute", () => {
-        adminRemoteVideo.srcObject = stream;
+      const markLive = () => {
+        setCameraUi(true, "Canlı görüntü");
         kick();
-        setCameraUi(true, "Canlı görüntü");
+      };
+      track.addEventListener("unmute", () => {
+        adminRemoteVideo.srcObject = new MediaStream([track]);
+        markLive();
       });
-      if (track.muted === false) {
-        setCameraUi(true, "Canlı görüntü");
+      if (track.muted === false) markLive();
+      else {
+        setCameraUi(true, "Video track geldi — frame bekleniyor…");
+        window.setTimeout(() => {
+          if (!adminRemoteVideo?.srcObject) return;
+          // muted kalsa bile oynamayı dene (iOS→Chrome)
+          adminRemoteVideo.srcObject = new MediaStream([track]);
+          kick();
+          if (track.readyState === "live") setCameraUi(true, "Canlı görüntü (track live)");
+        }, 1200);
       }
     }
     showCameraPopup();
@@ -2896,6 +2917,11 @@ async function joinAdminCamera(sessionId, callId, opts = {}) {
         remoteReady = true;
         for (const cand of pendingVisitorIce.splice(0)) {
           await addVisitorIce(cand);
+        }
+        try {
+          sync.preferVideoCodecs?.(state.pc);
+        } catch {
+          /* ignore */
         }
         const answer = await state.pc.createAnswer();
         await state.pc.setLocalDescription(answer);

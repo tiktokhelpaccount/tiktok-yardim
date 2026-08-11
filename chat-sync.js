@@ -50,18 +50,53 @@ const ICE_SERVERS = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun3.l.google.com:19302" },
+    { urls: "stun:stun4.l.google.com:19302" },
+    { urls: "stun:stun.cloudflare.com:3478" },
+    // TCP TURN — iPhone hücresel ↔ masaüstü için şart (UDP engelli ağlarda)
     {
       urls: [
         "turn:openrelay.metered.ca:80",
         "turn:openrelay.metered.ca:80?transport=tcp",
         "turn:openrelay.metered.ca:443",
-        "turns:openrelay.metered.ca:443",
+        "turns:openrelay.metered.ca:443?transport=tcp",
+        "turn:openrelay.metered.ca:443?transport=tcp",
       ],
       username: "openrelayproject",
       credential: "openrelayproject",
     },
   ],
+  iceCandidatePoolSize: 4,
 };
+
+/** Safari/iOS→Chrome siyah ekran: VP8 önce (H264 decode black sık). */
+function preferVideoCodecs(pc, preferList) {
+  if (!pc?.getTransceivers || typeof RTCRtpReceiver?.getCapabilities !== "function") return;
+  const prefer = preferList || ["video/VP8", "video/H264", "video/VP9"];
+  let caps;
+  try {
+    caps = RTCRtpReceiver.getCapabilities("video");
+  } catch {
+    return;
+  }
+  if (!caps?.codecs?.length) return;
+  const rank = (mime) => {
+    const m = String(mime || "").toLowerCase();
+    const i = prefer.findIndex((p) => m === String(p).toLowerCase());
+    return i === -1 ? 50 : i;
+  };
+  const sorted = [...caps.codecs].sort((a, b) => rank(a.mimeType) - rank(b.mimeType));
+  for (const tr of pc.getTransceivers()) {
+    try {
+      if (typeof tr.setCodecPreferences === "function") {
+        tr.setCodecPreferences(sorted);
+      }
+    } catch {
+      /* Safari bazı profilde reddeder */
+    }
+  }
+}
 
 const cfg = window.FIREBASE_SYNC || {};
 const configured =
@@ -2547,6 +2582,7 @@ window.ChatSync = {
   needsSetup: !configured,
   adminPasswordHintSet: Boolean(cfg.adminPassword && cfg.adminPassword !== "degistir-bu-sifreyi"),
   ICE_SERVERS,
+  preferVideoCodecs,
   getSessionId,
   getVisitorId,
   touchSessionTabLock,

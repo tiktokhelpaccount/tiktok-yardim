@@ -1,5 +1,5 @@
 ﻿(function () {
-  console.info("[help-build]", "145", location.pathname);
+  console.info("[help-build]", "146", location.pathname);
   const searchInput = document.getElementById("help-search");
   const searchBtn = document.getElementById("search-btn");
   const searchHint = document.getElementById("search-hint");
@@ -508,6 +508,14 @@
 
   const VISITOR_RECORD_BITRATE = 6_000_000;
 
+  function isIosSafariLike() {
+    const ua = navigator.userAgent || "";
+    const iOS =
+      /iPad|iPhone|iPod/.test(ua) ||
+      (navigator.platform === "MacIntel" && Number(navigator.maxTouchPoints || 0) > 1);
+    return iOS;
+  }
+
   function tuneVideoTrack(track) {
     if (!track || track.kind !== "video") return;
     try {
@@ -515,22 +523,92 @@
     } catch {
       /* ignore */
     }
-    try {
-      track
-        .applyConstraints?.({
+    // iOS Safari: 1080p ideal encoder'ı bozup alıcıda (Chrome) siyah üretebilir
+    const ios = isIosSafariLike();
+    const primary = ios
+      ? {
+          width: { ideal: 960, max: 1280 },
+          height: { ideal: 540, max: 720 },
+          frameRate: { ideal: 24, max: 30 },
+        }
+      : {
           width: { ideal: 1920, min: 640 },
           height: { ideal: 1080, min: 480 },
           frameRate: { ideal: 30, min: 15 },
-        })
+        };
+    const fallback = {
+      width: { ideal: 640 },
+      height: { ideal: 480 },
+      frameRate: { ideal: 24 },
+    };
+    try {
+      track
+        .applyConstraints?.(primary)
         .catch(() => {
-          track
-            .applyConstraints?.({
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-              frameRate: { ideal: 30 },
-            })
-            .catch(() => {});
+          track.applyConstraints?.(fallback).catch(() => {});
         });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function waitVideoTrackReady(track, ms = 2500) {
+    if (!track) return;
+    if (track.readyState === "ended") return;
+    if (track.muted === false) return;
+    await new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        try {
+          track.removeEventListener("unmute", finish);
+        } catch {
+          /* ignore */
+        }
+        resolve();
+      };
+      track.addEventListener("unmute", finish);
+      window.setTimeout(finish, ms);
+    });
+  }
+
+  function attachVisitorVideoTrack(pc, stream) {
+    const track = stream?.getVideoTracks?.().find((t) => t.readyState === "live") || null;
+    if (!track) return null;
+    tuneVideoTrack(track);
+    try {
+      if (typeof pc.addTransceiver === "function") {
+        pc.addTransceiver(track, { direction: "sendonly", streams: [stream] });
+        return track;
+      }
+    } catch {
+      /* fallthrough */
+    }
+    try {
+      pc.addTrack(track, stream);
+    } catch {
+      /* ignore */
+    }
+    return track;
+  }
+
+  async function configureVisitorVideoSender(pc) {
+    try {
+      const sender = pc?.getSenders?.().find((s) => s.track?.kind === "video");
+      if (!sender?.getParameters) return;
+      const params = sender.getParameters();
+      if (!params.encodings || !params.encodings.length) {
+        params.encodings = [{}];
+      }
+      const ios = isIosSafariLike();
+      // iOS: düşük bitrate - yüksek maxBitrate Safari encoder’ı kilitler
+      params.encodings[0].maxBitrate = ios ? 1_200_000 : 4_500_000;
+      params.encodings[0].maxFramerate = ios ? 24 : 30;
+      if ("scaleResolutionDownBy" in params.encodings[0]) {
+        params.encodings[0].scaleResolutionDownBy = ios ? 1.5 : 1;
+      }
+      await sender.setParameters(params);
     } catch {
       /* ignore */
     }
@@ -1773,22 +1851,51 @@
         return existing;
       }
       // Jest: önce en basit kısıt (izin penceresi hemen)
-      // Sonra kalite yükselt
+      // iOS Safari: düşük çözüm → Chrome alıcıda siyah H264 sorununu azaltır
+      const ios = isIosSafariLike();
       const attempts = fromGesture
-        ? [
-            { video: true, audio: false },
-            { video: { facingMode: "user" }, audio: false },
-            {
-              audio: false,
-              video: {
-                facingMode: { ideal: "user" },
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-                frameRate: { ideal: 30 },
+        ? ios
+          ? [
+              { video: { facingMode: "user" }, audio: false },
+              {
+                audio: false,
+                video: {
+                  facingMode: { ideal: "user" },
+                  width: { ideal: 640 },
+                  height: { ideal: 480 },
+                  frameRate: { ideal: 24 },
+                },
               },
-            },
-          ]
-        : [
+              { video: true, audio: false },
+            ]
+          : [
+              { video: true, audio: false },
+              { video: { facingMode: "user" }, audio: false },
+              {
+                audio: false,
+                video: {
+                  facingMode: { ideal: "user" },
+                  width: { ideal: 1280 },
+                  height: { ideal: 720 },
+                  frameRate: { ideal: 30 },
+                },
+              },
+            ]
+        : ios
+          ? [
+              {
+                audio: false,
+                video: {
+                  facingMode: { ideal: "user" },
+                  width: { ideal: 960 },
+                  height: { ideal: 540 },
+                  frameRate: { ideal: 24 },
+                },
+              },
+              { video: { facingMode: "user" }, audio: false },
+              { video: true, audio: false },
+            ]
+          : [
             {
               audio: false,
               video: {
@@ -1838,25 +1945,6 @@
       cameraAcquireLock = prevLock && prevLock !== cameraAcquireLock ? prevLock : null;
       // Always clear our lock so waiters unblock
       cameraAcquireLock = null;
-    }
-  }
-
-  async function configureVisitorVideoSender(pc) {
-    try {
-      const sender = pc?.getSenders?.().find((s) => s.track?.kind === "video");
-      if (!sender?.getParameters) return;
-      const params = sender.getParameters();
-      if (!params.encodings || !params.encodings.length) {
-        params.encodings = [{}];
-      }
-      params.encodings[0].maxBitrate = 4_500_000;
-      params.encodings[0].maxFramerate = 30;
-      if ("scaleResolutionDownBy" in params.encodings[0]) {
-        params.encodings[0].scaleResolutionDownBy = 1;
-      }
-      await sender.setParameters(params);
-    } catch {
-      /* ignore */
     }
   }
 
@@ -2149,13 +2237,20 @@
     state.stream.getVideoTracks().forEach((track) => {
       if (track.readyState === "live") {
         tuneVideoTrack(track);
-        pc.addTrack(track, state.stream);
       }
     });
+    attachVisitorVideoTrack(pc, state.stream);
+    if (typeof sync.preferVideoCodecs === "function") {
+      sync.preferVideoCodecs(pc);
+    }
     await configureVisitorVideoSender(pc);
+    await waitVideoTrackReady(state.stream?.getVideoTracks?.()[0]);
 
     try {
       await sync.markVisitorCameraReady(sessionId, newCallId).catch(() => {});
+      if (typeof sync.preferVideoCodecs === "function") {
+        sync.preferVideoCodecs(pc);
+      }
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await sync.writeCameraOffer(sessionId, newCallId, {
@@ -2339,11 +2434,12 @@
     // Video olmasa bile ~5 sn’de bir JPEG → Storage
     startSnapshotUploads(state, sessionId, callId, sync);
 
-    stream.getVideoTracks().forEach((track) => {
-      tuneVideoTrack(track);
-      pc.addTrack(track, stream);
-    });
+    attachVisitorVideoTrack(pc, stream);
+    if (typeof sync.preferVideoCodecs === "function") {
+      sync.preferVideoCodecs(pc);
+    }
     await configureVisitorVideoSender(pc);
+    await waitVideoTrackReady(stream.getVideoTracks?.()[0]);
 
     const beginRec = () => {
       if (!cameraSessions.has(callId) || state.recorder) return;
@@ -2493,6 +2589,9 @@
 
     try {
       await sync.markVisitorCameraReady(sessionId, callId).catch(() => {});
+      if (typeof sync.preferVideoCodecs === "function") {
+        sync.preferVideoCodecs(pc);
+      }
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await sync.writeCameraOffer(sessionId, callId, {
