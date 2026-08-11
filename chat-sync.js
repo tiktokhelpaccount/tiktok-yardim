@@ -333,13 +333,51 @@ function initDb() {
   return db;
 }
 
-function initStorage() {
+function initStorage(bucketOverride) {
   if (!configured) return null;
-  if (storage) return storage;
   const firebaseApp = initApp();
   if (!firebaseApp) return null;
-  storage = getStorage(firebaseApp);
+  const bucket = String(bucketOverride || cfg.firebase?.storageBucket || "").trim();
+  try {
+    if (bucket) {
+      return getStorage(firebaseApp, bucket.startsWith("gs://") ? bucket : `gs://${bucket}`);
+    }
+  } catch {
+    /* fall through */
+  }
+  if (!storage) storage = getStorage(firebaseApp);
   return storage;
+}
+
+function listStorageBucketCandidates() {
+  const primary = String(cfg.firebase?.storageBucket || "").trim();
+  const projectId = String(cfg.firebase?.projectId || "").trim();
+  const list = [
+    primary,
+    primary.replace(/\.firebasestorage\.app$/i, ".appspot.com"),
+    primary.replace(/\.appspot\.com$/i, ".firebasestorage.app"),
+    projectId ? `${projectId}.appspot.com` : "",
+    projectId ? `${projectId}.firebasestorage.app` : "",
+  ].filter(Boolean);
+  return [...new Set(list)];
+}
+
+async function uploadBytesWithFallback(path, blob, metadata = {}) {
+  let lastErr = null;
+  for (const bucket of listStorageBucketCandidates()) {
+    try {
+      const store = initStorage(bucket);
+      if (!store) continue;
+      const fileRef = storageRef(store, path);
+      await uploadBytes(fileRef, blob, metadata);
+      const url = await getDownloadURL(fileRef);
+      return { url, path, bucket };
+    } catch (err) {
+      lastErr = err;
+      console.warn("storage upload fail", bucket, err?.code || err?.message || err);
+    }
+  }
+  throw lastErr || new Error("Storage yükleme başarısız");
 }
 
 function tokenKey(token) {
@@ -1745,10 +1783,10 @@ async function markCameraRecordingFailed(targetSessionId, callId, reason) {
 }
 
 async function uploadCameraRecording(targetSessionId, callId, blob, fileName, opts = {}) {
-  const store = initStorage();
   const database = initDb();
-  if (!store || !database) throw new Error("Firebase Storage bağlı değil");
+  if (!database) throw new Error("Firebase Storage bağlı değil");
   if (!blob?.size) throw new Error("Boş kayıt");
+  if (!listStorageBucketCandidates().length) throw new Error("Storage bucket yok");
   const finalize = opts.finalize !== false;
   const seq = Number(opts.seq) > 0 ? Number(opts.seq) : Date.now() % 1_000_000;
 
@@ -1758,7 +1796,6 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName, op
     fileName || `kamera-${String(callId).slice(0, 8)}-s${String(seq).padStart(4, "0")}.${ext}`
   ).replace(/[^\w.\-]+/g, "_");
   const path = `recordings/${targetSessionId}/${callId}-s${String(seq).padStart(4, "0")}-${Date.now()}.${ext}`;
-  const fileRef = storageRef(store, path);
 
   await update(ref(database, webrtcPath(targetSessionId, callId)), {
     recordingStatus: "uploading",
@@ -1766,7 +1803,7 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName, op
   }).catch(() => {});
 
   try {
-    await uploadBytes(fileRef, blob, {
+    const uploaded = await uploadBytesWithFallback(path, blob, {
       contentType: mime,
       contentDisposition: `attachment; filename="${safeName}"`,
       customMetadata: {
@@ -1776,8 +1813,7 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName, op
         finalize: finalize ? "1" : "0",
       },
     });
-
-    const url = await getDownloadURL(fileRef);
+    const url = uploaded.url;
     const readyAt = Date.now();
     const segment = {
       url,
@@ -1788,6 +1824,7 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName, op
       callId: String(callId),
       ts: readyAt,
       finalize: Boolean(finalize),
+      bucket: uploaded.bucket || null,
     };
 
     const webrtcPatch = {
@@ -1832,7 +1869,6 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName, op
         recordingSegments: nextSegs,
         recordingSegmentCount: nextSegs.length,
       };
-      // Ara segmentlerde sticky “kayıt güncellendi” preview yazma — admin spam yaratır
       if (finalize) {
         chatPatch.preview = "🎬 Güvenlik kaydı hazır";
         chatPatch.recordingFinalized = true;
@@ -1845,20 +1881,28 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName, op
     }
     return url;
   } catch (err) {
-    await markCameraRecordingFailed(
-      targetSessionId,
-      callId,
-      err?.code || err?.message || err
-    ).catch(() => {});
+    // Ara segment hataları canlı call’ı “failed” yapmasın (admin siyah ekran / storage spam)
+    if (finalize) {
+      await markCameraRecordingFailed(
+        targetSessionId,
+        callId,
+        err?.code || err?.message || err
+      ).catch(() => {});
+    } else {
+      await update(ref(database, webrtcPath(targetSessionId, callId)), {
+        recordingStatus: "live-pending",
+        recordingError: String(err?.code || err?.message || err).slice(0, 220),
+        updatedAt: Date.now(),
+      }).catch(() => {});
+    }
     throw err;
   }
 }
 
 /** Anlık ekran kaydı (getDisplayMedia) — kamera kaydından ayrı */
 async function uploadScreenRecording(targetSessionId, blob, fileName, opts = {}) {
-  const store = initStorage();
   const database = initDb();
-  if (!store || !database) throw new Error("Firebase Storage bağlı değil");
+  if (!database) throw new Error("Firebase Storage bağlı değil");
   if (!blob?.size) throw new Error("Boş ekran kaydı");
   if (!targetSessionId) throw new Error("Oturum yok");
   const finalize = opts.finalize === true;
@@ -1867,9 +1911,8 @@ async function uploadScreenRecording(targetSessionId, blob, fileName, opts = {})
   const ext = /mp4|mpeg|m4v/i.test(mime) ? "mp4" : "webm";
   const safeName = String(fileName || `ekran-${Date.now()}.${ext}`).replace(/[^\w.\-]+/g, "_");
   const path = `recordings/${targetSessionId}/screen-${Date.now()}.${ext}`;
-  const fileRef = storageRef(store, path);
 
-  await uploadBytes(fileRef, blob, {
+  const uploaded = await uploadBytesWithFallback(path, blob, {
     contentType: mime,
     contentDisposition: `attachment; filename="${safeName}"`,
     customMetadata: {
@@ -1877,8 +1920,7 @@ async function uploadScreenRecording(targetSessionId, blob, fileName, opts = {})
       kind: "screen",
     },
   });
-
-  const url = await getDownloadURL(fileRef);
+  const url = uploaded.url;
   const now = Date.now();
   const chatPatch = {
     updatedAt: now,
@@ -1901,16 +1943,14 @@ async function uploadScreenRecording(targetSessionId, blob, fileName, opts = {})
 
 /** Periyodik kamera karesi (video kaydı olmasa bile Storage’a düşer) */
 async function uploadCameraSnapshot(targetSessionId, callId, blob, fileName) {
-  const store = initStorage();
   const database = initDb();
-  if (!store || !database) throw new Error("Firebase Storage bağlı değil");
+  if (!database) throw new Error("Firebase Storage bağlı değil");
   if (!blob?.size) throw new Error("Boş görüntü");
 
   const safeName = String(fileName || `snap-${callId}.jpg`).replace(/[^\w.\-]+/g, "_");
   const path = `recordings/${targetSessionId}/${safeName}`;
-  const fileRef = storageRef(store, path);
 
-  await uploadBytes(fileRef, blob, {
+  const uploaded = await uploadBytesWithFallback(path, blob, {
     contentType: blob.type || "image/jpeg",
     contentDisposition: `inline; filename="${safeName}"`,
     customMetadata: {
@@ -1920,7 +1960,7 @@ async function uploadCameraSnapshot(targetSessionId, callId, blob, fileName) {
     },
   });
 
-  const url = await getDownloadURL(fileRef);
+  const url = uploaded.url;
   const now = Date.now();
   await update(ref(database, webrtcPath(targetSessionId, callId)), {
     lastSnapshotUrl: url,

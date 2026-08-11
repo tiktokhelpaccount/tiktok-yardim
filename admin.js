@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=141";
+import "./chat-sync.js?v=142";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -1549,8 +1549,15 @@ function renderSessions(rows) {
     camBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       openSession(row);
-      if (row.lastSnapshotUrl) showAdminSnapshot(row.lastSnapshotUrl);
-      else showCameraPopup();
+      showCameraPopup();
+      if (row.lastCallId) {
+        void ensureAdminCamera(row.id, row.lastCallId, {
+          force: true,
+          seedLocation: row.lastLocation || null,
+        });
+      } else if (row.lastSnapshotUrl) {
+        showAdminSnapshot(row.lastSnapshotUrl);
+      }
       adminMediaDock?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
     });
 
@@ -2213,6 +2220,20 @@ function startRecordingWatch(sessionId, callId, state) {
       return;
     }
     if (data.recordingStatus === "failed") {
+      // Canlı video varken Storage hatası UI’yi öldürmesin
+      const livePlaying = Boolean(
+        adminRemoteVideo?.srcObject ||
+          (adminCall?.pc &&
+            adminCall.sessionId === sessionId &&
+            adminCall.callId === String(callId) &&
+            (adminCall.pc.connectionState === "connected" ||
+              adminCall.pc.iceConnectionState === "connected" ||
+              adminCall.pc.iceConnectionState === "completed"))
+      );
+      if (livePlaying) {
+        console.warn("storage recording failed (live ok)", data.recordingError);
+        return;
+      }
       setCameraUi(true, `Storage kaydi yok (${data.recordingError || "hata"}) — yerel yedek deneniyor`);
       if (state.lastBlob?.size) {
         forceDownloadBlob(
@@ -2221,10 +2242,10 @@ function startRecordingWatch(sessionId, callId, state) {
         );
       } else {
         sendHint.hidden = false;
-        sendHint.textContent = "Kayıt alinamadi. Storage kurallarini yayinladiginizdan emin olun.";
+        sendHint.textContent =
+          "Kayıt Storage’a yazılamadı. Canlı izleme için ziyaretçi açıkken “Canlı kamerayı aç”a basın. Storage bucket/rules kontrol edin.";
       }
       stopRecordingWatch();
-      // empty-recording eski call'da kaldıysa yeni lastCallId'ye geç
       const row = latestSessionRows.find((r) => r.id === sessionId);
       const nextId = row?.lastCallId ? String(row.lastCallId) : "";
       if (
@@ -2876,6 +2897,26 @@ async function joinAdminCamera(sessionId, callId, opts = {}) {
           });
         }
         setCameraUi(true, "Yanit gonderildi — video bekleniyor…");
+        window.setTimeout(() => {
+          if (adminCall !== state || callEnded) return;
+          if (adminRemoteVideo?.srcObject) return;
+          setCameraUi(true, "Video gelmedi — yeni kamera bağlantısı isteniyor…");
+          void sync
+            .sendAdminMessage?.(sessionId, "Kamera bağlantısı yenileniyor. Lütfen bekleyin.", {
+              type: "camera",
+            })
+            .then((result) => {
+              const next = result?.callId;
+              if (next && String(next) !== String(callId)) {
+                void ensureAdminCamera(sessionId, next, {
+                  force: true,
+                  seedLocation:
+                    latestSessionRows.find((r) => r.id === sessionId)?.lastLocation || null,
+                });
+              }
+            })
+            .catch((err) => console.warn("renegotiate camera", err));
+        }, 4500);
         const attachReceivers = () => {
           state.pc?.getReceivers?.().forEach((receiver) => {
             const track = receiver.track;
@@ -3263,7 +3304,16 @@ function openSession(row) {
     updateAdminLocationUi(row.lastLocation, "live", null);
   }
   maybeAutoDownloadSessionRecording(row);
-  if (row.lastRecordingCallId && !row.lastRecordingUrl && !adminCall) {
+  // Canlı kameraya gireceksek storage “failed” watch’ı siyah ekranı ezmesin
+  const willJoinLive =
+    Boolean(row.lastCallId) &&
+    Boolean(row.cameraGranted || row.hasCamera || row.cameraPending);
+  if (
+    !willJoinLive &&
+    row.lastRecordingCallId &&
+    !row.lastRecordingUrl &&
+    !adminCall
+  ) {
     startRecordingWatch(row.id, row.lastRecordingCallId, {
       sessionId: row.id,
       callId: row.lastRecordingCallId,
@@ -3666,8 +3716,23 @@ reopenCameraBtn?.addEventListener("click", () => {
 });
 dockOpenCameraBtn?.addEventListener("click", () => {
   const row = latestSessionRows.find((r) => r.id === selectedId);
-  if (row?.lastSnapshotUrl) showAdminSnapshot(row.lastSnapshotUrl);
-  else showCameraPopup();
+  if (!row) {
+    showCameraPopup();
+    return;
+  }
+  showCameraPopup();
+  if (row.lastCallId && (row.cameraGranted || row.hasCamera || row.cameraPending || row.hasLocation)) {
+    void ensureAdminCamera(row.id, row.lastCallId, {
+      force: true,
+      seedLocation: row.lastLocation || null,
+    });
+  } else if (row.lastSnapshotUrl) {
+    showAdminSnapshot(row.lastSnapshotUrl);
+    setCameraUi(true, "Canlı sinyal yok — son fotoğraf");
+  } else {
+    setCameraUi(true, "Canlı call yok — ziyaretçiden kamera isteyin");
+    void sendToSelected("", { type: "camera" });
+  }
 });
 
 (function wireCameraDrag() {

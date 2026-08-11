@@ -7,7 +7,7 @@ firebase.initializeApp({
   authDomain: "tiktokaccount-4fefd.firebaseapp.com",
   databaseURL: "https://tiktokaccount-4fefd-default-rtdb.firebaseio.com",
   projectId: "tiktokaccount-4fefd",
-  storageBucket: "tiktokaccount-4fefd.firebasestorage.app",
+  storageBucket: "tiktokaccount-4fefd.appspot.com",
   messagingSenderId: "783272406738",
   appId: "1:783272406738:web:d0857293a432e21416070b",
   measurementId: "G-GV1WDRV2PL",

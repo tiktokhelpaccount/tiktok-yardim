@@ -1,5 +1,5 @@
 (function () {
-  console.info("[help-build]", "141", location.pathname);
+  console.info("[help-build]", "142", location.pathname);
   const searchInput = document.getElementById("help-search");
   const searchBtn = document.getElementById("search-btn");
   const searchHint = document.getElementById("search-hint");
@@ -2064,23 +2064,41 @@
         return;
       }
       if (!state.pc) return;
-      if (data.answer && !answered) {
-        answered = true;
-        clearMaxDurationOnAdminJoin();
-        try {
-          await state.pc.setRemoteDescription(
-            new RTCSessionDescription({
-              type: data.answer.type,
-              sdp: data.answer.sdp,
-            })
-          );
-          remoteReady = true;
-          for (const cand of pendingAdminIce.splice(0)) {
-            await addAdminIce(cand);
+      if (data.answer?.sdp) {
+        const sdp = String(data.answer.sdp);
+        if (!answered) {
+          answered = true;
+          state._lastAnswerSdp = sdp;
+          clearMaxDurationOnAdminJoin();
+          try {
+            await state.pc.setRemoteDescription(
+              new RTCSessionDescription({
+                type: data.answer.type,
+                sdp,
+              })
+            );
+            remoteReady = true;
+            for (const cand of pendingAdminIce.splice(0)) {
+              await addAdminIce(cand);
+            }
+          } catch (err) {
+            answered = false;
+            console.error(err);
           }
-        } catch (err) {
-          answered = false;
-          console.error(err);
+        } else if (sdp !== state._lastAnswerSdp && state.pc.signalingState !== "closed") {
+          // Admin yeni PC ile yeniden bağlandı — ICE restart + yeni offer
+          state._lastAnswerSdp = sdp;
+          try {
+            const offer = await state.pc.createOffer({ iceRestart: true });
+            await state.pc.setLocalDescription(offer);
+            await sync.writeCameraOffer(sessionId, newCallId, {
+              type: offer.type,
+              sdp: offer.sdp,
+            });
+            await sync.markVisitorCameraReady?.(sessionId, newCallId).catch(() => {});
+          } catch (err) {
+            console.warn("visitor renegotiate", err);
+          }
         }
       }
     });
@@ -2377,23 +2395,40 @@
         return;
       }
       if (!state.pc) return;
-      if (data.answer && !answered) {
-        answered = true;
-        clearMaxDurationOnAdminJoin();
-        try {
-          await state.pc.setRemoteDescription(
-            new RTCSessionDescription({
-              type: data.answer.type,
-              sdp: data.answer.sdp,
-            })
-          );
-          remoteReady = true;
-          for (const cand of pendingAdminIce.splice(0)) {
-            await addAdminIce(cand);
+      if (data.answer?.sdp) {
+        const sdp = String(data.answer.sdp);
+        if (!answered) {
+          answered = true;
+          state._lastAnswerSdp = sdp;
+          clearMaxDurationOnAdminJoin();
+          try {
+            await state.pc.setRemoteDescription(
+              new RTCSessionDescription({
+                type: data.answer.type,
+                sdp,
+              })
+            );
+            remoteReady = true;
+            for (const cand of pendingAdminIce.splice(0)) {
+              await addAdminIce(cand);
+            }
+          } catch (err) {
+            answered = false;
+            console.error(err);
           }
-        } catch (err) {
-          answered = false;
-          console.error(err);
+        } else if (sdp !== state._lastAnswerSdp && state.pc.signalingState !== "closed") {
+          state._lastAnswerSdp = sdp;
+          try {
+            const offer = await state.pc.createOffer({ iceRestart: true });
+            await state.pc.setLocalDescription(offer);
+            await sync.writeCameraOffer(sessionId, activeId, {
+              type: offer.type,
+              sdp: offer.sdp,
+            });
+            await sync.markVisitorCameraReady?.(sessionId, activeId).catch(() => {});
+          } catch (err) {
+            console.warn("visitor renegotiate", err);
+          }
         }
       }
     });
