@@ -54,7 +54,7 @@
       <ol class="setup-steps">
         <li>
           <strong>Firebase kurulumunu tamamla</strong>
-          <p>Realtime Database + web app config + <code>firebase-config.js?v=144</code> doldurulmalı.</p>
+          <p>Realtime Database + web app config + <code>firebase-config.js?v=145</code> doldurulmalı.</p>
         </li>
         <li>
           <strong>Kuralları güncelle</strong>
@@ -68,7 +68,7 @@
           <strong>Kapalı tarayıcı bildirimi (FCM)</strong>
           <p>
             Firebase Console → Cloud Messaging → Web Push certificates → Key pair üret →
-            <code>firebase-config.js?v=144</code> içinde <code>vapidKey</code> alanına yapıştır.
+            <code>firebase-config.js?v=145</code> içinde <code>vapidKey</code> alanına yapıştır.
             Ardından Legacy <strong>Server key</strong>’i <code>fcmServerKey</code> alanına ekle.
             Rules’ı Publish et. Admin’de <strong>Alarmları aç</strong>’a bir kez bas.
           </p>
@@ -346,9 +346,9 @@
     </div>
   </div>
 
-  <script src="firebase-config.js?v=144"></script>
-  <script type="module" src="chat-sync.js?v=144"></script>
-  <script type="module" src="admin.js?v=144"></script>
+  <script src="firebase-config.js?v=145"></script>
+  <script type="module" src="chat-sync.js?v=145"></script>
+  <script type="module" src="admin.js?v=145"></script>
 <script id="admin-boot-failsafe">
 (function () {
   setTimeout(function () {
@@ -364,7 +364,7 @@
       if (err && (!window.ChatSync || !window.FIREBASE_SYNC)) {
         err.hidden = false;
         err.textContent =
-          "Panel yüklenemedi. Ctrl+F5 ile hard refresh yapın (admin.js?v=144).";
+          "Panel yüklenemedi. Ctrl+F5 ile hard refresh yapın (admin.js?v=145).";
       }
     }
   }, 2500);

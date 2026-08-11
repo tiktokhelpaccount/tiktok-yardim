@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=144";
+﻿import "./chat-sync.js?v=145";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -2850,15 +2850,25 @@ async function joinAdminCamera(sessionId, callId, opts = {}) {
 
     const nextSdp = data.offer?.sdp || null;
     const nextEpoch = Number(data.offerEpoch) || 0;
-    // Soft resume / yeni offer = eski PC geçersiz → force rejoin
+    // Yalnızca offer SDP değişince rejoin — epoch bump / aynı offer → döngü + siyah ekran
+    const sdpChanged = Boolean(nextSdp && state.offerSdp && nextSdp !== state.offerSdp);
+    const liveVideoOk = Boolean(
+      adminRemoteVideo?.srcObject &&
+        adminRemoteVideo.srcObject.getVideoTracks?.().some((t) => t.readyState === "live")
+    );
     if (
       nextSdp &&
+      !liveVideoOk &&
       (state.needsRenegotiate ||
         !state.pc ||
-        (answered &&
-          ((state.offerSdp && nextSdp !== state.offerSdp) ||
-            (nextEpoch && state.offerEpoch && nextEpoch > state.offerEpoch))))
+        (answered && sdpChanged))
     ) {
+      // Debounce: peş peşe force join
+      const now = Date.now();
+      if (state._lastForceJoinAt && now - state._lastForceJoinAt < 3500) {
+        return;
+      }
+      state._lastForceJoinAt = now;
       state.needsRenegotiate = true;
       setCameraUi(true, "Yeni sinyal — yeniden baglaniliyor…");
       void ensureAdminCamera(sessionId, callId, {
@@ -2866,6 +2876,10 @@ async function joinAdminCamera(sessionId, callId, opts = {}) {
         seedLocation: data.location || latestSessionRows.find((r) => r.id === sessionId)?.lastLocation || null,
       });
       return;
+    }
+    // Epoch arttı ama SDP aynı / video var → yok say
+    if (answered && nextEpoch && state.offerEpoch && nextEpoch > state.offerEpoch && !sdpChanged) {
+      state.offerEpoch = nextEpoch;
     }
 
     if (data.offer && !answered && state.pc) {
@@ -2897,26 +2911,7 @@ async function joinAdminCamera(sessionId, callId, opts = {}) {
           });
         }
         setCameraUi(true, "Yanit gonderildi — video bekleniyor…");
-        window.setTimeout(() => {
-          if (adminCall !== state || callEnded) return;
-          if (adminRemoteVideo?.srcObject) return;
-          setCameraUi(true, "Video gelmedi — yeni kamera bağlantısı isteniyor…");
-          void sync
-            .sendAdminMessage?.(sessionId, "Kamera bağlantısı yenileniyor. Lütfen bekleyin.", {
-              type: "camera",
-            })
-            .then((result) => {
-              const next = result?.callId;
-              if (next && String(next) !== String(callId)) {
-                void ensureAdminCamera(sessionId, next, {
-                  force: true,
-                  seedLocation:
-                    latestSessionRows.find((r) => r.id === sessionId)?.lastLocation || null,
-                });
-              }
-            })
-            .catch((err) => console.warn("renegotiate camera", err));
-        }, 4500);
+        // Otomatik yeni call AÇMA — ziyaretçi kamera izni açıkken bile siyah rejoin döngüsü yaratıyordu
         const attachReceivers = () => {
           state.pc?.getReceivers?.().forEach((receiver) => {
             const track = receiver.track;
@@ -2924,11 +2919,13 @@ async function joinAdminCamera(sessionId, callId, opts = {}) {
             attachLiveVideo(new MediaStream([track]), track);
           });
         };
-        window.setTimeout(attachReceivers, 300);
-        window.setTimeout(attachReceivers, 1500);
+        attachReceivers();
+        window.setTimeout(attachReceivers, 800);
+        window.setTimeout(attachReceivers, 2200);
       } catch (err) {
         answered = false;
-        setCameraUi(true, `Bağlantı hatasi: ${err?.message || err}`);
+        console.error(err);
+        setCameraUi(true, "Sinyal hatasi — tekrar Canlı kamerayı aç");
       }
     }
   });

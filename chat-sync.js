@@ -1596,11 +1596,43 @@ async function writeCameraSignal(targetSessionId, callId, key, value) {
   });
 }
 
-async function writeCameraOffer(targetSessionId, callId, offer) {
+async function writeCameraOffer(targetSessionId, callId, offer, opts = {}) {
   const database = initDb();
   if (!database) throw new Error("Firebase bağlı değil");
-  const epoch = Date.now();
-  // Eski answer/ICE'i temizle — aynı callId reuse'ta admin eski cevaba takılıp siyah kalmasın
+  const force = opts.force === true;
+  const now = Date.now();
+
+  // Aynı SDP + mevcut answer varsa answer/ICE’i SİLME — admin siyah döngüsü yaratır
+  if (!force) {
+    try {
+      const snap = await get(ref(database, webrtcPath(targetSessionId, callId)));
+      const cur = snap.val() || {};
+      const sameSdp = Boolean(cur.offer?.sdp && offer?.sdp && cur.offer.sdp === offer.sdp);
+      if (sameSdp && cur.answer?.sdp) {
+        await update(ref(database, webrtcPath(targetSessionId, callId)), {
+          visitorReady: true,
+          visitorReadyAt: now,
+          status: cur.status === "ended" ? "live" : cur.status || "live",
+          updatedAt: now,
+        });
+        return { reused: true, epoch: Number(cur.offerEpoch) || now };
+      }
+      if (sameSdp && !cur.answer?.sdp) {
+        // Offer zaten duruyor, epoch bump etme (admin rejoin tetiklemesin)
+        await update(ref(database, webrtcPath(targetSessionId, callId)), {
+          visitorReady: true,
+          visitorReadyAt: now,
+          status: "live",
+          updatedAt: now,
+        });
+        return { reused: true, epoch: Number(cur.offerEpoch) || now };
+      }
+    } catch {
+      /* full write */
+    }
+  }
+
+  const epoch = now;
   try {
     await remove(ref(database, webrtcPath(targetSessionId, callId, "visitorCandidates")));
   } catch {
@@ -1624,6 +1656,7 @@ async function writeCameraOffer(targetSessionId, callId, offer) {
     visitorReadyAt: epoch,
     updatedAt: epoch,
   });
+  return { reused: false, epoch };
 }
 
 async function writeCameraAnswer(targetSessionId, callId, answer) {

