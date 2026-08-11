@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=140";
+import "./chat-sync.js?v=141";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -1418,18 +1418,48 @@ function showGmailHint(text) {
   }, 2400);
 }
 
+function collapseSessionsByVisitor(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const bestByVisitor = new Map();
+  const countByVisitor = new Map();
+  const orphans = [];
+
+  list.forEach((r) => {
+    const vid = String(r?.visitorId || "").trim();
+    if (!vid) {
+      orphans.push(r);
+      return;
+    }
+    countByVisitor.set(vid, (countByVisitor.get(vid) || 0) + 1);
+    const prev = bestByVisitor.get(vid);
+    if (!prev || (Number(r.updatedAt) || 0) > (Number(prev.updatedAt) || 0)) {
+      bestByVisitor.set(vid, r);
+    }
+  });
+
+  const collapsed = [...bestByVisitor.values()].map((r) => ({
+    ...r,
+    _dupCount: countByVisitor.get(String(r.visitorId)) || 1,
+  }));
+  return [...collapsed, ...orphans].sort(
+    (a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0)
+  );
+}
+
 function renderSessions(rows) {
-  latestSessionRows = Array.isArray(rows) ? rows : [];
-  sessionCount.textContent = `${rows.length} oturum`;
+  const raw = Array.isArray(rows) ? rows : [];
+  latestSessionRows = raw;
+  const viewRows = collapseSessionsByVisitor(raw);
+  sessionCount.textContent = `${viewRows.length} ziyaretçi · ${raw.length} kayıt`;
   sessionList.innerHTML = "";
-  if (!rows.length) {
+  if (!viewRows.length) {
     sessionList.innerHTML = '<li class="session-empty">Henüz sohbet yok. Sitede bir sohbet başlatın.</li>';
     updateMediaDock(null);
     renderEvidenceBoard([]);
     return;
   }
 
-  rows.forEach((row) => {
+  viewRows.forEach((row) => {
     const li = document.createElement("li");
     const card = document.createElement("div");
     card.className = "session-item" + (row.id === selectedId ? " is-active" : "");
@@ -1460,8 +1490,10 @@ function renderSessions(rows) {
       ? escapeHtml(`ID ${String(row.visitorId).slice(0, 10)}…`)
       : "";
     const online = Boolean(row.online) && !(Number(row.userLeftAt) > 0);
-    const segN = Number(row.recordingSegmentCount) ||
+    const segN =
+      Number(row.recordingSegmentCount) ||
       (Array.isArray(row.recordingSegments) ? row.recordingSegments.length : 0);
+    const dupN = Number(row._dupCount) || 1;
     const statusLine = online
       ? "● Çevrimiçi"
       : Number(row.userLeftAt) > 0
@@ -1469,6 +1501,9 @@ function renderSessions(rows) {
         : "○ Kapalı";
     const badges = [
       `<span class="session-badge ${online ? "session-badge-online" : "session-badge-offline"}">${statusLine}</span>`,
+      dupN > 1
+        ? `<span class="session-badge session-badge-return">×${dupN} kayıt birleşti</span>`
+        : "",
       isReturning
         ? `<span class="session-badge session-badge-return">Dönen${
             visits > 1 ? ` · #${visits}` : ""

