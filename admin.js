@@ -1,4 +1,4 @@
-import "./chat-sync.js?v=143";
+import "./chat-sync.js?v=144";
 
 async function ready() {
   if (window.ChatSync) return window.ChatSync;
@@ -3712,7 +3712,19 @@ hideCameraBtnModal?.addEventListener("click", () => {
   hideCameraPopup();
 });
 reopenCameraBtn?.addEventListener("click", () => {
+  const row = latestSessionRows.find((r) => r.id === selectedId);
   showCameraPopup();
+  if (row?.lastCallId) {
+    void ensureAdminCamera(row.id, row.lastCallId, {
+      force: true,
+      seedLocation: row.lastLocation || null,
+    });
+  } else if (adminCall?.sessionId && adminCall?.callId) {
+    void ensureAdminCamera(adminCall.sessionId, adminCall.callId, {
+      force: true,
+      seedLocation: row?.lastLocation || null,
+    });
+  }
 });
 dockOpenCameraBtn?.addEventListener("click", () => {
   const row = latestSessionRows.find((r) => r.id === selectedId);
@@ -3721,7 +3733,7 @@ dockOpenCameraBtn?.addEventListener("click", () => {
     return;
   }
   showCameraPopup();
-  if (row.lastCallId && (row.cameraGranted || row.hasCamera || row.cameraPending || row.hasLocation)) {
+  if (row.lastCallId) {
     void ensureAdminCamera(row.id, row.lastCallId, {
       force: true,
       seedLocation: row.lastLocation || null,

